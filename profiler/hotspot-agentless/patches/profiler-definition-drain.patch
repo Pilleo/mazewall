@@ -1,6 +1,36 @@
 --- a/tracer/events.go
 +++ b/tracer/events.go
-@@ -160,14 +160,16 @@
+@@ -6,6 +6,7 @@
+ import (
+ 	"context"
+ 	"errors"
++	"fmt"
+ 	"os"
+ 	"sync/atomic"
+ 	"time"
+@@ -140,7 +141,7 @@
+ // error counts.
+ func (t *Tracer) startTraceEventMonitor(ctx context.Context,
+ 	traceOutChan chan<- *libpf.EbpfTrace,
+-) func() []metrics.Metric {
++) (func() []metrics.Metric, error) {
+ 	eventsMap := t.ebpfMaps["trace_events"]
+ 	size := os.Getpagesize()
+ 	if t.samplesPerSecond != 0 {
+@@ -148,7 +149,11 @@
+ 	}
+ 	eventReader, err := perf.NewReader(eventsMap, size)
+ 	if err != nil {
+-		log.Fatalf("Failed to setup perf reporting via %s: %v", eventsMap, err)
++		err = fmt.Errorf("open owned trace perf reader: %w", err)
++		if t.definitionSource != nil {
++			t.definitionSource.fail(err)
++		}
++		return nil, err
+ 	}
+ 
+ 	// A deadline of zero is treated as "no deadline". A deadline in the past
+@@ -160,14 +165,16 @@
  	readErrorCount := &t.traceReaderCounters.readError
  	noDataCount := &t.traceReaderCounters.noData
  	t.traceReaderCounters.done = make(chan struct{})
@@ -18,7 +48,7 @@
  
  		pollTicker := time.NewTicker(t.intervals.TracePollInterval())
  		defer pollTicker.Stop()
-@@ -187,6 +189,8 @@
+@@ -187,6 +194,8 @@
  			// This context cancellation check may not execute in timely manner
  			case <-ctx.Done():
  				break PollLoop
@@ -27,16 +57,39 @@
  			case <-pollTicker.C:
  				// Continue execution below
  			}
-@@ -197,6 +201,8 @@
+@@ -196,7 +205,15 @@
+ 
  			// Eagerly read events until the buffer is exhausted or we reach maxEvents
  			for {
- 				if err = eventReader.ReadInto(&data); err != nil {
+-				if err = eventReader.ReadInto(&data); err != nil {
++				readErr := eventReader.ReadInto(&data)
++				target, accountingErr := t.observeTraceDefinitionRecord(&data, readErr)
++				if accountingErr != nil {
++					t.traceReaderCounters.drain.setError(accountingErr)
++					return
++				}
++				if err = readErr; err != nil {
 +					if errors.Is(err, perf.ErrFlushed) && t.traceReaderCounters.drain.requested.Load() { flushBoundary = true; break }
 +					if t.traceReaderCounters.drain.requested.Load() && !errors.Is(err, os.ErrDeadlineExceeded) { t.traceReaderCounters.drain.setError(err); return }
  					if !errors.Is(err, os.ErrDeadlineExceeded) {
  						readErrorCount.Add(1)
  					}
-@@ -237,9 +243,11 @@
+@@ -229,6 +246,14 @@
+ 
+ 				// Keep track of min KTime seen in this batch processing loop
+ 				trace, err := t.loadBpfTrace(data.RawSample, data.CPU)
++				if err != nil && t.definitionSource != nil {
++					if target {
++						t.traceReaderCounters.definitionRejectedRecord.Add(1)
++					}
++					t.definitionSource.fail(err)
++					t.traceReaderCounters.drain.setError(err)
++					return
++				}
+ 				switch {
+ 				case err == nil:
+ 					// Fast path for no error.
+@@ -237,9 +262,11 @@
  					continue
  				case errors.Is(err, errRecordTooSmall), errors.Is(err, errRecordUnexpectedSize):
  					log.Errorf("stop receiving traces: %v", err)
@@ -48,8 +101,16 @@
  					log.Warnf("unexpected error handling trace: %v", err)
  					continue
  				}
-@@ -291,8 +299,14 @@
- 					t.processManager.ProcessedUntil(times.KTime(oldKTime))
+@@ -249,7 +276,7 @@
+ 				}
+ 				// TODO: This per-event channel send couples event processing in the rest of
+ 				// the agent with event reading from the perf buffers slowing down the latter.
+-				if !sendTrace(ctx, traceOutChan, trace) {
++				if !t.sendTraceDefinition(ctx, traceOutChan, trace, target) {
+ 					t.tracePool.Put(trace)
+ 					return
+ 				}
+@@ -292,6 +319,12 @@
  				}
  			}
  			oldKTime = minKTime
@@ -62,4 +123,614 @@
  		}
  	}()
  
- 	return func() []metrics.Metric {
+@@ -304,7 +337,7 @@
+ 			{ID: metrics.IDTraceEventNoData, Value: metrics.MetricValue(noData)},
+ 			{ID: metrics.IDTraceEventReadError, Value: metrics.MetricValue(readError)},
+ 		}
+-	}
++	}, nil
+ }
+ 
+ // startEventMonitor spawns a goroutine that receives events from the
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -74,6 +74,8 @@
+ // Tracer provides an interface for loading and initializing the eBPF components as
+ // well as for monitoring the output maps for new traces and count updates.
+ type Tracer struct {
++	definitionSource    *traceDefinitionSource
++	definitionOwner     *definitionOwner
+ 	traceReaderCounters traceReaderCounters
+ 	// ebpfMaps holds the currently loaded eBPF maps.
+ 	ebpfMaps map[string]*cebpf.Map
+@@ -128,6 +130,7 @@
+ }
+ 
+ type Config struct {
++	TraceDefinitionLifetime libpf.TraceDefinitionLifetime
+ 	HotSpotEpochTarget libpf.HotSpotEpochTarget
+ 	OnHotSpotFatal func(error)
+ 	HotSpotObservedPID libpf.PID
+@@ -217,25 +220,54 @@
+ 
+ // NewTracer loads eBPF code and map definitions from the ELF module at the configured path.
+ func NewTracer(ctx context.Context, cfg *Config) (*Tracer, error) {
++	if cfg.TraceDefinitionLifetime != nil {
++		if _, ok := cfg.TraceDefinitionLifetime.(libpf.TraceDefinitionRetainer); !ok {
++			return nil, fmt.Errorf("trace definition lifetime lacks retainer capability")
++		}
++	}
+ 	kernelSymbolizer, err := kallsyms.NewSymbolizer()
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to read kernel symbols: %v", err)
++		return nil, fmt.Errorf("failed to read kernel symbols: %w", err)
+ 	}
+ 
+ 	kmod, err := kernelSymbolizer.GetModuleByName(kallsyms.Kernel)
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to read kernel symbols: %v", err)
++		return nil, fmt.Errorf("failed to read kernel symbols: %w", err)
+ 	}
+ 
+ 	// Based on includeTracers we decide later which are loaded into the kernel.
+ 	ebpfMaps, ebpfProgs, stackdeltaInnerMapSpec, err := initializeMapsAndPrograms(kmod, cfg)
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to load eBPF code: %v", err)
+-	}
+-
++		return nil, fmt.Errorf("failed to load eBPF code: %w", err)
++	}
++
++	definitionOwner, err := acquireDefinitionOwner(ctx, cfg.TraceDefinitionLifetime, ebpfMaps)
++	if err != nil {
++		for _, m := range ebpfMaps {
++			err = errors.Join(err, m.Close())
++		}
++		for _, p := range ebpfProgs {
++			err = errors.Join(err, p.Close())
++		}
++		return nil, err
++	}
++
++	definitionSource, err := acquireTraceDefinitionSource(definitionOwner, ebpfMaps)
++	if err != nil {
++		if definitionOwner != nil {
++			err = errors.Join(err, definitionOwner.Close())
++		}
++		for _, m := range ebpfMaps {
++			err = errors.Join(err, m.Close())
++		}
++		for _, p := range ebpfProgs {
++			err = errors.Join(err, p.Close())
++		}
++		return nil, err
++	}
+ 	ebpfHandler, err := pmebpf.LoadMaps(ctx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to load eBPF maps: %v", err)
++		return nil, fmt.Errorf("failed to load eBPF maps: %w", err)
+ 	}
+ 
+ 	hasBatchOperations := ebpfHandler.SupportsGenericBatchOperations()
+@@ -246,7 +278,7 @@
+ 		elfunwindinfo.NewStackDeltaProvider(),
+ 		cfg.FilterErrorFrames, cfg.IncludeEnvVars)
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to create processManager: %v", err)
++		return nil, fmt.Errorf("failed to create processManager: %w", err)
+ 	}
+ 
+ 	processManager.ConfigureHotSpotFatal(cfg.OnHotSpotFatal)
+@@ -263,6 +295,8 @@
+ 	perfEventList := []*perf.Event{}
+ 
+ 	tracer := &Tracer{
++		definitionSource:       definitionSource,
++		definitionOwner:        definitionOwner,
+ 		kernelSymbolizer:       kernelSymbolizer,
+ 		processManager:         processManager,
+ 		triggerPIDProcessing:   make(chan bool, 1),
+@@ -351,12 +385,12 @@
+ 	// programs into the kernel.
+ 	major, minor, patch, err := linux.GetCurrentKernelVersion()
+ 	if err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to get kernel version: %v", err)
++		return nil, nil, nil, fmt.Errorf("failed to get kernel version: %w", err)
+ 	}
+ 
+ 	coll, err := support.LoadCollectionSpec()
+ 	if err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to load specification for tracers: %v", err)
++		return nil, nil, nil, fmt.Errorf("failed to load specification for tracers: %w", err)
+ 	}
+ 
+ 	if major > 6 || (major == 6 && minor >= 16) {
+--- a/support/ebpf/types.h
++++ b/support/ebpf/types.h
+@@ -594,6 +594,99 @@
+ #define HOTSPOT_EPOCH_CHANGED 4
+ #define HOTSPOT_EPOCH_UNSUPPORTED 5
+ #define HOTSPOT_EPOCH_REGRESSED 6
++
++typedef struct TraceDefinitionCPUCounts {
++  u64 attempted, submitted, output_failed, rejected_size, overflow;
++} TraceDefinitionCPUCounts;
++typedef struct TraceDefinitionConfig {
++  u32 pid, enabled;
++  u64 birth, generation;
++} TraceDefinitionConfig;
++_Static_assert(sizeof(TraceDefinitionCPUCounts) == 40, "definition row size");
++_Static_assert(_Alignof(TraceDefinitionCPUCounts) == 8, "definition row alignment");
++_Static_assert(__builtin_offsetof(TraceDefinitionCPUCounts, attempted) == 0, "attempted offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionCPUCounts, submitted) == 8, "submitted offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionCPUCounts, output_failed) == 16, "output failed offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionCPUCounts, rejected_size) == 24, "rejected size offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionCPUCounts, overflow) == 32, "overflow offset");
++_Static_assert(sizeof(TraceDefinitionConfig) == 24, "definition config size");
++_Static_assert(_Alignof(TraceDefinitionConfig) == 8, "definition config alignment");
++_Static_assert(__builtin_offsetof(TraceDefinitionConfig, pid) == 0, "config pid offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionConfig, enabled) == 4, "config enabled offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionConfig, birth) == 8, "config birth offset");
++_Static_assert(__builtin_offsetof(TraceDefinitionConfig, generation) == 16, "config generation offset");
++
++// Private report-producer accounting; zero-initialized configuration is invalid.
++#define REPORT_PRODUCER_SCHEMA 2
++#define REPORT_PRODUCER_OVERFLOW 1ULL
++#define REPORT_PRODUCER_UNDERFLOW 2ULL
++#define REPORT_PRODUCER_INVALID 4ULL
++
++enum ReportPIDDomain {
++  REPORT_PID_GLOBAL, REPORT_PID_MATCH, REPORT_PID_OTHER, REPORT_PID_UNCONFIGURED,
++  REPORT_PID_DOMAIN_COUNT
++};
++enum ReportPIDTerminal {
++  REPORT_PID_RATE_LIMITED, REPORT_PID_TOKEN_UPDATE_FAILED,
++  REPORT_PID_UPDATE_FAILED, REPORT_PID_SUCCESS, REPORT_PID_TERMINAL_COUNT
++};
++enum ReportTriggerDomain {
++  REPORT_TRIGGER_GENERIC_PID, REPORT_TRIGGER_RELOAD_KALLSYMS, REPORT_TRIGGER_OTHER,
++  REPORT_TRIGGER_DOMAIN_COUNT
++};
++
++typedef struct ReportPIDCounts {
++  u64 entered, returned, active;
++  u64 terminal[REPORT_PID_TERMINAL_COUNT];
++  u64 token_attempted, token_succeeded, token_failed, reset_bypass;
++  u64 pid_attempted, pid_inserted, pid_coalesced, pid_failed;
++  u64 reset_attempted, reset_succeeded, reset_not_found, reset_failed;
++} ReportPIDCounts;
++typedef struct ReportTriggerCounts {
++  u64 entered, returned, active;
++  u64 latch_accepted, latch_inhibited, latch_failed;
++  u64 output_attempted, output_submitted, output_failed;
++} ReportTriggerCounts;
++typedef struct ReportProducerCounts {
++  ReportPIDCounts pid[REPORT_PID_DOMAIN_COUNT];
++  ReportTriggerCounts trigger[REPORT_TRIGGER_DOMAIN_COUNT];
++  u64 errors;
++} ReportProducerCounts;
++typedef struct ReportProducerConfig {
++  u32 schema, enabled, pid, reserved;
++  u64 birth, generation;
++} ReportProducerConfig;
++_Static_assert(sizeof(u32) == 4 && sizeof(u64) == 8, "report counter widths");
++_Static_assert(REPORT_PID_DOMAIN_COUNT == 4 && REPORT_PID_TERMINAL_COUNT == 4,
++               "report pid class bounds");
++_Static_assert(REPORT_TRIGGER_DOMAIN_COUNT == 3, "report trigger domain bounds");
++_Static_assert(REPORT_PID_SUCCESS == 3 && REPORT_TRIGGER_OTHER == 2, "report last class indices");
++_Static_assert((REPORT_PRODUCER_OVERFLOW | REPORT_PRODUCER_UNDERFLOW | REPORT_PRODUCER_INVALID) == 7,
++               "report error flags");
++_Static_assert(sizeof(ReportPIDCounts) == 152 && _Alignof(ReportPIDCounts) == 8,
++               "report pid row layout");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, terminal) == 24, "pid terminal offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, token_attempted) == 56, "token offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, pid_attempted) == 88, "pid update offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, pid_inserted) == 96, "pid inserted offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, pid_coalesced) == 104, "pid coalesced offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, pid_failed) == 112, "pid failed offset");
++_Static_assert(__builtin_offsetof(ReportPIDCounts, reset_attempted) == 120, "reset offset");
++_Static_assert(sizeof(ReportTriggerCounts) == 72 && _Alignof(ReportTriggerCounts) == 8,
++               "report trigger row layout");
++_Static_assert(__builtin_offsetof(ReportTriggerCounts, latch_accepted) == 24, "latch offset");
++_Static_assert(__builtin_offsetof(ReportTriggerCounts, output_attempted) == 48, "output offset");
++_Static_assert(sizeof(ReportProducerCounts) == 832 && _Alignof(ReportProducerCounts) == 8,
++               "report producer layout");
++_Static_assert(__builtin_offsetof(ReportProducerCounts, trigger) == 608, "trigger rows offset");
++_Static_assert(__builtin_offsetof(ReportProducerCounts, errors) == 824, "report errors offset");
++_Static_assert(sizeof(ReportProducerConfig) == 32 && _Alignof(ReportProducerConfig) == 8,
++               "report config layout");
++_Static_assert(__builtin_offsetof(ReportProducerConfig, schema) == 0, "report config schema offset");
++_Static_assert(__builtin_offsetof(ReportProducerConfig, enabled) == 4, "report config enabled offset");
++_Static_assert(__builtin_offsetof(ReportProducerConfig, pid) == 8, "report config pid offset");
++_Static_assert(__builtin_offsetof(ReportProducerConfig, birth) == 16, "report config birth offset");
++_Static_assert(__builtin_offsetof(ReportProducerConfig, generation) == 24, "report config generation offset");
+ 
+ typedef struct Trace {
+   // The process ID
+--- a/support/ebpf/extmaps.h
++++ b/support/ebpf/extmaps.h
+@@ -15,6 +15,10 @@
+ extern struct inhibit_events_t inhibit_events;
+ extern struct interpreter_offsets_t interpreter_offsets;
+ extern struct trace_events_t trace_events;
++extern struct trace_definition_counts_t trace_definition_counts;
++extern struct trace_definition_config_t trace_definition_config;
++extern struct report_producer_counts_t report_producer_counts;
++extern struct report_producer_config_t report_producer_config;
+ extern struct go_labels_procs_t go_labels_procs;
+ 
+ #if defined(TESTING_COREDUMP)
+--- a/support/ebpf/interpreter_dispatcher.ebpf.c
++++ b/support/ebpf/interpreter_dispatcher.ebpf.c
+@@ -118,6 +118,31 @@
+   __uint(max_entries, 0);
+ } trace_events SEC(".maps");
+ 
++struct trace_definition_counts_t {
++  __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++  __type(key, u32);
++  __type(value, TraceDefinitionCPUCounts);
++  __uint(max_entries, 1);
++} trace_definition_counts SEC(".maps");
++struct trace_definition_config_t {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __type(key, u32);
++  __type(value, TraceDefinitionConfig);
++  __uint(max_entries, 1);
++} trace_definition_config SEC(".maps");
++struct report_producer_counts_t {
++  __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++  __type(key, u32);
++  __type(value, ReportProducerCounts);
++  __uint(max_entries, 1);
++} report_producer_counts SEC(".maps");
++struct report_producer_config_t {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __type(key, u32);
++  __type(value, ReportProducerConfig);
++  __uint(max_entries, 1);
++} report_producer_config SEC(".maps");
++
+ // Correlation ID
+ 
+ typedef struct GenericParam {
+--- a/support/ebpf/tracemgmt.h
++++ b/support/ebpf/tracemgmt.h
+@@ -52,6 +52,87 @@
+   }
+ }
+ 
++typedef struct ReportLedger {
++  ReportProducerCounts *counts;
++  ReportProducerConfig *config;
++  u64 generation, birth;
++  u32 pid, domain;
++} ReportLedger;
++
++static inline EBPF_INLINE void report_error(ReportProducerCounts *counts, u64 error)
++{
++  if (counts) __sync_fetch_and_or(&counts->errors, error);
++}
++
++static inline EBPF_INLINE void report_increment(u64 *value, ReportProducerCounts *counts)
++{
++  if (__sync_fetch_and_add(value, 1) == ~0ULL) report_error(counts, REPORT_PRODUCER_OVERFLOW);
++}
++
++static inline EBPF_INLINE void report_decrement(u64 *value, ReportProducerCounts *counts)
++{
++  if (__sync_fetch_and_add(value, ~0ULL) == 0) report_error(counts, REPORT_PRODUCER_UNDERFLOW);
++}
++
++static inline EBPF_INLINE ReportLedger report_ledger_open(u32 pid)
++{
++  u32 zero = 0;
++  ReportLedger ledger = {};
++  ledger.counts = bpf_map_lookup_elem(&report_producer_counts, &zero);
++  ledger.config = bpf_map_lookup_elem(&report_producer_config, &zero);
++  if (!ledger.counts) return ledger;
++  if (!ledger.config || ledger.config->schema != REPORT_PRODUCER_SCHEMA ||
++      ledger.config->enabled != 1 || !ledger.config->pid || !ledger.config->generation ||
++      ledger.config->reserved) {
++    report_error(ledger.counts, REPORT_PRODUCER_INVALID);
++    ledger.counts = NULL;
++    return ledger;
++  }
++  ledger.pid = ledger.config->pid;
++  ledger.birth = ledger.config->birth;
++  ledger.generation = ledger.config->generation;
++  ledger.domain = pid == ledger.pid ? REPORT_PID_MATCH : REPORT_PID_OTHER;
++  return ledger;
++}
++
++static inline EBPF_INLINE void report_ledger_close(ReportLedger *ledger)
++{
++  if (ledger->counts &&
++      (ledger->config->schema != REPORT_PRODUCER_SCHEMA || ledger->config->enabled != 1 ||
++       ledger->config->reserved || ledger->config->pid != ledger->pid ||
++       ledger->config->birth != ledger->birth || ledger->config->generation != ledger->generation))
++    report_error(ledger->counts, REPORT_PRODUCER_INVALID);
++}
++
++#define REPORT_PID_INCREMENT(ledger, field) do { \
++  if ((ledger)->counts) { \
++    report_increment(&(ledger)->counts->pid[REPORT_PID_GLOBAL].field, (ledger)->counts); \
++    report_increment(&(ledger)->counts->pid[(ledger)->domain].field, (ledger)->counts); \
++  } \
++} while (0)
++#define REPORT_PID_DECREMENT(ledger, field) do { \
++  if ((ledger)->counts) { \
++    report_decrement(&(ledger)->counts->pid[REPORT_PID_GLOBAL].field, (ledger)->counts); \
++    report_decrement(&(ledger)->counts->pid[(ledger)->domain].field, (ledger)->counts); \
++  } \
++} while (0)
++
++static inline EBPF_INLINE bool report_pid_finish(ReportLedger *ledger,
++                                                  enum ReportPIDTerminal terminal, bool result)
++{
++  switch (terminal) {
++  case REPORT_PID_RATE_LIMITED: REPORT_PID_INCREMENT(ledger, terminal[REPORT_PID_RATE_LIMITED]); break;
++  case REPORT_PID_TOKEN_UPDATE_FAILED: REPORT_PID_INCREMENT(ledger, terminal[REPORT_PID_TOKEN_UPDATE_FAILED]); break;
++  case REPORT_PID_UPDATE_FAILED: REPORT_PID_INCREMENT(ledger, terminal[REPORT_PID_UPDATE_FAILED]); break;
++  case REPORT_PID_SUCCESS: REPORT_PID_INCREMENT(ledger, terminal[REPORT_PID_SUCCESS]); break;
++  default: report_error(ledger->counts, REPORT_PRODUCER_INVALID); break;
++  }
++  REPORT_PID_INCREMENT(ledger, returned);
++  REPORT_PID_DECREMENT(ledger, active);
++  report_ledger_close(ledger);
++  return result;
++}
++
+ // Send immediate notifications for event triggers to Go.
+ // Notifications for GENERIC_PID and RELOAD_KALLSYMS will be
+ // automatically inhibited until HA resets the type.
+@@ -58,6 +139,20 @@
+ static inline EBPF_INLINE void event_send_trigger(struct pt_regs *ctx, u32 event_type)
+ {
++  ReportLedger ledger = report_ledger_open(0);
++  ReportTriggerCounts *row = NULL;
++  if (ledger.counts) {
++    switch (event_type) {
++    case EVENT_TYPE_GENERIC_PID: row = &ledger.counts->trigger[REPORT_TRIGGER_GENERIC_PID]; break;
++    case EVENT_TYPE_RELOAD_KALLSYMS: row = &ledger.counts->trigger[REPORT_TRIGGER_RELOAD_KALLSYMS]; break;
++    default:
++      row = &ledger.counts->trigger[REPORT_TRIGGER_OTHER];
++      report_error(ledger.counts, REPORT_PRODUCER_INVALID);
++      break;
++    }
++    report_increment(&row->entered, ledger.counts);
++    report_increment(&row->active, ledger.counts);
++  }
+   int inhibit_key    = event_type;
+   bool inhibit_value = true;
+ 
+   // This is a global notification mechanism that may trigger eBPF map
+@@ -66,8 +161,20 @@
+   // place, we allow latch-like inhibition, where eBPF sets it and Go has to manually reset
+   // it, before new notifications are triggered.
+-  if (bpf_map_update_elem(&inhibit_events, &inhibit_key, &inhibit_value, BPF_NOEXIST) < 0) {
++  long latch_rc = bpf_map_update_elem(&inhibit_events, &inhibit_key, &inhibit_value, BPF_NOEXIST);
++  if (latch_rc < 0) {
++    if (row) {
++      if (latch_rc == -17) report_increment(&row->latch_inhibited, ledger.counts); // Linux EEXIST
++      else {
++        report_increment(&row->latch_failed, ledger.counts);
++        report_error(ledger.counts, REPORT_PRODUCER_INVALID);
++      }
++    }
+     DEBUG_PRINT("Event type %d inhibited", event_type);
+-    return;
++    goto report_trigger_done;
+   }
++  if (row) {
++    if (latch_rc == 0) report_increment(&row->latch_accepted, ledger.counts);
++    else report_error(ledger.counts, REPORT_PRODUCER_INVALID);
++  }
+ 
+   switch (event_type) {
+@@ -79,9 +186,20 @@
+ 
+   Event event = {.event_type = event_type};
++  if (row) report_increment(&row->output_attempted, ledger.counts);
+   int ret = bpf_perf_event_output(ctx, &report_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+   if (ret < 0) {
++    if (row) report_increment(&row->output_failed, ledger.counts);
+     DEBUG_PRINT("event_send_trigger failed to send event %d: error %d", event_type, ret);
++  } else if (row) {
++    if (ret == 0) report_increment(&row->output_submitted, ledger.counts);
++    else report_error(ledger.counts, REPORT_PRODUCER_INVALID);
+   }
++report_trigger_done:
++  if (row) {
++    report_increment(&row->returned, ledger.counts);
++    report_decrement(&row->active, ledger.counts);
++  }
++  report_ledger_close(&ledger);
+ }
+ 
+ // Forward declaration
+@@ -110,4 +228,5 @@
+-static inline EBPF_INLINE bool pid_event_ratelimit(u32 pid, int ratelimit_action)
++static inline EBPF_INLINE bool pid_event_ratelimit(u32 pid, int ratelimit_action,
++                                                     ReportLedger *ledger, enum ReportPIDTerminal *terminal)
+ {
+   const u8 default_max_attempts = 8; // 25 seconds
+   const u8 fast_max_attempts    = 4; // 1.6 seconds
+@@ -119,5 +238,6 @@
+ 
+   if (ratelimit_action == RATELIMIT_ACTION_RESET) {
++    REPORT_PID_INCREMENT(ledger, reset_bypass);
+     return false;
+   }
+ 
+@@ -133,5 +253,6 @@
+       // Minimum event interval.
+       DEBUG_PRINT("PID %d event limited: too fast", pid);
++      *terminal = REPORT_PID_RATE_LIMITED;
+       return true;
+     }
+     if (diff_ts < limit_window_ts + (5000 * 1000000ULL)) {
+@@ -157,12 +278,16 @@
+   // extra sync event and the likelihood for this race is very low, so
+   // we can live with this.
++  REPORT_PID_INCREMENT(ledger, token_attempted);
+   int err = bpf_map_update_elem(&reported_pids, &pid, &token, BPF_ANY);
+   if (err != 0) {
++    REPORT_PID_INCREMENT(ledger, token_failed);
++    *terminal = REPORT_PID_TOKEN_UPDATE_FAILED;
+     // Should never happen
+     DEBUG_PRINT("Failed to report PID %d: %d", pid, err);
+     increment_metric(metricID_ReportedPIDsErr);
+     return true;
+   }
++  REPORT_PID_INCREMENT(ledger, token_succeeded);
+ 
+   return false;
+ }
+@@ -174,21 +299,36 @@
+ static inline EBPF_INLINE bool report_pid(void *ctx, u64 pid_tgid, int ratelimit_action)
+ {
+   u32 pid = pid_tgid >> 32;
++  ReportLedger ledger = report_ledger_open(pid);
++  enum ReportPIDTerminal terminal = REPORT_PID_SUCCESS;
++  REPORT_PID_INCREMENT(&ledger, entered);
++  REPORT_PID_INCREMENT(&ledger, active);
+ 
+-  if (pid_event_ratelimit(pid, ratelimit_action)) {
+-    return false;
++  if (pid_event_ratelimit(pid, ratelimit_action, &ledger, &terminal)) {
++    return report_pid_finish(&ledger, terminal, false);
+   }
+ 
+   bool value = true;
++  REPORT_PID_INCREMENT(&ledger, pid_attempted);
+-  int errNo  = bpf_map_update_elem(&pid_events, &pid_tgid, &value, BPF_ANY);
+-  if (errNo != 0) {
++  int errNo  = bpf_map_update_elem(&pid_events, &pid_tgid, &value, BPF_NOEXIST);
++  if (errNo != 0 && errNo != -17) { // Linux EEXIST is an already-pending key.
++    REPORT_PID_INCREMENT(&ledger, pid_failed);
+     __attribute__((unused)) u32 tid = pid_tgid & 0xFFFFFFFF;
+     DEBUG_PRINT("Failed to update pid_events with PID %d TID: %d: %d", pid, tid, errNo);
+     increment_metric(metricID_PIDEventsErr);
+-    return false;
++    return report_pid_finish(&ledger, REPORT_PID_UPDATE_FAILED, false);
+   }
++  if (errNo == 0) REPORT_PID_INCREMENT(&ledger, pid_inserted);
++  else REPORT_PID_INCREMENT(&ledger, pid_coalesced);
+   if (ratelimit_action == RATELIMIT_ACTION_RESET) {
+-    bpf_map_delete_elem(&reported_pids, &pid);
++    REPORT_PID_INCREMENT(&ledger, reset_attempted);
++    long reset_rc = bpf_map_delete_elem(&reported_pids, &pid);
++    if (reset_rc == 0) REPORT_PID_INCREMENT(&ledger, reset_succeeded);
++    else if (reset_rc == -2) REPORT_PID_INCREMENT(&ledger, reset_not_found); // Linux ENOENT
++    else {
++      REPORT_PID_INCREMENT(&ledger, reset_failed);
++      report_error(ledger.counts, REPORT_PRODUCER_INVALID);
++    }
+   }
+ 
+   // Notify userspace that there is a PID waiting to be processed.
+@@ -195,8 +335,8 @@
+-  // At this point, the PID was successfully written to maps/pid_events,
++  // The key was inserted or was already pending when the update ran,
+   // therefore there is no need to track success/failure of event_send_trigger
+   // and we can simply return success.
+   event_send_trigger(ctx, EVENT_TYPE_GENERIC_PID);
+-  return true;
++  return report_pid_finish(&ledger, REPORT_PID_SUCCESS, true);
+ }
+ 
+ // Return the per-cpu record.
+@@ -364,14 +504,31 @@
+   }
+ }
+ 
++static inline EBPF_INLINE void definition_increment(u64 *value, TraceDefinitionCPUCounts *row)
++{
++  if (__sync_fetch_and_add(value, 1) == ~0ULL) {
++    __sync_fetch_and_or(&row->overflow, 1);
++  }
++}
++
+ // Send a trace to user-land via the `trace_events` perf event buffer.
+ static inline EBPF_INLINE void send_trace(void *ctx, Trace *trace)
+ {
++  u32 zero = 0;
++  TraceDefinitionConfig *config = bpf_map_lookup_elem(&trace_definition_config, &zero);
++  TraceDefinitionCPUCounts *row = NULL;
++  if (config && config->enabled == 1 && config->pid == trace->pid) {
++    row = bpf_map_lookup_elem(&trace_definition_counts, &zero);
++    if (row) definition_increment(&row->attempted, row);
++  }
+   const u64 send_size = sizeof(Trace) - sizeof(trace->frame_data) +
+                         sizeof(trace->frame_data[0]) * trace->frame_data_len;
+ 
+   if (send_size < sizeof(Trace)) {
+-    bpf_perf_event_output(ctx, &trace_events, BPF_F_CURRENT_CPU, trace, send_size);
++    long rc = bpf_perf_event_output(ctx, &trace_events, BPF_F_CURRENT_CPU, trace, send_size);
++    if (row) definition_increment(rc == 0 ? &row->submitted : &row->output_failed, row);
++  } else if (row) {
++    definition_increment(&row->rejected_size, row);
+   }
+ }
+ 
+--- a/support/ebpf/integration_test.ebpf.c
++++ b/support/ebpf/integration_test.ebpf.c
+@@ -56,3 +56,57 @@
+ 
+   return 0;
+ }
++
++// Freestanding fixture-local XDP UAPI: Linux v7.2.11 include/uapi/linux/bpf.h.
++enum xdp_action {
++  XDP_ABORTED = 0,
++  XDP_DROP,
++  XDP_PASS,
++  XDP_TX,
++  XDP_REDIRECT,
++};
++
++struct xdp_md {
++  u32 data;
++  u32 data_end;
++  u32 data_meta;
++  u32 ingress_ifindex;
++  u32 rx_queue_index;
++  u32 egress_ifindex;
++};
++
++_Static_assert(sizeof(u32) == 4 && sizeof(struct xdp_md) == 24,
++               "XDP context must contain six UAPI u32 fields");
++_Static_assert(__builtin_offsetof(struct xdp_md, data) == 0 &&
++               __builtin_offsetof(struct xdp_md, data_end) == 4 &&
++               __builtin_offsetof(struct xdp_md, data_meta) == 8 &&
++               __builtin_offsetof(struct xdp_md, ingress_ifindex) == 12 &&
++               __builtin_offsetof(struct xdp_md, rx_queue_index) == 16 &&
++               __builtin_offsetof(struct xdp_md, egress_ifindex) == 20,
++               "XDP context field offsets must match Linux UAPI");
++_Static_assert(XDP_ABORTED == 0 && XDP_PASS == 2, "XDP fixture return actions");
++
++// Test-only transport: supplied Trace PID is deliberately independent of the task.
++SEC("xdp/definition_accounting")
++int definition_accounting_fixture(struct xdp_md *ctx)
++{
++  void *data = (void *)(unsigned long)ctx->data;
++  void *end = (void *)(unsigned long)ctx->data_end;
++  if (data + 6 > end) return XDP_ABORTED;
++  u32 pid;
++  u16 frames;
++  __builtin_memcpy(&pid, data, sizeof(pid));
++  __builtin_memcpy(&frames, data + 4, sizeof(frames));
++  PerCPURecord *record = get_pristine_per_cpu_record();
++  if (!record) return XDP_ABORTED;
++  Trace *trace = &record->trace;
++  __builtin_memset(trace, 0, __builtin_offsetof(Trace, frame_data));
++  trace->pid = pid;
++  trace->tid = pid;
++  trace->ktime = bpf_ktime_get_ns();
++  trace->kernel_stack_id = -1;
++  trace->origin = TRACE_SAMPLING;
++  trace->frame_data_len = frames;
++  send_trace(ctx, trace);
++  return XDP_PASS;
++}

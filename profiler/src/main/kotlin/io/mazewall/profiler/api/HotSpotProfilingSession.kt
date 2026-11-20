@@ -75,7 +75,7 @@ public class HotSpotProfilingException internal constructor(
                 failure,
                 result,
                 failure.owner,
-                causes.filterIsInstance<io.mazewall.profiler.internal.hotspot.HotSpotCollectorFailure>().mapNotNull { it.nativeErrno },
+                causes.filterIsInstance<io.mazewall.profiler.internal.hotspot.HotSpotCollectorFailure>().flatMap { it.nativeErrnos }.distinct(),
                 failure.snapshot.stderr,
                 failure.snapshot.discardedStderrBytes,
             )

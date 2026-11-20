@@ -63,4 +63,15 @@ and consumer instructions pin that final source baseline. This is packaged API
 evidence, not stable-compiler, JDK22, framework or packaged-native acceptance.
 
 ---
+## Repository-review expansion — 2026-11-04
+
+[LIF-02](../reviews/2026-11-04-repository-review-findings.md#lif-02): a plain **uncaptured**
+inner Callable's Error crosses the library boundary but is not retained; an outer catch can
+return success and reuse the worker. The captured-context fix remains present. Apply the same
+fatal-first/quarantine path to plain inline nesting, testing caught-return, later outer failure
+and an earlier ordinary retained violation. Preserve exact fatal identity and result/end/drain
+truthfulness; coordinate with C7's new classifier-failure case. Host evidence used existing
+outputs with mocked installation, not a fresh native gate. Historical acceptance stays scoped.
+
+---
 <!-- id: issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain  file: issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain.md -->

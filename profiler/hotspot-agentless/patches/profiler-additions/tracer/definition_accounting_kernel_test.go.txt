@@ -1,0 +1,438 @@
+//go:build mw_kernel && linux
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"math"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/perf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	ottimes "go.opentelemetry.io/ebpf-profiler/times"
+	"go.opentelemetry.io/ebpf-profiler/tracer/types"
+)
+
+// Real map-side readout only: the target lifetime is a memory model, not native
+// capture, producer conservation, or a NativeFinal receipt.
+func TestKernelAuxiliaryStopMapSide(t *testing.T) {
+	for _, scenario := range []string{"valid", "changed-config", "changed-source-association"} {
+		t.Run(scenario, func(t *testing.T) {
+			cpus, err := ebpf.PossibleCPU()
+			if err != nil { t.Fatal(err) }
+			maps := make(map[string]*ebpf.Map)
+			originalsSafe := true
+			for _, item := range []struct{ key string; spec *ebpf.MapSpec }{
+				{traceDefinitionCounterMap, &ebpf.MapSpec{Name: "counts", Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 40, MaxEntries: 1}},
+				{traceDefinitionConfigMap, &ebpf.MapSpec{Name: "config", Type: ebpf.Array, KeySize: 4, ValueSize: 24, MaxEntries: 1}},
+				{"trace_events", &ebpf.MapSpec{Name: "trace_events", Type: ebpf.PerfEventArray, KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)}},
+				{"pid_events", &ebpf.MapSpec{Name: "pid_events", Type: ebpf.Hash, KeySize: 8, ValueSize: 1, MaxEntries: 32}},
+			} {
+				m, err := ebpf.NewMap(item.spec)
+				if err != nil { t.Fatal(err) }
+				t.Cleanup(func() {
+					if !originalsSafe { t.Error("original map retained after incomplete owner cleanup"); return }
+					if err := m.Close(); err != nil { t.Error(err) }
+				})
+				maps[item.key] = m
+			}
+			var replacement *ebpf.Map
+			t.Cleanup(func() {
+				if replacement == nil { return }
+				if !originalsSafe { t.Error("replacement map retained after incomplete owner cleanup"); return }
+				if err := replacement.Close(); err != nil { t.Error(err) }
+			})
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "kernel-map-side", tgid: 1234, birth: 5678}}
+			owner, err := acquireDefinitionOwner(context.Background(), mock, maps)
+			if err != nil {
+				var pending *traceDefinitionOwnerError
+				if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+			}
+			scopeJoined := true
+			if owner != nil {
+				originalsSafe = false
+				t.Cleanup(func() {
+					if !scopeJoined { t.Error("owner retained after incomplete scope stop"); return }
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					if err := owner.closeWithContext(ctx); err != nil { t.Errorf("owner close: %v", err) }
+					select { case <-owner.closeReqDone: originalsSafe = true; case <-ctx.Done(): t.Error("owner physical close timed out") }
+				})
+			}
+			if err != nil { t.Fatal(err) }
+			if owner == nil { t.Fatal("missing owner") }
+			scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+			scopeJoined = false
+			stopped := false
+			t.Cleanup(func() {
+				if stopped { return }
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := scope.Stop(ctx); err != nil { t.Errorf("scope cleanup: %v", err) }
+				scopeJoined = ctx.Err() == nil
+			})
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatal(err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("scope callback did not complete") }
+			source, err := acquireTraceDefinitionSource(owner, maps)
+			if err != nil { t.Fatal(err) }
+			if source == nil { t.Fatal("missing source") }
+			for _, item := range []struct{ m *ebpf.Map; id uint32 }{
+				{owner.CountsMap(), owner.CountsID()}, {owner.ConfigMap(), owner.configID},
+				{owner.PerfMap(), owner.PerfID()}, {owner.PIDMap(), owner.PIDID()},
+			} {
+				info, err := traceDefinitionInfo(item.m)
+				if err != nil || item.id == 0 || info.ID != item.id { t.Fatalf("clone info: %+v, id %d, err %v", info, item.id, err) }
+			}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps}
+			var result libpf.AuxiliaryBinding
+			var pidInfo traceDefinitionMapInfo
+			var finalErr error
+			if err := scope.AddFinalizer(func() error {
+				result, pidInfo, finalErr = tracer.readAuxiliaryStopFacts()
+				return finalErr
+			}); err != nil { t.Fatal(err) }
+			if scenario == "changed-config" {
+				changed := source.nativeConfig
+				changed.Generation++
+				if err := source.config.Update(uint32(0), changed, ebpf.UpdateAny); err != nil { t.Fatal(err) }
+			}
+			if scenario == "changed-source-association" {
+				replacement, err = ebpf.NewMap(&ebpf.MapSpec{Name: "replacement", Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 40, MaxEntries: 1})
+				if err != nil { t.Fatal(err) }
+				info, err := traceDefinitionInfo(replacement)
+				if err != nil || info.ID == 0 || info.ID == owner.CountsID() { t.Fatalf("replacement info: %+v, err %v", info, err) }
+				tracer.ebpfMaps[traceDefinitionCounterMap] = replacement
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = scope.Stop(ctx)
+			stopped = ctx.Err() == nil
+			scopeJoined = stopped
+			cancel()
+			if !stopped { t.Fatal("scope stop timed out") }
+			if scenario == "changed-source-association" {
+				if err == nil || finalErr == nil || !strings.Contains(finalErr.Error(), "trace definition original counter map replaced") || result != (libpf.AuxiliaryBinding{}) || pidInfo != (traceDefinitionMapInfo{}) { t.Fatalf("changed association: stop=%v final=%v binding=%+v pid=%+v", err, finalErr, result, pidInfo) }
+				return
+			}
+			if scenario == "changed-config" {
+				if err == nil || finalErr == nil || !strings.Contains(finalErr.Error(), "trace definition target configuration changed") { t.Fatalf("changed native config: stop=%v final=%v", err, finalErr) }
+				return
+			}
+			if err != nil || finalErr != nil { t.Fatalf("stop: %v, finalizer: %v", err, finalErr) }
+			if result.Session != "kernel-map-side" || result.HostTGID != 1234 || result.Birth != 5678 || result.Generation == 0 { t.Fatalf("scope binding: %+v", result) }
+			if pidInfo.ID != owner.PIDID() || pidInfo.Type != uint32(ebpf.Hash) || pidInfo.KeySize != 8 || pidInfo.ValueSize != 1 || pidInfo.MaxEntries != 32 { t.Fatalf("pid info: %+v", pidInfo) }
+		})
+	}
+}
+
+// These isolated C emission controls do not mint a capture lifetime/final receipt.
+type definitionNativeFixture struct {
+	program *ebpf.Program
+	maps    map[string]*ebpf.Map
+	cpus    int
+	target  uint32
+}
+
+func newDefinitionNativeFixture(t *testing.T, verifyProduction bool) definitionNativeFixture {
+	t.Helper()
+	if err := support.CheckTraceDefinitionABI(); err != nil {
+		t.Fatal(err)
+	}
+	coll, err := support.LoadCollectionSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"definition_accounting_fixture"}
+	if verifyProduction {
+		names = append(names, "perf_unwind_stop", "kprobe_unwind_stop", "perf_go_labels", "kprobe_go_labels")
+	}
+	subset := &ebpf.CollectionSpec{Maps: map[string]*ebpf.MapSpec{}}
+	for _, name := range names {
+		program := coll.Programs[name]
+		if program == nil {
+			t.Fatal("missing actual C program", name)
+		}
+		for _, ins := range program.Instructions {
+			if m := coll.Maps[ins.Reference()]; m != nil {
+				subset.Maps[ins.Reference()] = m
+			}
+		}
+	}
+	owned := map[string]*ebpf.Map{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log("failed native control: originals retained until process exit")
+			return
+		}
+		for name, m := range owned {
+			if err := m.Close(); err != nil {
+				t.Errorf("close original %s: %v", name, err)
+			}
+		}
+	})
+	if err := loadAllMaps(subset, &Config{IncludeTracers: types.AllTracers()}, owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := rewriteMaps(coll, owned); err != nil {
+		t.Fatal(err)
+	}
+	var fixture *ebpf.Program
+	for _, name := range names {
+		p, err := ebpf.NewProgram(coll.Programs[name])
+		if err != nil {
+			t.Fatal("actual production/C fixture verifier load", name, err)
+		}
+		t.Cleanup(func() {
+			if err := p.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if name == "definition_accounting_fixture" {
+			fixture = p
+		}
+	}
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := definitionNativeFixture{program: fixture, maps: owned, cpus: cpus, target: uint32(os.Getpid()) + 100000}
+	config := traceDefinitionConfig{PID: f.target, Enabled: 1, Birth: 1, Generation: 1}
+	if err := owned[traceDefinitionConfigMap].Update(uint32(0), config, ebpf.UpdateAny); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f definitionNativeFixture) emit(t *testing.T, pid uint32, frames uint16, repeat uint32) {
+	t.Helper()
+	packet := make([]byte, 64)
+	binary.NativeEndian.PutUint32(packet[:4], pid)
+	binary.NativeEndian.PutUint16(packet[4:6], frames)
+	ret, err := f.program.Run(&ebpf.RunOptions{Data: packet, Repeat: repeat})
+	if err != nil || ret != 2 {
+		t.Fatal("actual C test trigger", ret, err)
+	}
+}
+
+func (f definitionNativeFixture) rows(t *testing.T) []libpf.TraceDefinitionCPUCounts {
+	t.Helper()
+	rows := make([]libpf.TraceDefinitionCPUCounts, f.cpus)
+	if err := f.maps[traceDefinitionCounterMap].Lookup(uint32(0), &rows); err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func definitionNativeSums(t *testing.T, rows []libpf.TraceDefinitionCPUCounts) libpf.TraceDefinitionCPUCounts {
+	t.Helper()
+	var sum libpf.TraceDefinitionCPUCounts
+	for _, row := range rows {
+		n, err := sumTraceDefinitionCounts(row.Submitted, row.OutputFailed, row.RejectedSize)
+		if err != nil || n != row.Attempted || row.Overflow != 0 {
+			t.Fatal("actual C row conservation", row, err)
+		}
+		for _, p := range []struct {
+			dst *uint64
+			n   uint64
+		}{{&sum.Attempted, row.Attempted}, {&sum.Submitted, row.Submitted}, {&sum.OutputFailed, row.OutputFailed}, {&sum.RejectedSize, row.RejectedSize}} {
+			v, err := sumTraceDefinitionCounts(*p.dst, p.n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*p.dst = v
+		}
+	}
+	return sum
+}
+
+func TestKernelTraceDefinitionNativeAdmission(t *testing.T) {
+	f := newDefinitionNativeFixture(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Reader-only attribution cannot finalize: config/topology/lifetime are absent.
+	tr := &Tracer{ebpfMaps: f.maps, tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}, intervals: ottimes.New(0, time.Millisecond, 0), samplesPerSecond: 20, definitionSource: &traceDefinitionSource{binding: libpf.TraceDefinitionBinding{HostTGID: f.target, PossibleCPUs: f.cpus}}}
+	out := make(chan *libpf.EbpfTrace)
+	if _, err := tr.startTraceEventMonitor(ctx, out); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	consumerDone := make(chan struct{})
+	var foreign uint64
+	go func() {
+		defer close(consumerDone)
+		for {
+			select {
+			case trace, ok := <-out:
+				if !ok {
+					return
+				}
+				if trace != nil {
+					if uint32(trace.PID) != f.target {
+						foreign++
+					}
+					tr.tracePool.Put(trace)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		for _, done := range []<-chan struct{}{tr.traceReaderCounters.done, consumerDone} {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("actual C reader/consumer cleanup did not join")
+			}
+		}
+	})
+	f.emit(t, f.target, 0, 7)
+	f.emit(t, f.target, 3072, 2)
+	// Task TGID matches this foreign Trace PID, not the configured target.
+	f.emit(t, uint32(os.Getpid()), 0, 1)
+	if err := tr.QuiesceDefinitionSources(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.DrainTraceReader(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-consumerDone:
+	case <-ctx.Done():
+		t.Fatal("C final consumer did not join", ctx.Err())
+	}
+	reader := tr.traceDefinitionReaderObservation()
+	sum := definitionNativeSums(t, f.rows(t))
+	if sum.Attempted != 9 || sum.Submitted != 7 || sum.OutputFailed != 0 || sum.RejectedSize != 2 || reader.Received != 7 || reader.HandedOff != 7 || reader.RejectedRecord != 0 || reader.HandoffAborted != 0 || reader.LostSamples != 0 || foreign != 1 {
+		t.Fatal("C admission/task-independent attribution/real reader handoff", sum, reader, foreign)
+	}
+}
+
+func TestKernelTraceDefinitionPerfOverflow(t *testing.T) {
+	t.Run("missing_perf_slot", func(t *testing.T) {
+		f := newDefinitionNativeFixture(t, false)
+		f.emit(t, f.target, 0, 1)
+		sum := definitionNativeSums(t, f.rows(t))
+		if sum.Attempted != 1 || sum.Submitted != 0 || sum.OutputFailed != 1 || sum.RejectedSize != 0 {
+			t.Fatal("actual helper failure was not recorded", sum)
+		}
+	})
+	t.Run("pressure_then_recovery", func(t *testing.T) {
+		f := newDefinitionNativeFixture(t, false)
+		r, err := perf.NewReader(f.maps["trace_events"], os.Getpagesize())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := r.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		f.emit(t, f.target, 0, 8192)
+		before := definitionNativeSums(t, f.rows(t))
+		if before.OutputFailed == 0 {
+			t.Fatal("INCOMPLETE: bounded burst did not exercise helper output failure", before)
+		}
+		var received, lost uint64
+		drain := func(final bool) {
+			r.SetDeadline(time.Now().Add(100 * time.Millisecond))
+			if final {
+				if err := r.Flush(); err != nil {
+					t.Fatal(err)
+				}
+				r.SetDeadline(time.Now().Add(5 * time.Second))
+			}
+			for {
+				record, err := r.Read()
+				if (!final && errors.Is(err, os.ErrDeadlineExceeded)) || (final && errors.Is(err, perf.ErrFlushed)) {
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if record.LostSamples != 0 {
+					lost += record.LostSamples
+				} else if len(record.RawSample) >= 744 && binary.NativeEndian.Uint32(record.RawSample[:4]) == f.target {
+					received++
+				} else {
+					t.Fatal("unexpected actual perf record", record)
+				}
+			}
+		}
+		drain(false)
+		f.emit(t, f.target, 0, 1)
+		drain(true)
+		after := definitionNativeSums(t, f.rows(t))
+		if after.Submitted <= before.Submitted || received > after.Submitted || after.OutputFailed == 0 {
+			t.Fatal("no real recovery or invalid received count", before, after, received)
+		}
+		t.Logf("native A=%d S=%d F=%d Z=%d R=%d undelivered=%d emission_loss=%d LOST=%d (not additive)", after.Attempted, after.Submitted, after.OutputFailed, after.RejectedSize, received, after.Submitted-received, after.OutputFailed+after.RejectedSize+after.Submitted-received, lost)
+		if lost == 0 {
+			t.Log("UNEXERCISED: native LOST dispatch; helper-failure control is not LOST proof")
+		}
+	})
+}
+
+func TestKernelTraceDefinitionStickyOverflow(t *testing.T) {
+	for _, field := range []string{"attempted", "submitted", "output_failed", "rejected_size"} {
+		t.Run(field, func(t *testing.T) {
+			f := newDefinitionNativeFixture(t, false)
+			if field != "output_failed" {
+				r, err := perf.NewReader(f.maps["trace_events"], os.Getpagesize())
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := r.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			rows := f.rows(t)
+			for i := range rows {
+				switch field {
+				case "attempted":
+					rows[i].Attempted = math.MaxUint64
+				case "submitted":
+					rows[i].Submitted = math.MaxUint64
+				case "output_failed":
+					rows[i].OutputFailed = math.MaxUint64
+				case "rejected_size":
+					rows[i].RejectedSize = math.MaxUint64
+				}
+			}
+			if err := f.maps[traceDefinitionCounterMap].Update(uint32(0), rows, ebpf.UpdateAny); err != nil {
+				t.Fatal(err)
+			}
+			frames := uint16(0)
+			if field == "rejected_size" {
+				frames = 3072
+			}
+			f.emit(t, f.target, frames, 1)
+			first := f.rows(t)
+			found := false
+			for _, row := range first {
+				found = found || row.Overflow != 0
+			}
+			if !found {
+				t.Fatal("actual C increment lost wrap indicator", first)
+			}
+			f.emit(t, f.target, frames, 1)
+			for i, row := range f.rows(t) {
+				if first[i].Overflow != 0 && row.Overflow == 0 {
+					t.Fatal("native overflow cleared", i, row)
+				}
+			}
+		})
+	}
+}

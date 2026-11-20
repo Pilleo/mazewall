@@ -8,8 +8,18 @@ import (
 	"math"
 )
 
+func validateEventFinalizationWriters(i *ebpfInstance) error {
+	if i == nil || len(i.tracers) != 1 || len(i.rawDetachers) != 0 || len(i.perfFds) != 0 || len(i.networkTracers) != 0 || len(i.tcHandlers) != 0 || len(i.uprobeTracers) != 0 || len(i.iterators) != 0 || len(i.mapIters) != 0 {
+		return fmt.Errorf("unsupported event finalization writer scope")
+	}
+	return nil
+}
+
 func validateEventFinalizationScope(i *ebpfInstance, ustack, otel bool) error {
-	if ustack || otel || i.collectionSpec == nil || len(i.collectionSpec.Programs) != 1 || len(i.tracers) != 1 || len(i.rawDetachers) != 0 || len(i.perfFds) != 0 || len(i.networkTracers) != 0 || len(i.tcHandlers) != 0 || len(i.uprobeTracers) != 0 || len(i.iterators) != 0 || len(i.mapIters) != 0 {
+	if err := validateEventFinalizationWriters(i); err != nil {
+		return err
+	}
+	if ustack || otel || i.collectionSpec == nil || len(i.collectionSpec.Programs) != 1 {
 		return fmt.Errorf("unsupported event finalization writer scope")
 	}
 	p := i.collectionSpec.Programs["capture_openat"]
@@ -21,6 +31,48 @@ func validateEventFinalizationScope(i *ebpfInstance, ustack, otel bool) error {
 	}
 	if counter == nil || counter.Type != ebpf.PerCPUArray || counter.KeySize != 4 || counter.ValueSize != 8 || counter.MaxEntries != 1 {
 		return fmt.Errorf("owned event reserve counter layout unsupported")
+	}
+	return nil
+}
+
+// Admission retains names/identity only, never the CollectionSpec's BTF graph.
+type eventFinalizationAdmission struct {
+	instance *ebpfInstance
+	tracer   *Tracer
+	maps     map[string]struct{}
+}
+
+func admitEventFinalizationScope(i *ebpfInstance) (*eventFinalizationAdmission, error) {
+	if err := validateEventFinalizationScope(i, false, false); err != nil {
+		return nil, err
+	}
+	a := &eventFinalizationAdmission{instance: i, tracer: i.tracers["openat"], maps: make(map[string]struct{}, len(i.collectionSpec.Maps))}
+	for name := range i.collectionSpec.Maps {
+		a.maps[name] = struct{}{}
+	}
+	return a, nil
+}
+
+// Pure handle-identity checks: callers may hold the event owner mutex here.
+func (o *eventStopOwner) validateRuntimeScope(i *ebpfInstance) error {
+	if err := validateEventFinalizationWriters(i); err != nil {
+		return err
+	}
+	a, root := o.admission, o.definitionRoot
+	if o != i.eventFinalizer || a == nil || a.instance != i || a.tracer == nil || i.tracers["openat"] != a.tracer || a.tracer.mapName != "events" || root == nil || root.admission != a || root.collection == nil || i.collection != root.collection || root.program == nil || len(i.collection.Programs) != 1 || i.collection.Programs["capture_openat"] != root.program || len(root.maps) != len(a.maps) || len(i.collection.Maps) != len(root.maps) {
+		return fmt.Errorf("event runtime lacks its admitted original collection")
+	}
+	for name := range a.maps {
+		if root.maps[name] == nil || i.collection.Maps[name] != root.maps[name] {
+			return fmt.Errorf("event runtime original map %q changed", name)
+		}
+	}
+	if root.maps["events"] == nil || root.maps["events_lost_samples"] == nil || a.tracer.mapType != ebpf.RingBuf || a.tracer.lostSampleMap != root.maps["events_lost_samples"] || root.reader == nil || a.tracer.ringbufReader != root.reader || a.tracer.perfReader != nil || root.drain == nil || a.tracer.eventDrain != root.drain {
+		return fmt.Errorf("event runtime original reader/counter changed")
+	}
+	// Before Start releases the spec, it must still agree with admission.
+	if i.collectionSpec != nil {
+		return validateEventFinalizationScope(i, false, false)
 	}
 	return nil
 }

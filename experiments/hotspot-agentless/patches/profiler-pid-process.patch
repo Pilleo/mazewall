@@ -1,0 +1,180 @@
+--- a/processmanager/processinfo.go
++++ b/processmanager/processinfo.go
+@@ -772,17 +772,47 @@
+ 
+ var errBootstrapNonELF = errors.New("nonrequired mapping is not an ELF file")
+ 
++// OrdinarySyncBranch identifies the terminal classification of an ordinary synchronization pass.
++type OrdinarySyncBranch uint8
++
++const (
++	OrdinarySyncUnknown OrdinarySyncBranch = iota
++	ExitWaiting
++	PermissionIgnored
++	NoMappings
++	NotExistExited
++	ESRCHExited
++	OtherMappingErrorExited
++	MappingsError
++	PartialOrEmpty
++	OrdinaryNil
++	Context
++)
++
++func classifyOrdinarySync(numParseErrors uint32, mappingCount int) OrdinarySyncBranch {
++	if numParseErrors == 0 && mappingCount > 0 {
++		return OrdinaryNil
++	}
++	return PartialOrEmpty
++}
++
+ const (
+ 	ordinarySynchronization synchronizationMode = iota
+ 	strictEpochBootstrap
+ )
+ 
+ func (pm *ProcessManager) SynchronizeProcess(pr process.Process) {
+-	_ = pm.synchronizeProcessChecked(context.Background(), pr, ordinarySynchronization, nil)
++	_ = pm.synchronizeProcessChecked(context.Background(), pr, ordinarySynchronization, nil, nil)
++}
++
++// SynchronizeOrdinaryReported executes ordinary process synchronization and reports the terminal branch.
++func (pm *ProcessManager) SynchronizeOrdinaryReported(pr process.Process, report func(OrdinarySyncBranch, error)) {
++	_ = pm.synchronizeProcessChecked(context.Background(), pr, ordinarySynchronization, nil, report)
+ }
+ 
+ func (pm *ProcessManager) synchronizeProcessChecked(ctx context.Context, pr process.Process,
+ 	mode synchronizationMode, journal *bootstrapJournal,
++	report func(OrdinarySyncBranch, error),
+ ) error {
+ 	if mode != ordinarySynchronization && !mode.strictBootstrap() {
+ 		return errors.New("invalid synchronization mode")
+@@ -794,6 +824,9 @@
+ 		return errors.New("strict synchronization requires the configured target and an ownership journal")
+ 	}
+ 	if err := ctx.Err(); err != nil {
++		if report != nil && mode == ordinarySynchronization {
++			report(Context, err)
++		}
+ 		return err
+ 	}
+ 	pid := pr.PID()
+@@ -810,6 +843,9 @@
+ 		}
+ 		log.Debugf("PID %v waiting for cleanup, aborting SynchronizeProcess", pid)
+ 		pm.ebpf.RemoveReportedPID(pid)
++		if report != nil && mode == ordinarySynchronization {
++			report(ExitWaiting, nil)
++		}
+ 		return nil
+ 	}
+ 
+@@ -837,6 +873,9 @@
+ 			// inspect it. Exiting here keeps the PID in the eBPF maps so
+ 			// we avoid a notification flood to resynchronize.
+ 			pm.mappingStats.errProcPerm.Add(1)
++			if report != nil && mode == ordinarySynchronization {
++				report(PermissionIgnored, nil)
++			}
+ 			return nil
+ 		}
+ 
+@@ -846,22 +885,33 @@
+ 			// As it's likely that a future iteration can extract mappings from a
+ 			// different thread in the process, notify eBPF to enable further notifications.
+ 			pm.ebpf.RemoveReportedPID(pid)
++			if report != nil && mode == ordinarySynchronization {
++				report(NoMappings, nil)
++			}
+ 			return nil
+ 		}
+ 
+ 		// All other errors imply that the process has exited.
++		var branch OrdinarySyncBranch
+ 		if os.IsNotExist(err) {
+ 			// Since listing /proc and opening files in there later is inherently racy,
+ 			// we expect to lose the race sometimes and thus expect to hit os.IsNotExist.
+ 			pm.mappingStats.errProcNotExist.Add(1)
++			branch = NotExistExited
+ 		} else if e, ok := err.(*os.PathError); ok && e.Err == syscall.ESRCH {
+ 			// If the process exits while reading its /proc/$PID/maps, the kernel will
+ 			// return ESRCH. Handle it as if the process did not exist.
+ 			pm.mappingStats.errProcESRCH.Add(1)
++			branch = ESRCHExited
++		} else {
++			branch = OtherMappingErrorExited
+ 		}
+ 		// Clean up, and notify eBPF.
+ 		log.Debugf("removing pid due to mappings read error: %v", err)
+ 		pm.processPIDExit(pid)
++		if report != nil && mode == ordinarySynchronization {
++			report(branch, nil)
++		}
+ 		return nil
+ 	}
+ 
+@@ -870,6 +920,9 @@
+ 
+ 	newProcess, syncErr := pm.synchronizeMappingsChecked(ctx, pr, mappings, mode, journal)
+ 	if syncErr != nil {
++		if report != nil && mode == ordinarySynchronization {
++			report(MappingsError, syncErr)
++		}
+ 		return syncErr
+ 	}
+ 	if newProcess {
+@@ -887,6 +940,9 @@
+ 		// Also see: Unified PID Events design doc
+ 		pm.ebpf.RemoveReportedPID(pid)
+ 	}
++	if report != nil && mode == ordinarySynchronization {
++		report(classifyOrdinarySync(numParseErrors, len(mappings)), nil)
++	}
+ 	return nil
+ }
+ 
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -19,7 +19,6 @@
+ 
+ 	"go.opentelemetry.io/ebpf-profiler/libpf"
+ 	"go.opentelemetry.io/ebpf-profiler/metrics"
+-	"go.opentelemetry.io/ebpf-profiler/process"
+ 	"go.opentelemetry.io/ebpf-profiler/support"
+ 	"go.opentelemetry.io/ebpf-profiler/times"
+ )
+@@ -51,9 +50,9 @@
+ 	for {
+ 		select {
+ 		case pidTid := <-t.pidEvents:
+-			t.processManager.SynchronizeProcess(process.New(pidTid.PID(), pidTid.TID()))
++			t.observePIDProcess(pidTid)
+ 		case <-pidCleanupTicker.C:
+ 			t.processManager.CleanupPIDs()
+ 		case <-ctx.Done():
+ 			return
+ 		}
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -84,6 +84,7 @@
+ 	pidPollMu            sync.Mutex
+ 	pidEventsMapOverride pidEventsMapper
+ 	pidMapInfoOverride   pidMapInfoFunc
++	pidProcess           *pidProcess
+ 	traceReaderCounters  traceReaderCounters
+ 	// ebpfMaps holds the currently loaded eBPF maps.
+ 	ebpfMaps map[string]*cebpf.Map
+@@ -358,6 +359,13 @@
+ 	}
+ 	tracer.preparePIDMailbox(cfg)
++	tracer.preparePIDProcess()
++	if auxiliary != nil {
++		if err := auxiliary.Failure(); err != nil {
++			bootstrapCleanupHandled = true
++			return nil, disposeBootstrapFailure(tracer, err)
++		}
++	}
+ 
+ 	// Use an optimized version if available
+ 	if hasBatchLookupAndDelete {
+ 		tracer.monitorPIDEventsMapMethod = (*tracer).monitorPIDEventsMapBatch

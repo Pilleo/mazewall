@@ -22,6 +22,8 @@ public class StructuredProfileEvidence internal constructor(
     public val pendingOccurrences: ULong = owner.pendingOccurrences
     public val finalized: Boolean = owner.finalized
     public val collectionLossComplete: Boolean = false
+    public val policyEligibility: Boolean = false
+    public val runtimeProfile: String? = owner.runtimeProfile
     public val terminalAccountingComplete: Boolean = owner.terminalAccountingComplete
     public val retentionComplete: Boolean = owner.retentionComplete
 

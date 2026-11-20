@@ -3,7 +3,8 @@ title: "Make Tier E shutdown terminal across service and control state"
 severity: "MEDIUM"
 status: "open"
 priority: medium
-dependencies: []
+dependencies:
+  - "issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c"
 component: "profiler"
 target_modules: ["profiler"]
 target_files:
@@ -83,6 +84,15 @@ historical qualification. Remains open for orchestrator review/integration.
 ## Related work
 
 Coordinate with [Tier E cleanup ownership](issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md), which fixes loss of owners rather than post-shutdown admission. This tightens the invariant introduced by [control machine extraction](resolved/issue-20260912-224640-816-extract-controlsessionmachine-pure-state-machine-f.md). Read the profiler design and notification-liveness contract before implementation.
+
+---
+## Repository-review revalidation — 2026-11-04
+
+[TE-07](../reviews/2026-11-04-repository-review-findings.md#te-07) remains live: direct
+shutdown leaves command-state admission open, and terminal reducer events can revive state.
+After cleanup405 establishes retained ownership, close admission before fallible retirement;
+regress queued ATTACH/direct shutdown and all terminal event variants with no engine creation.
+No remote asynchronous-completion exploit is inferred from the reducer alone.
 
 ---
 <!-- id: issue-20260926-122439-817-make-tier-e-shutdown-terminal-across-service-and-c  file: issue-20260926-122439-817-make-tier-e-shutdown-terminal-across-service-and-c.md -->

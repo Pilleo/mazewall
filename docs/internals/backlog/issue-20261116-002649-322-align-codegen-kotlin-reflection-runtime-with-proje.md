@@ -7,9 +7,9 @@ dependencies: []
 component: "core"
 target_modules:
   - "portals/codegen"
-target_files: 
+target_files:
   - "portals/codegen/build.gradle.kts"
-target_symbols: 
+target_symbols:
   - "runtimeOnly"
 open_questions: true
 ---

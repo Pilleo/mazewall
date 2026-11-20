@@ -86,7 +86,7 @@ class ContainmentDesignSpec :
 
             "jt and jf fields are unsigned 8-bit — max valid offset is 255" {
                 // Verify our BpfInstruction constructor guards against out of range jumps
-                val filter = BpfInstruction.Jmp(0, 255.toShort(), 255.toShort(), 0)
+                val filter = BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 255.toShort(), 255.toShort(), 0)
                 filter.jt shouldBe 255.toShort()
                 filter.jf shouldBe 255.toShort()
             }

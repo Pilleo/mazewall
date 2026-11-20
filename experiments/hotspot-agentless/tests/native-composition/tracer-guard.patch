@@ -1,0 +1,13 @@
+--- a/tracer/definition_accounting.go
++++ b/tracer/definition_accounting.go
+@@ -262,8 +262,10 @@
+ 	if s == nil {
+ 		return observation, fmt.Errorf("trace definition accounting not configured")
+ 	}
++	defer nativeCompositionSampleReturned(t, &observation, &err)
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
++	nativeCompositionGuardEntered(t)
+ 	if s.err != nil {
+ 		return observation, s.err
+ 	}

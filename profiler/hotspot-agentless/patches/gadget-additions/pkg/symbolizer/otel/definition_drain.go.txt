@@ -4,9 +4,15 @@ package otel
 
 import (
 	"context"
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	"sync"
+	"time"
 )
 
 type definitionDrainBackend interface {
@@ -14,6 +20,215 @@ type definitionDrainBackend interface {
 	DrainReader(context.Context) error
 	JoinConsumer(context.Context) error
 }
+
+type definitionAccountingBackend interface {
+	DefinitionLifetime() libpf.TraceDefinitionLifetime
+	SampleDefinitions(context.Context) (libpf.TraceDefinitionObservation, error)
+}
+
+type auxiliaryNativeStop func(context.Context) (tracer.DefinitionAuxiliaryObservation, error)
+
+type localDiagnosticSource interface {
+	localDiagnosticSnapshot() (channelDiagnostic, storeDiagnostic)
+}
+
+type cachedDiagnosticChild interface {
+	DefinitionSourceDiagnosticsReady() <-chan struct{}
+	DefinitionSourceDiagnostics() (json.RawMessage, error)
+}
+
+type cachedDiagnosticBackend interface { diagnosticChild() cachedDiagnosticChild }
+
+var errLocalDiagnosticPending = errors.New("definition diagnostic pending")
+var errLocalDiagnosticUnavailable = errors.New("definition diagnostic unavailable")
+
+type diagnosticEnvelope struct {
+	Schema int `json:"schema"`
+	Queue json.RawMessage `json:"queue,omitempty"`
+	Processing json.RawMessage `json:"processing,omitempty"`
+	Channel *channelDiagnostic `json:"channel,omitempty"`
+	Store *storeDiagnostic `json:"store,omitempty"`
+	Missing []string `json:"missing"`
+}
+
+// These private shapes validate the B1 wire format; original raw bytes remain the output.
+type diagnosticQueueSection struct {
+	Unit string `json:"unit"`
+	RequestsOwned uint64 `json:"requests_owned"`
+	QueueAccepted uint64 `json:"queue_accepted"`
+	AdmissionHeld uint64 `json:"admission_held"`
+	Refused uint64 `json:"refused"`
+	Applied uint64 `json:"applied"`
+	AppliedPublished uint64 `json:"applied_published"`
+	AppliedNotPublished uint64 `json:"applied_not_published"`
+	Failed uint64 `json:"failed"`
+	Aborted uint64 `json:"aborted"`
+	Pending uint64 `json:"pending"`
+	CleanupFailed uint64 `json:"cleanup_failed"`
+	PendingKnown bool `json:"pending_known"`
+	AllWorkersEnded bool `json:"all_workers_ended"`
+	CallerJoinedClaim bool `json:"caller_joined_claim"`
+	ScopeJoinedWitness bool `json:"scope_joined_witness"`
+	Held bool `json:"held"`
+	LastUnavailable bool `json:"last_unavailable"`
+	LastPublished bool `json:"last_published"`
+	Outcome uint8 `json:"outcome"`
+	ProofErrorPresent bool `json:"proof_error_present"`
+	LastApplyErrorPresent bool `json:"last_apply_error_present"`
+	LastCleanupErrorPresent bool `json:"last_cleanup_error_present"`
+}
+type diagnosticProcessingBinding struct {
+	Source uint8 `json:"source"`
+	Session string `json:"session"`
+	HostTGID uint32 `json:"host_tgid"`
+	Birth uint64 `json:"birth"`
+	CounterMapID uint32 `json:"counter_map_id"`
+	PerfMapID uint32 `json:"perf_map_id"`
+	PossibleCPUs int64 `json:"possible_cpus"`
+	Generation uint64 `json:"generation"`
+}
+type diagnosticProcessingTarget struct {
+	PID uint32 `json:"pid"`
+	ProcessStartTicks uint64 `json:"process_start_ticks"`
+	CounterAddress uint64 `json:"counter_address"`
+	InitialEpoch uint64 `json:"initial_epoch"`
+}
+type diagnosticProcessingIdentity struct {
+	Epoch uint64 `json:"epoch"`
+	State uint8 `json:"state"`
+	ReadError int32 `json:"read_error"`
+}
+type diagnosticProcessingTrace struct {
+	PID uint32 `json:"pid"`
+	TID uint32 `json:"tid"`
+	CPU int64 `json:"cpu"`
+	Origin uint64 `json:"origin"`
+	KTime int64 `json:"ktime"`
+	CorrelationID uint64 `json:"correlation_id"`
+	HotSpotIdentity diagnosticProcessingIdentity `json:"hotspot_identity"`
+}
+type diagnosticProcessingSection struct {
+	Unit string `json:"unit"`
+	HasBinding bool `json:"has_binding"`
+	ExpectedBinding *diagnosticProcessingBinding `json:"expected_binding,omitempty"`
+	EpochTarget diagnosticProcessingTarget `json:"epoch_target"`
+	ObservedPID uint32 `json:"observed_pid"`
+	Admitted uint64 `json:"admitted"`
+	PreReporterRejected uint64 `json:"pre_reporter_rejected"`
+	ReporterOK uint64 `json:"reporter_ok"`
+	ReporterError uint64 `json:"reporter_error"`
+	InFlight uint64 `json:"in_flight"`
+	TargetBound uint64 `json:"target_bound"`
+	ForeignToBinding uint64 `json:"foreign_to_binding"`
+	BindingUnknown uint64 `json:"binding_unknown"`
+	Overflow bool `json:"overflow"`
+	HasLastAdmitted bool `json:"has_last_admitted"`
+	LastAdmitted *diagnosticProcessingTrace `json:"last_admitted,omitempty"`
+	HasLastClassified bool `json:"has_last_classified"`
+	LastClassified *diagnosticProcessingTrace `json:"last_classified,omitempty"`
+	LastTerminal uint8 `json:"last_terminal"`
+	Outcome uint8 `json:"outcome"`
+	ReporterErrorPresent bool `json:"reporter_error_present"`
+	ProofErrorPresent bool `json:"proof_error_present"`
+	GetterErrorPresent bool `json:"getter_error_present"`
+}
+
+func diagnosticObjectValues(raw json.RawMessage, section string) bool {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &fields) != nil || fields == nil { return false }
+	for key, value := range fields {
+		next := ""
+		switch section {
+		case "queue":
+			switch key { case "unit", "requests_owned", "queue_accepted", "admission_held", "refused", "applied", "applied_published", "applied_not_published", "failed", "aborted", "pending", "cleanup_failed", "pending_known", "all_workers_ended", "caller_joined_claim", "scope_joined_witness", "held", "last_unavailable", "last_published", "outcome", "proof_error_present", "last_apply_error_present", "last_cleanup_error_present": default: return false }
+		case "processing":
+			switch key { case "expected_binding": next = "binding"; case "epoch_target": next = "target"; case "last_admitted", "last_classified": next = "trace"; case "unit", "has_binding", "observed_pid", "admitted", "pre_reporter_rejected", "reporter_ok", "reporter_error", "in_flight", "target_bound", "foreign_to_binding", "binding_unknown", "overflow", "has_last_admitted", "has_last_classified", "last_terminal", "outcome", "reporter_error_present", "proof_error_present", "getter_error_present": default: return false }
+		case "binding":
+			switch key { case "source", "session", "host_tgid", "birth", "counter_map_id", "perf_map_id", "possible_cpus", "generation": default: return false }
+		case "target":
+			switch key { case "pid", "process_start_ticks", "counter_address", "initial_epoch": default: return false }
+		case "trace":
+			switch key { case "hotspot_identity": next = "identity"; case "pid", "tid", "cpu", "origin", "ktime", "correlation_id": default: return false }
+		case "identity":
+			switch key { case "epoch", "state", "read_error": default: return false }
+		default: return false
+		}
+		value = bytes.TrimSpace(value)
+		if len(value) == 0 || bytes.Equal(value, []byte("null")) || value[0] == '[' { return false }
+		if next != "" { if !diagnosticObjectValues(value, next) { return false } } else if value[0] == '{' { return false }
+	}
+	return true
+}
+
+func validDiagnosticSection(raw json.RawMessage, section string, target any) bool {
+	if !diagnosticObjectValues(raw, section) { return false }
+	d := json.NewDecoder(bytes.NewReader(raw)); d.DisallowUnknownFields()
+	return d.Decode(target) == nil && d.Decode(new(any)) == io.EOF
+}
+
+func decodeChildDiagnostic(raw json.RawMessage) (diagnosticEnvelope, bool) {
+	var child diagnosticEnvelope
+	if len(raw) == 0 || len(raw) > 32768 { return child, false }
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil { return child, false }
+	for key := range fields { switch key { case "schema", "queue", "processing", "missing": default: return child, false } }
+	d := json.NewDecoder(bytes.NewReader(raw)); d.DisallowUnknownFields()
+	if d.Decode(&child) != nil || d.Decode(new(any)) != io.EOF || child.Schema != 1 || child.Channel != nil || child.Store != nil || child.Missing == nil || len(child.Missing) > 16 { return child, false }
+	for i, reason := range child.Missing {
+		switch reason { case "queue-binding-absent", "queue-pool-missing", "queue-getter-error", "queue-capability-absent", "processing-source-unverified", "processing-join-unverified", "processing-binding-absent", "epoch-target-absent", "observed-pid-absent", "binding-unrepresentable": default: return child, false }
+		for _, prior := range child.Missing[:i] { if prior == reason { return child, false } }
+	}
+	if len(child.Queue) != 0 {
+		var queue diagnosticQueueSection
+		if !validDiagnosticSection(child.Queue, "queue", &queue) || queue.Unit != "owned-map-update-request" || queue.Outcome < 1 || queue.Outcome > 3 { return child, false }
+	}
+	if len(child.Processing) != 0 {
+		var processing diagnosticProcessingSection
+		if !validDiagnosticSection(child.Processing, "processing", &processing) || processing.Unit != "handle-trace-input" || processing.LastTerminal > 3 || processing.Outcome < 1 || processing.Outcome > 3 || (processing.ExpectedBinding != nil && len(processing.ExpectedBinding.Session) > 256) { return child, false }
+	}
+	child.Queue = append(json.RawMessage(nil), child.Queue...)
+	child.Processing = append(json.RawMessage(nil), child.Processing...)
+	return child, true
+}
+
+func diagnosticExpiredAt(done bool, deadline time.Time, hasDeadline bool, now time.Time) bool {
+	return done || (hasDeadline && !now.Before(deadline))
+}
+
+func diagnosticExpired(done <-chan struct{}, deadline time.Time, hasDeadline bool) bool {
+	closed := false
+	select { case <-done: closed = true; default: }
+	return diagnosticExpiredAt(closed, deadline, hasDeadline, time.Now())
+}
+
+type localStopClaim struct{ marker byte }
+
+type localStopDiagnostic struct {
+	Channel channelDiagnostic `json:"channel"`
+	Store storeDiagnostic `json:"store"`
+	SnapshotMissing bool `json:"snapshot_missing"`
+	ChildInvoked bool `json:"child_invoked"`
+	TraceIncomplete bool `json:"trace_incomplete"`
+	TraceError bool `json:"trace_error"`
+	NativeError bool `json:"native_error"`
+	FirstContextDone bool `json:"first_context_done"`
+	HasDeadline bool `json:"has_deadline"`
+	DeadlineSeconds int64 `json:"deadline_seconds"`
+	DeadlineNanoseconds int `json:"deadline_nanoseconds"`
+}
+
+type auxiliaryFinalBackend interface {
+	stopAuxiliaryFinal(context.Context) (tracer.DefinitionAuxiliaryObservation, error)
+}
+
+type auxiliaryDrainState uint8
+
+const (
+	auxiliaryNotStarted auxiliaryDrainState = iota
+	auxiliaryRunning
+	auxiliaryFrozen
+)
+
 type definitionDrainOwner struct {
 	backend     definitionDrainBackend
 	done        chan struct{}
@@ -21,6 +236,160 @@ type definitionDrainOwner struct {
 	mu          sync.Mutex
 	observation symbolizer.DefinitionStopObservation
 	err         error
+	traceStarted bool
+	auxiliaryState auxiliaryDrainState
+	auxiliaryDone chan struct{}
+	auxiliaryContext context.Context
+	auxiliaryContextDone <-chan struct{}
+	auxiliaryErr error
+	combinedObservation symbolizer.DefinitionStopObservation
+	combinedErr error
+	localClaim *localStopClaim
+	localReady chan struct{}
+	localFragment []byte
+	localFirstDone <-chan struct{}
+	localFirstDeadline time.Time
+	localFirstHasDeadline bool
+	localChildInvoked bool
+	localMemo []byte
+	localMemoReady chan struct{}
+}
+
+// freezeLocalStop records diagnostic snapshots only; they are not a final receipt.
+func (o *definitionDrainOwner) freezeLocalStop(claim *localStopClaim, childInvoked, traceIncomplete, traceError, nativeError, firstDone bool) {
+	d := localStopDiagnostic{ChildInvoked: childInvoked, TraceIncomplete: traceIncomplete, TraceError: traceError, NativeError: nativeError, FirstContextDone: firstDone}
+	o.mu.Lock()
+	if claim == nil || o.localClaim != claim { o.mu.Unlock(); return }
+	deadline, hasDeadline := o.localFirstDeadline, o.localFirstHasDeadline
+	o.mu.Unlock()
+	d.HasDeadline = hasDeadline
+	if hasDeadline { d.DeadlineSeconds, d.DeadlineNanoseconds = deadline.Unix(), deadline.Nanosecond() }
+	if source, ok := o.backend.(localDiagnosticSource); ok {
+		d.Channel, d.Store = source.localDiagnosticSnapshot()
+	} else { d.SnapshotMissing = true }
+	encoded, err := json.Marshal(d)
+	if err != nil { return }
+	o.mu.Lock()
+	if o.localClaim == claim && o.localFragment == nil {
+		o.localFragment = encoded
+		o.localChildInvoked = childInvoked
+		close(o.localReady)
+	}
+	o.mu.Unlock()
+}
+
+// A relayed child's close means its input is ready, not that this owner has composed it.
+func (o *definitionDrainOwner) diagnosticReady() <-chan struct{} {
+	o.mu.Lock()
+	if o.localClaim == nil { o.mu.Unlock(); return nil }
+	local, memo, invoked := o.localReady, o.localMemoReady, o.localChildInvoked
+	if o.localMemo != nil { o.mu.Unlock(); return memo }
+	select { case <-local: default: o.mu.Unlock(); return local }
+	o.mu.Unlock()
+	if invoked {
+		if b, ok := o.backend.(cachedDiagnosticBackend); ok {
+			if child := b.diagnosticChild(); child != nil {
+				if ready := child.DefinitionSourceDiagnosticsReady(); ready != nil { return ready }
+			}
+		}
+	}
+	return local
+}
+
+func (o *definitionDrainOwner) diagnostic() (json.RawMessage, error) {
+	o.mu.Lock()
+	if o.localMemo != nil { raw := append(json.RawMessage(nil), o.localMemo...); o.mu.Unlock(); return raw, nil }
+	if o.localClaim == nil { o.mu.Unlock(); return nil, errLocalDiagnosticUnavailable }
+	select { case <-o.localReady: default: o.mu.Unlock(); return nil, errLocalDiagnosticPending }
+	claim, local, invoked := o.localClaim, append([]byte(nil), o.localFragment...), o.localChildInvoked
+	done, deadline, hasDeadline := o.localFirstDone, o.localFirstDeadline, o.localFirstHasDeadline
+	o.mu.Unlock()
+	var fragment localStopDiagnostic
+	if json.Unmarshal(local, &fragment) != nil { return nil, errLocalDiagnosticUnavailable }
+	base := diagnosticEnvelope{Schema: 1, Missing: []string{}}
+	if !fragment.SnapshotMissing { base.Channel, base.Store = &fragment.Channel, &fragment.Store } else { base.Missing = append(base.Missing, "local-snapshot-missing") }
+	unknown := base; unknown.Missing = append(append([]string(nil), base.Missing...), "first-caller-closed")
+	unknownRaw, _ := json.Marshal(unknown)
+	result := base
+	if diagnosticExpired(done, deadline, hasDeadline) {
+		result = unknown
+	} else if !invoked {
+		result.Missing = append(result.Missing, "child-not-invoked")
+	} else {
+		var child cachedDiagnosticChild
+		if b, ok := o.backend.(cachedDiagnosticBackend); ok { child = b.diagnosticChild() }
+		if child == nil { result.Missing = append(result.Missing, "child-capability-absent") } else {
+			ready := child.DefinitionSourceDiagnosticsReady()
+			if ready == nil { result.Missing = append(result.Missing, "child-cache-absent") } else {
+				select {
+				case <-ready:
+					if diagnosticExpired(done, deadline, hasDeadline) { result = unknown; break }
+					raw, err := child.DefinitionSourceDiagnostics()
+					decoded, valid := decodeChildDiagnostic(raw)
+					if err != nil || !valid { result.Missing = append(result.Missing, "child-diagnostic-unknown") } else {
+						result.Queue, result.Processing = decoded.Queue, decoded.Processing
+						result.Missing = append(result.Missing, decoded.Missing...)
+					}
+				default:
+					if !diagnosticExpired(done, deadline, hasDeadline) { return nil, errLocalDiagnosticPending }
+					result = unknown
+				}
+			}
+		}
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || len(encoded) > 32768 || len(result.Missing) > 16 { result = base; result.Missing = append(result.Missing, "child-diagnostic-unknown"); encoded, _ = json.Marshal(result) }
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.localMemo != nil { return append(json.RawMessage(nil), o.localMemo...), nil }
+	if o.localClaim != claim { return nil, errLocalDiagnosticUnavailable }
+	if diagnosticExpired(done, deadline, hasDeadline) { encoded = unknownRaw }
+	o.localMemo = append([]byte(nil), encoded...)
+	close(o.localMemoReady)
+	return append(json.RawMessage(nil), o.localMemo...), nil
+}
+
+func (o *definitionDrainOwner) localStopFragment() []byte {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]byte(nil), o.localFragment...)
+}
+
+func cloneDefinitionStopObservation(r symbolizer.DefinitionStopObservation) symbolizer.DefinitionStopObservation {
+	if r.TraceDefinition != nil {
+		value := *r.TraceDefinition
+		value.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), value.Rows...)
+		r.TraceDefinition = &value
+	}
+	if r.Auxiliary != nil {
+		value := *r.Auxiliary
+		r.Auxiliary = &value
+	}
+	return r
+}
+
+// validateCombinedFinal checks copied target facts without equating generation domains.
+func validateCombinedFinal(r symbolizer.DefinitionStopObservation, traceErr, nativeErr error) error {
+	if r.Auxiliary == nil { return nil }
+	switch r.Auxiliary.Disposition() {
+	case tracer.DefinitionAuxiliaryMissing, tracer.DefinitionAuxiliaryFrozenNonfinal:
+		return nil
+	case tracer.DefinitionAuxiliaryFrozenFinal:
+	default:
+		return errors.New("unknown auxiliary disposition")
+	}
+	if traceErr != nil || nativeErr != nil || !r.ReaderStopped || !r.ConsumerStopped || !r.BuffersDrained || !r.AuxiliaryStopped ||
+		r.TraceDefinition == nil || r.TraceDefinition.Outcome != libpf.TraceDefinitionFinal {
+		return errors.New("combined final receipt lacks complete trace or auxiliary stop")
+	}
+	tb, ab := r.TraceDefinition.Binding, r.Auxiliary.Binding()
+	if tb.Source != libpf.TraceDefinitionPerfOutputV1 || ab.Source != libpf.AuxiliarySourcePeriodicCaller ||
+		tb.Session == "" || tb.HostTGID == 0 || tb.Birth == 0 || tb.Generation == 0 || ab.Generation == 0 ||
+		tb.Session != ab.Session || tb.HostTGID != ab.HostTGID || tb.Birth != ab.Birth {
+		return errors.New("combined final target binding mismatch")
+	}
+	// The current closed reason vocabulary contains only rejecting reasons.
+	return errors.New("combined final auxiliary success reason unavailable")
 }
 
 func newDefinitionDrainOwner(b definitionDrainBackend) *definitionDrainOwner {
@@ -28,7 +397,33 @@ func newDefinitionDrainOwner(b definitionDrainBackend) *definitionDrainOwner {
 }
 func (o *definitionDrainOwner) execute(ctx context.Context) {
 	defer close(o.done)
-	fail := func(err error) { o.mu.Lock(); o.err = errors.Join(o.err, err); o.mu.Unlock() }
+	fail := func(err error) {
+		o.mu.Lock()
+		o.err = errors.Join(o.err, err)
+		o.observation.TraceDefinition = nil
+		o.observation.BuffersDrained = false
+		o.mu.Unlock()
+	}
+	var lifetime libpf.TraceDefinitionLifetime
+	var authority libpf.TraceDefinitionReadoutAuthority
+	accounting, hasAccounting := o.backend.(definitionAccountingBackend)
+	if hasAccounting {
+		lifetime = accounting.DefinitionLifetime()
+	}
+	if lifetime != nil {
+		var ok bool
+		authority, ok = lifetime.(libpf.TraceDefinitionReadoutAuthority)
+		if !ok {
+			fail(errors.New("definition lifetime lacks native readout authority"))
+			return
+		}
+		if err := authority.WithDefinitionReadout(func() error {
+			return lifetime.Validate()
+		}); err != nil {
+			fail(err)
+			return
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		fail(err)
 		return
@@ -52,18 +447,72 @@ func (o *definitionDrainOwner) execute(ctx context.Context) {
 		fail(err)
 		return
 	}
-	o.mu.Lock()
-	o.observation.ConsumerStopped = true
-	o.observation.BuffersDrained = true
-	o.mu.Unlock()
+	var sample *libpf.TraceDefinitionObservation
+	if lifetime != nil {
+		if err := authority.WithDefinitionReadout(func() error {
+			if err := lifetime.Validate(); err != nil {
+				return err
+			}
+			value, err := accounting.SampleDefinitions(ctx)
+			if err != nil {
+				return err
+			}
+			value.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), value.Rows...)
+			sample = &value
+			return lifetime.Validate()
+		}); err != nil {
+			fail(err)
+			return
+		}
+	}
+	publish := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		o.observation.ConsumerStopped = true
+		o.observation.BuffersDrained = true
+		if sample != nil {
+			value := *sample
+			value.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), sample.Rows...)
+			o.observation.TraceDefinition = &value
+		}
+		return nil
+	}
+	if authority != nil {
+		if err := authority.WithDefinitionReadout(publish); err != nil {
+			fail(err)
+		}
+	} else if err := publish(); err != nil {
+		fail(err)
+	}
 }
 func (o *definitionDrainOwner) result() (symbolizer.DefinitionStopObservation, error) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.observation, o.err
+	r := o.observation
+	err := o.err
+	select {
+	case <-o.done:
+	default:
+		r.TraceDefinition = nil
+		r.BuffersDrained = false
+	}
+	o.mu.Unlock()
+	r.Auxiliary = nil
+	r.AuxiliaryStopped = false
+	return cloneDefinitionStopObservation(r), err
 }
-func (o *definitionDrainOwner) stop(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
-	o.once.Do(func() { go o.execute(ctx) })
+func (o *definitionDrainOwner) drain(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	o.mu.Lock()
+	if !o.traceStarted && o.auxiliaryState != auxiliaryNotStarted {
+		o.mu.Unlock()
+		return symbolizer.DefinitionStopObservation{}, errors.New("trace drain admission closed")
+	}
+	first := !o.traceStarted
+	if first { o.traceStarted = true }
+	o.mu.Unlock()
+	if first { o.once.Do(func() { go o.execute(ctx) }) }
 	select {
 	case <-o.done:
 		return o.result()
@@ -76,4 +525,112 @@ func (o *definitionDrainOwner) stop(ctx context.Context) (symbolizer.DefinitionS
 		r, err := o.result()
 		return r, errors.Join(err, ctx.Err())
 	}
+}
+
+func (o *definitionDrainOwner) stop(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	o.mu.Lock()
+	state, done := o.auxiliaryState, o.auxiliaryDone
+	if state == auxiliaryFrozen {
+		r, err := o.combinedObservation, o.combinedErr
+		o.mu.Unlock()
+		return cloneDefinitionStopObservation(r), err
+	}
+	o.mu.Unlock()
+	if state == auxiliaryNotStarted { return o.drain(ctx) }
+	select { case <-done: return o.combinedResult(); default: }
+	select {
+	case <-done:
+		return o.combinedResult()
+	case <-ctx.Done():
+		select { case <-done: return o.combinedResult(); default: }
+		r, err := o.result()
+		r.BuffersDrained = false
+		waitErr := ctx.Err()
+		if waitErr == nil { waitErr = context.Canceled }
+		return r, errors.Join(err, waitErr)
+	}
+}
+
+func (o *definitionDrainOwner) combinedResult() (symbolizer.DefinitionStopObservation, error) {
+	o.mu.Lock()
+	r, err := o.combinedObservation, o.combinedErr
+	o.mu.Unlock()
+	return cloneDefinitionStopObservation(r), err
+}
+
+// stopAuxiliaryFinal admits one native stop and freezes its trace-admission snapshot.
+func (o *definitionDrainOwner) stopAuxiliaryFinal(ctx context.Context, nativeStop auxiliaryNativeStop) error {
+	o.mu.Lock()
+	if o.auxiliaryState == auxiliaryFrozen {
+		err := o.auxiliaryErr
+		o.mu.Unlock()
+		return err
+	}
+	o.mu.Unlock()
+	callerDone := ctx.Done()
+	deadline, hasDeadline := ctx.Deadline()
+	o.mu.Lock()
+	first := o.auxiliaryState == auxiliaryNotStarted
+	var r symbolizer.DefinitionStopObservation
+	var traceErr error
+	traceComplete := false
+	if first {
+		o.localClaim = &localStopClaim{marker: 1}
+		o.localReady = make(chan struct{})
+		o.localMemoReady = make(chan struct{})
+		o.localFirstDone = callerDone
+		o.localFirstDeadline, o.localFirstHasDeadline = deadline, hasDeadline
+		o.auxiliaryState = auxiliaryRunning
+		o.auxiliaryDone = make(chan struct{})
+		o.auxiliaryContext, o.auxiliaryContextDone = ctx, callerDone
+		r, traceErr = o.observation, o.err
+		select { case <-o.done: traceComplete = true; default: }
+		if !traceComplete { r.TraceDefinition = nil; r.BuffersDrained = false }
+		r.Auxiliary = nil
+		r.AuxiliaryStopped = false
+	}
+	done := o.auxiliaryDone
+	claim := o.localClaim
+	o.mu.Unlock()
+	if !first {
+		select { case <-done: o.mu.Lock(); err := o.auxiliaryErr; o.mu.Unlock(); return err; default: }
+		select {
+		case <-done:
+			o.mu.Lock(); err := o.auxiliaryErr; o.mu.Unlock(); return err
+		case <-callerDone:
+			select { case <-done: o.mu.Lock(); err := o.auxiliaryErr; o.mu.Unlock(); return err; default: }
+			err := ctx.Err(); if err == nil { err = context.Canceled }; return err
+		}
+	}
+	r = cloneDefinitionStopObservation(r)
+	if !traceComplete { traceErr = errors.Join(traceErr, errors.New("trace drain missing or pending at auxiliary admission")) }
+	var nativeErr error
+	if nativeStop == nil {
+		nativeErr = errors.New("native auxiliary stop unavailable")
+	} else {
+		value, err := nativeStop(ctx)
+		nativeErr = err
+		r.Auxiliary = &value
+		r.AuxiliaryStopped = err == nil
+	}
+	o.mu.Lock()
+	firstClosed := false
+	select { case <-o.auxiliaryContextDone: firstClosed = true; default: }
+	o.mu.Unlock()
+	if firstClosed {
+		cause := ctx.Err()
+		if cause == nil { cause = context.Canceled }
+		nativeErr = errors.Join(nativeErr, cause)
+		r.AuxiliaryStopped = false
+	}
+	o.freezeLocalStop(claim, nativeStop != nil, !traceComplete, traceErr != nil, nativeErr != nil, firstClosed)
+	validationErr := validateCombinedFinal(r, traceErr, nativeErr)
+	r = cloneDefinitionStopObservation(r)
+	combinedErr := errors.Join(traceErr, nativeErr, validationErr)
+	o.mu.Lock()
+	o.combinedObservation, o.combinedErr, o.auxiliaryErr = r, combinedErr, nativeErr
+	o.auxiliaryState = auxiliaryFrozen
+	close(done)
+	o.mu.Unlock()
+	return nativeErr
 }

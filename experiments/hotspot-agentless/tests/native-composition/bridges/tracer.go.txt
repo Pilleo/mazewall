@@ -1,0 +1,354 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/bits"
+	"runtime"
+	"sync"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"golang.org/x/sys/unix"
+)
+
+// Installed only in the isolated native-test build, never normal preparation.
+var nativeCompositionTracers sync.Map
+
+type NativeCompositionSnapshot struct {
+	Binding                          libpf.TraceDefinitionBinding
+	Rows                             []libpf.TraceDefinitionCPUCounts
+	Reader                           libpf.TraceDefinitionReaderCounts
+	Retired, Requested, ReaderJoined bool
+	SourceError                      error
+}
+
+type NativeCompositionTracer struct {
+	tracer         *Tracer
+	pidPage0Source *traceDefinitionSource
+	pidPage0Map    *cebpf.Map // Borrowed; only the original fixture releases it.
+	mu             sync.Mutex
+	gate           *nativeCompositionGate
+	samples        uint64
+	last           libpf.TraceDefinitionObservation
+	lastError      error
+	closeGoroutine uint64
+}
+
+type nativeCompositionGate struct {
+	entered     chan struct{}
+	release     chan struct{}
+	once        sync.Once
+	releaseOnce sync.Once
+}
+
+func NativeCompositionOriginalTracer(t *Tracer) (*NativeCompositionTracer, error) {
+	if t == nil || t.definitionSource == nil {
+		return nil, fmt.Errorf("native control requires the constructed accounted tracer")
+	}
+	c, _ := nativeCompositionTracers.LoadOrStore(t, &NativeCompositionTracer{tracer: t, pidPage0Source: t.definitionSource, pidPage0Map: t.ebpfMaps["pid_page_to_mapping_info"]})
+	return c.(*NativeCompositionTracer), nil
+}
+
+func (c *NativeCompositionTracer) Snapshot() (NativeCompositionSnapshot, error) {
+	s := c.tracer.definitionSource
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.checkBinding(c.tracer.ebpfMaps); err != nil {
+		return NativeCompositionSnapshot{}, err
+	}
+	rows := make([]libpf.TraceDefinitionCPUCounts, s.binding.PossibleCPUs)
+	if err := s.counter.Lookup(uint32(0), &rows); err != nil {
+		return NativeCompositionSnapshot{}, fmt.Errorf("diagnostic original-row lookup: %w", err)
+	}
+	value := NativeCompositionSnapshot{Binding: s.binding, Rows: rows, Reader: c.tracer.traceDefinitionReaderObservation(), SourceError: s.err}
+	if d := c.tracer.traceReaderCounters.drain; d != nil {
+		value.Retired, value.Requested = d.sourcesRetired.Load(), d.requested.Load()
+	}
+	select {
+	case <-c.tracer.traceReaderCounters.done:
+		value.ReaderJoined = true
+	default:
+	}
+	return value, nil
+}
+
+func (c *NativeCompositionTracer) ArmSample() (<-chan struct{}, func(), error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gate != nil || c.samples != 0 {
+		return nil, nil, fmt.Errorf("sample gate requires a fresh real source")
+	}
+	g := &nativeCompositionGate{entered: make(chan struct{}), release: make(chan struct{})}
+	c.gate = g
+	return g.entered, func() { g.releaseOnce.Do(func() { close(g.release) }) }, nil
+}
+
+func (c *NativeCompositionTracer) Result() (uint64, libpf.TraceDefinitionObservation, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	value := c.last
+	value.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), value.Rows...)
+	return c.samples, value, c.lastError
+}
+
+func (c *NativeCompositionTracer) Close() {
+	stack := make([]byte, 256)
+	n := runtime.Stack(stack, false)
+	var id uint64
+	_, parseErr := fmt.Sscanf(string(stack[:n]), "goroutine %d ", &id)
+	c.mu.Lock()
+	if parseErr == nil {
+		c.closeGoroutine = id
+	}
+	c.mu.Unlock()
+	c.tracer.Close()
+}
+
+func (c *NativeCompositionTracer) CloseGoroutine() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closeGoroutine
+}
+
+func (c *NativeCompositionTracer) Retry(ctx context.Context) (libpf.TraceDefinitionObservation, error) {
+	return c.tracer.TraceDefinitionFinal(ctx)
+}
+
+func (c *NativeCompositionTracer) Abandoned(err error) bool {
+	return errors.Is(err, errTraceDefinitionSourceClosed)
+}
+
+func (c *NativeCompositionTracer) JoinReader(ctx context.Context) error {
+	select {
+	case <-c.tracer.traceReaderCounters.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Fixture-owned handles only, after real reader/consumer/enrichment joins.
+// This is not a change to Tracer.Close's production teardown contract.
+func (c *NativeCompositionTracer) ReleaseOriginalHandles(ctx context.Context) error {
+	if err := c.JoinReader(ctx); err != nil {
+		return err
+	}
+	if err := c.tracer.StopAuxiliary(ctx); err != nil {
+		return err
+	}
+	c.tracer.Close()
+	var failures []error
+	for name, program := range c.tracer.ebpfProgs {
+		if program.FD() >= 0 {
+			if err := program.Close(); err != nil {
+				failures = append(failures, fmt.Errorf("fixture program %s: %w", name, err))
+			}
+		}
+	}
+	for name, m := range c.tracer.ebpfMaps {
+		if m.FD() >= 0 {
+			if err := m.Close(); err != nil {
+				failures = append(failures, fmt.Errorf("fixture map %s: %w", name, err))
+			}
+		}
+	}
+	nativeCompositionTracers.Delete(c.tracer)
+	return errors.Join(failures...)
+}
+
+// These two calls are inserted only by the separately hashed native-only overlay.
+// The gate is before any syscall, under the actual sampling guard and authority.
+func nativeCompositionGuardEntered(t *Tracer) {
+	if raw, ok := nativeCompositionTracers.Load(t); ok {
+		c := raw.(*NativeCompositionTracer)
+		c.mu.Lock()
+		g := c.gate
+		c.mu.Unlock()
+		if g != nil {
+			g.once.Do(func() { close(g.entered) })
+			<-g.release
+		}
+	}
+}
+
+func nativeCompositionSampleReturned(t *Tracer, value *libpf.TraceDefinitionObservation, err *error) {
+	if raw, ok := nativeCompositionTracers.Load(t); ok {
+		c := raw.(*NativeCompositionTracer)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.samples++
+		c.last = *value
+		c.last.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), value.Rows...)
+		c.lastError = *err
+	}
+}
+
+// NativePIDPage0Observation is live, nonfinal telemetry, not process readiness.
+// Present means a covering-prefix LPM match, not literal dummy-entry publication.
+type NativePIDPage0Observation struct {
+	Binding libpf.TraceDefinitionBinding
+	MapID   uint32
+	Present bool
+}
+
+type nativePIDPage0State struct {
+	err                         error
+	sourceOriginal, mapOriginal bool
+	live                        bool
+	fd                          int
+	binding                     libpf.TraceDefinitionBinding
+}
+
+// Private call boundary: tests substitute scalar/map calls, never fabricated FDs.
+type nativePIDPage0View struct {
+	mu           *sync.Mutex
+	validate     func() error
+	state        func() nativePIDPage0State
+	checkBinding func() error
+	info         func() (traceDefinitionMapInfo, error)
+	lookup       func(support.PIDPage, *[16]byte) error
+}
+
+func nativePIDPage0Guard(state nativePIDPage0State, binding libpf.TraceDefinitionBinding) error {
+	if state.err != nil {
+		return state.err
+	}
+	if !state.sourceOriginal || !state.mapOriginal || state.fd < 0 {
+		return fmt.Errorf("PID-page0 original source/map unavailable: %w", unix.EBADF)
+	}
+	if !state.live {
+		return fmt.Errorf("PID-page0 original source is outside its live window")
+	}
+	return validateTraceDefinitionBinding(binding, state.binding)
+}
+
+func nativePIDPage0Key(pid uint32) (support.PIDPage, error) {
+	key := support.PIDPage{PrefixLen: support.BitWidthPID + support.BitWidthPage, Pid: bits.ReverseBytes32(pid), Page: 0}
+	if pid == 0 || unsafe.Sizeof(key) != 16 || key.PrefixLen != 96 {
+		return key, fmt.Errorf("invalid PID-page0 key ABI/host TGID")
+	}
+	return key, nil
+}
+
+func nativePIDPage0Layout(info traceDefinitionMapInfo) error {
+	if info.ID == 0 || info.Type != uint32(cebpf.LPMTrie) || info.KeySize != 16 || info.ValueSize != 16 || info.MaxEntries != 1<<20 || info.Flags != unix.BPF_F_NO_PREALLOC {
+		return fmt.Errorf("PID-page0 original map layout/identity mismatch")
+	}
+	return nil
+}
+
+func observeNativePIDPage0(view nativePIDPage0View) (NativePIDPage0Observation, error) {
+	var value NativePIDPage0Observation
+	if view.mu == nil || view.validate == nil || view.state == nil || view.checkBinding == nil || view.info == nil || view.lookup == nil {
+		return value, fmt.Errorf("PID-page0 original observation unavailable")
+	}
+	// Validate may take independent locks; never run it under the source guard.
+	if err := view.validate(); err != nil {
+		return value, err
+	}
+	var binding libpf.TraceDefinitionBinding
+	fd, bound := -1, false
+	probeErr := func() error {
+		view.mu.Lock()
+		defer view.mu.Unlock()
+		state := view.state()
+		if err := nativePIDPage0Guard(state, state.binding); err != nil {
+			return err
+		}
+		binding, fd, bound = state.binding, state.fd, true
+		if err := view.checkBinding(); err != nil {
+			return err
+		}
+		info, err := view.info()
+		if err != nil {
+			return err
+		}
+		if err := nativePIDPage0Layout(info); err != nil {
+			return err
+		}
+		key, err := nativePIDPage0Key(binding.HostTGID)
+		if err != nil {
+			return err
+		}
+		var discarded [16]byte
+		// ONLY this selected lookup's typed miss means absence.
+		lookupErr := view.lookup(key, &discarded)
+		if lookupErr != nil && !errors.Is(lookupErr, cebpf.ErrKeyNotExist) {
+			return lookupErr
+		}
+		value = NativePIDPage0Observation{Binding: binding, MapID: info.ID, Present: lookupErr == nil}
+		return nil
+	}()
+	postErr := view.validate()
+	// No Info, lookup or other syscall in this second guarded recheck.
+	guardErr := func() error {
+		view.mu.Lock()
+		defer view.mu.Unlock()
+		state := view.state()
+		want := state.binding
+		if bound {
+			want = binding
+		}
+		if err := nativePIDPage0Guard(state, want); err != nil {
+			return err
+		}
+		if bound && state.fd != fd {
+			return fmt.Errorf("PID-page0 original map FD changed: %w", unix.EBADF)
+		}
+		return nil
+	}()
+	if err := errors.Join(probeErr, postErr, guardErr); err != nil {
+		return NativePIDPage0Observation{}, err
+	}
+	return value, nil
+}
+
+// ObservePIDPage0 borrows Run's actual map during the existing live test window.
+// It neither enters final readout nor creates/owns/closes any native handle.
+func (c *NativeCompositionTracer) ObservePIDPage0() (NativePIDPage0Observation, error) {
+	if c == nil || c.tracer == nil || c.pidPage0Source == nil {
+		return NativePIDPage0Observation{}, fmt.Errorf("PID-page0 original source unavailable")
+	}
+	s := c.pidPage0Source
+	return observeNativePIDPage0(nativePIDPage0View{
+		mu: &s.mu,
+		validate: func() error {
+			if s.lifetime == nil {
+				return fmt.Errorf("PID-page0 original lifetime unavailable")
+			}
+			return s.lifetime.Validate()
+		},
+		state: func() nativePIDPage0State {
+			state := nativePIDPage0State{err: s.err, fd: -1}
+			if state.err != nil {
+				return state
+			}
+			state.sourceOriginal = c.tracer.definitionSource == s
+			state.mapOriginal = c.pidPage0Map != nil && c.tracer.ebpfMaps["pid_page_to_mapping_info"] == c.pidPage0Map
+			state.binding = s.binding
+			if d := c.tracer.traceReaderCounters.drain; d != nil {
+				state.live = c.tracer.traceReaderCounters.ready.Load() && !d.requested.Load() && !d.sourcesRetired.Load()
+			}
+			select {
+			case <-c.tracer.traceReaderCounters.done:
+				state.live = false
+			default:
+			}
+			if state.mapOriginal {
+				state.fd = c.pidPage0Map.FD()
+			}
+			return state
+		},
+		checkBinding: func() error { return s.checkBinding(c.tracer.ebpfMaps) },
+		info:         func() (traceDefinitionMapInfo, error) { return traceDefinitionInfo(c.pidPage0Map) },
+		lookup: func(key support.PIDPage, out *[16]byte) error {
+			return c.pidPage0Map.Lookup(unsafe.Pointer(&key), out)
+		},
+	})
+}

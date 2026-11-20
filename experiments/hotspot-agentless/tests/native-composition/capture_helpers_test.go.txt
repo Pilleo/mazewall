@@ -1,0 +1,873 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package capture
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	ebpfoperator "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer/otel"
+	"go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+	"go.opentelemetry.io/otel/metric/noop"
+	"golang.org/x/sys/unix"
+	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
+)
+
+var nativeCompositionMetrics sync.Once
+
+const compositionMetadataSamples = 8
+const compositionMetadataTextLimit = 64
+
+type compositionOutputMetadata struct {
+	SessionID, EventID                            string
+	PID, TID                                      uint32
+	Birth, CorrelationID                          uint64
+	IdentityTruncated, EvidenceSeen               bool
+	Attribution, Reason                           string
+	EvidenceTruncated                             bool
+	CaptureBootNS                                 uint64
+	CaptureBootNSPresent, DetailAvailable         bool
+	HotSpotIdentityPresent                        bool
+	HotSpotState, HotSpotProfile                  string
+	HotSpotStatePresent, HotSpotProfilePresent    bool
+	HotSpotEpoch                                  uint64
+	HotSpotEpochPresent                           bool
+	HotSpotReadError                              int32
+	HotSpotReadErrorPresent, HotSpotTextTruncated bool
+}
+
+func (m compositionOutputMetadata) String() string {
+	return fmt.Sprintf("{session=%q event=%q pid=%d tid=%d birth=%d correlation_id=%d identity_truncated=%t evidence_seen=%t attribution=%q reason=%q evidence_truncated=%t detail_available=%t capture_boot_ns_present=%t capture_boot_ns=%d hotspot_identity_present=%t hotspot_state_present=%t hotspot_state=%q hotspot_profile_present=%t hotspot_profile=%q hotspot_epoch_present=%t hotspot_epoch=%d hotspot_read_error_present=%t hotspot_read_error=%d hotspot_text_truncated=%t}", m.SessionID, m.EventID, m.PID, m.TID, m.Birth, m.CorrelationID, m.IdentityTruncated, m.EvidenceSeen, m.Attribution, m.Reason, m.EvidenceTruncated, m.DetailAvailable, m.CaptureBootNSPresent, m.CaptureBootNS, m.HotSpotIdentityPresent, m.HotSpotStatePresent, m.HotSpotState, m.HotSpotProfilePresent, m.HotSpotProfile, m.HotSpotEpochPresent, m.HotSpotEpoch, m.HotSpotReadErrorPresent, m.HotSpotReadError, m.HotSpotTextTruncated)
+}
+
+type compositionOutputCounts struct {
+	Ready, Event, Enrichment, Recovery, Summary, Other, DecodeError uint64
+	Overflow                                                        bool
+	ZeroReference, NonzeroReference, MissingReferenceField          uint64
+	ReasonMissingReference, ReasonOther, ReasonEmpty                uint64
+	MetadataDecodeError, MetadataOversize, MetadataMissingEvidence  uint64
+	MetadataUnassociatedEvent, MetadataUnmatchedEnrichment          uint64
+	MetadataDuplicateEvent, MetadataDuplicateEvidence               uint64
+	MetadataDetailDecodeError                                       uint64
+	MetadataUsed                                                    int
+	MetadataOverflow                                                bool
+	Metadata                                                        [compositionMetadataSamples]compositionOutputMetadata
+}
+
+type compositionOutput struct {
+	mu         sync.Mutex
+	pending    []byte
+	ready      chan struct{}
+	once       sync.Once
+	diagnostic bool
+	counts     compositionOutputCounts
+}
+
+func (w *compositionOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pending = append(w.pending, p...)
+	for {
+		i := bytes.IndexByte(w.pending, '\n')
+		if i < 0 {
+			break
+		}
+		var record struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(w.pending[:i], &record); err != nil {
+			if w.diagnostic {
+				w.diagnosticIncrement(&w.counts.DecodeError)
+			}
+			return 0, err
+		}
+		if w.diagnostic {
+			counter := &w.counts.Other
+			switch record.Kind {
+			case "collector_ready":
+				counter = &w.counts.Ready
+			case "event":
+				counter = &w.counts.Event
+			case "enrichment":
+				counter = &w.counts.Enrichment
+			case "recovery":
+				counter = &w.counts.Recovery
+			case "session_summary":
+				counter = &w.counts.Summary
+			}
+			w.diagnosticIncrement(counter)
+			w.diagnosticRecord(record.Kind, w.pending[:i])
+		}
+		if record.Kind == "collector_ready" {
+			w.once.Do(func() { close(w.ready) })
+		}
+		w.pending = w.pending[i+1:]
+	}
+	return len(p), nil
+}
+
+// Only bounded metadata is decoded; the original kind-only writer contract is unchanged.
+func (w *compositionOutput) diagnosticRecord(kind string, data []byte) {
+	if kind != "event" && kind != "enrichment" {
+		return
+	}
+	if len(data) > nativeJoinedDiagnosticTextLimit {
+		w.diagnosticIncrement(&w.counts.MetadataOversize)
+		return
+	}
+	var record struct {
+		SessionID string `json:"session_id"`
+		EventID   string `json:"event_id"`
+		Event     *struct {
+			SessionID     string  `json:"session_id"`
+			EventID       string  `json:"event_id"`
+			PID           uint32  `json:"host_pid"`
+			TID           uint32  `json:"host_tid"`
+			Birth         uint64  `json:"process_start_ticks"`
+			CorrelationID *uint64 `json:"correlation_id"`
+		} `json:"event"`
+		Evidence *struct {
+			Attribution string `json:"attribution"`
+			Reason      string `json:"reason"`
+		} `json:"evidence"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		w.diagnosticIncrement(&w.counts.MetadataDecodeError)
+		return
+	}
+	if kind == "event" {
+		if record.Event == nil || record.Event.CorrelationID == nil {
+			w.diagnosticIncrement(&w.counts.MissingReferenceField)
+			return
+		}
+		if *record.Event.CorrelationID == 0 {
+			w.diagnosticIncrement(&w.counts.ZeroReference)
+		} else {
+			w.diagnosticIncrement(&w.counts.NonzeroReference)
+		}
+		if record.SessionID == "" || record.EventID == "" || record.Event.SessionID != record.SessionID || record.Event.EventID != record.EventID || record.Event.PID == 0 || record.Event.TID == 0 || record.Event.Birth == 0 {
+			w.diagnosticIncrement(&w.counts.MetadataUnassociatedEvent)
+			return
+		}
+		for i := 0; i < w.counts.MetadataUsed; i++ {
+			m := &w.counts.Metadata[i]
+			if !m.IdentityTruncated && m.SessionID == record.SessionID && m.EventID == record.EventID {
+				w.diagnosticIncrement(&w.counts.MetadataDuplicateEvent)
+				return
+			}
+		}
+		if w.counts.MetadataUsed == len(w.counts.Metadata) {
+			w.counts.MetadataOverflow = true
+			return
+		}
+		m := &w.counts.Metadata[w.counts.MetadataUsed]
+		var sessionTruncated, eventTruncated bool
+		m.SessionID, sessionTruncated = compositionMetadataText(record.SessionID)
+		m.EventID, eventTruncated = compositionMetadataText(record.EventID)
+		m.IdentityTruncated = sessionTruncated || eventTruncated
+		m.PID, m.TID, m.Birth, m.CorrelationID = record.Event.PID, record.Event.TID, record.Event.Birth, *record.Event.CorrelationID
+		w.counts.MetadataUsed++
+		w.diagnosticEventDetail(m, data)
+		return
+	}
+	if record.Evidence == nil {
+		w.diagnosticIncrement(&w.counts.MetadataMissingEvidence)
+		return
+	}
+	switch record.Evidence.Reason {
+	case "missing_reference":
+		w.diagnosticIncrement(&w.counts.ReasonMissingReference)
+	case "":
+		w.diagnosticIncrement(&w.counts.ReasonEmpty)
+	default:
+		w.diagnosticIncrement(&w.counts.ReasonOther)
+	}
+	for i := 0; i < w.counts.MetadataUsed; i++ {
+		m := &w.counts.Metadata[i]
+		if m.IdentityTruncated || m.SessionID != record.SessionID || m.EventID != record.EventID {
+			continue
+		}
+		if m.EvidenceSeen {
+			w.diagnosticIncrement(&w.counts.MetadataDuplicateEvidence)
+			return
+		}
+		var attributionTruncated, reasonTruncated bool
+		m.Attribution, attributionTruncated = compositionMetadataText(record.Evidence.Attribution)
+		m.Reason, reasonTruncated = compositionMetadataText(record.Evidence.Reason)
+		m.EvidenceTruncated = attributionTruncated || reasonTruncated
+		m.EvidenceSeen = true
+		return
+	}
+	w.diagnosticIncrement(&w.counts.MetadataUnmatchedEnrichment)
+}
+
+// A malformed optional detail never erases the existing reference/association sample.
+func (w *compositionOutput) diagnosticEventDetail(m *compositionOutputMetadata, data []byte) {
+	var record struct {
+		Event struct {
+			CaptureBootNS   *uint64 `json:"capture_boot_ns"`
+			HotSpotIdentity *struct {
+				State     *string `json:"state"`
+				Profile   *string `json:"profile"`
+				Epoch     *uint64 `json:"epoch"`
+				ReadError *int32  `json:"read_error"`
+			} `json:"hotspot_identity"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		w.diagnosticIncrement(&w.counts.MetadataDetailDecodeError)
+		return
+	}
+	m.DetailAvailable = true
+	if record.Event.CaptureBootNS != nil {
+		m.CaptureBootNS, m.CaptureBootNSPresent = *record.Event.CaptureBootNS, true
+	}
+	id := record.Event.HotSpotIdentity
+	if id == nil {
+		return
+	}
+	m.HotSpotIdentityPresent = true
+	if id.State != nil {
+		var truncated bool
+		m.HotSpotState, truncated = compositionMetadataText(*id.State)
+		m.HotSpotStatePresent, m.HotSpotTextTruncated = true, truncated
+	}
+	if id.Profile != nil {
+		var truncated bool
+		m.HotSpotProfile, truncated = compositionMetadataText(*id.Profile)
+		m.HotSpotProfilePresent = true
+		m.HotSpotTextTruncated = m.HotSpotTextTruncated || truncated
+	}
+	if id.Epoch != nil {
+		m.HotSpotEpoch, m.HotSpotEpochPresent = *id.Epoch, true
+	}
+	if id.ReadError != nil {
+		m.HotSpotReadError, m.HotSpotReadErrorPresent = *id.ReadError, true
+	}
+}
+
+func compositionMetadataText(text string) (string, bool) {
+	truncated := len(text) > compositionMetadataTextLimit
+	if truncated {
+		text = text[:compositionMetadataTextLimit]
+	}
+	return strings.Clone(text), truncated
+}
+
+// Caller holds the existing output mutex; diagnostic counters never wrap.
+func (w *compositionOutput) diagnosticIncrement(counter *uint64) {
+	if *counter == ^uint64(0) {
+		w.counts.Overflow = true
+		return
+	}
+	*counter += 1
+}
+
+func (w *compositionOutput) diagnosticCounts() (compositionOutputCounts, bool) {
+	if !w.mu.TryLock() {
+		return compositionOutputCounts{}, false
+	}
+	defer w.mu.Unlock()
+	return w.counts, true
+}
+
+type compositionFixture struct {
+	ctx                    context.Context
+	requestStop            context.CancelFunc
+	run                    *captureRun
+	done                   chan struct{}
+	runError               error
+	output                 *compositionOutput
+	lastDiagnosticSnapshot string
+	pidPage0Probe          nativePIDPage0ProbeState
+	resolver               *otel.NativeCompositionResolver
+	events                 *ebpfoperator.NativeCompositionEvents
+	child                  *compositionChild
+	runAttempted           bool
+	gates                  []func()
+	cleanupOnce            sync.Once
+	cleanupErr             error
+	cancelWork             context.CancelFunc
+}
+
+const nativeJoinedDiagnosticTextLimit = 16 << 10
+
+func nativeJoinedDiagnosticText(text string) (string, int, bool) {
+	n := len(text)
+	if n > nativeJoinedDiagnosticTextLimit {
+		return text[:nativeJoinedDiagnosticTextLimit], n, true
+	}
+	return text, n, false
+}
+
+// The error callback is readable only after done publishes the Run result.
+func nativeHeldRunFailure(ctx context.Context, done <-chan struct{}, runError func() error) error {
+	select {
+	case <-done:
+		return errors.Join(errors.New("actual Run completed before held reporter"), runError())
+	default:
+		return ctx.Err()
+	}
+}
+
+func nativeHeldRunCompletion(done <-chan struct{}, runError func() error) (bool, error) {
+	select {
+	case <-done:
+		if err := runError(); err != nil {
+			return true, fmt.Errorf("run_error_nil=false: %w", err)
+		}
+		return true, errors.New("run_error_nil=true")
+	default:
+		return false, nil
+	}
+}
+
+func nativeJoinedFatal(t *testing.T, stage string, err error) {
+	t.Helper()
+	text, size, truncated := nativeJoinedDiagnosticText(fmt.Sprint(err))
+	t.Fatalf("joined diagnostic %s error_bytes=%d error_truncated=%t: %s", stage, size, truncated, text)
+}
+
+func (f *compositionFixture) nativeJoinedStage(t *testing.T, stage string) {
+	t.Helper()
+	now, clockErr := compositionNow()
+	deadline, hasDeadline := f.ctx.Deadline()
+	remaining := time.Duration(0)
+	if hasDeadline {
+		remaining = time.Until(deadline)
+	}
+	counts, available := f.output.diagnosticCounts()
+	output, outputSize, outputTruncated := nativeJoinedDiagnosticText(fmt.Sprintf("%+v", counts))
+	runState := nativeHeldRunFailure(f.ctx, f.done, func() error { return f.runError })
+	text, size, truncated := nativeJoinedDiagnosticText(fmt.Sprint(runState))
+	t.Logf("joined diagnostic stage=%s mono_ns=%d clock_error=%v deadline=%v has_deadline=%t remaining=%s context_error=%v output_available=%t output_bytes=%d output_truncated=%t output=%s run_state_bytes=%d run_state_truncated=%t run_state=%s", stage, now, clockErr, deadline, hasDeadline, remaining, f.ctx.Err(), available, outputSize, outputTruncated, output, size, truncated, text)
+}
+
+type nativePIDPage0ProbeState struct {
+	points uint8
+	first  tracer.NativePIDPage0Observation
+}
+
+type nativePIDPage0ProbeView struct {
+	running func() error
+	now     func() (uint64, error)
+	observe func() (tracer.NativePIDPage0Observation, error)
+}
+
+type nativePIDPage0Diagnostic struct {
+	value      tracer.NativePIDPage0Observation
+	begin, end uint64
+	err        error
+}
+
+func (d nativePIDPage0Diagnostic) String() string {
+	if d.err != nil {
+		return fmt.Sprintf("{status=UNAVAILABLE error=%q}", d.err.Error())
+	}
+	if d.value.MapID == 0 || d.begin == 0 || d.end < d.begin {
+		return "{status=UNAVAILABLE error=invalid_PID_page0_diagnostic}"
+	}
+	status := "ABSENT"
+	if d.value.Present {
+		status = "PRESENT"
+	}
+	return fmt.Sprintf("{status=%s pid_page0_present=%t map_id=%d pid_probe_begin_boot_ns=%d pid_probe_end_boot_ns=%d clock=CLOCK_BOOTTIME covering_prefix_match_only=true}", status, d.value.Present, d.value.MapID, d.begin, d.end)
+}
+
+func nativePIDPage0Probe(stage string, snapshot tracer.NativeCompositionSnapshot, snapshotErr error, state *nativePIDPage0ProbeState, view nativePIDPage0ProbeView) nativePIDPage0Diagnostic {
+	unavailable := func(err error) nativePIDPage0Diagnostic { return nativePIDPage0Diagnostic{err: err} }
+	if state == nil || view.running == nil || view.now == nil || view.observe == nil {
+		return unavailable(fmt.Errorf("PID-page0 diagnostic unavailable"))
+	}
+	if !((state.points == 0 && stage == "before_hold") || (state.points == 1 && stage == "after_burst")) {
+		return unavailable(fmt.Errorf("PID-page0 diagnostic outside its two live points"))
+	}
+	// Reserve the scheduled point even on failure; never retry to fill a quota.
+	state.points++
+	if err := errors.Join(snapshotErr, snapshot.SourceError); err != nil {
+		return unavailable(err)
+	}
+	if snapshot.Retired || snapshot.Requested || snapshot.ReaderJoined {
+		return unavailable(fmt.Errorf("PID-page0 diagnostic source is no longer in the live window"))
+	}
+	if err := view.running(); err != nil {
+		return unavailable(err)
+	}
+	begin, err := view.now()
+	if err != nil {
+		return unavailable(err)
+	}
+	if begin == 0 {
+		return unavailable(fmt.Errorf("PID-page0 BOOTTIME begin unavailable"))
+	}
+	value, probeErr := view.observe()
+	end, clockErr := view.now()
+	runErr := view.running()
+	var validityErr error
+	if end == 0 || end < begin {
+		validityErr = fmt.Errorf("PID-page0 BOOTTIME bracket invalid")
+	}
+	if probeErr == nil {
+		if value.MapID == 0 || value.Binding != snapshot.Binding {
+			validityErr = errors.Join(validityErr, fmt.Errorf("PID-page0 phase binding/map identity mismatch"))
+		}
+		if state.first.MapID != 0 && (value.MapID != state.first.MapID || value.Binding != state.first.Binding) {
+			validityErr = errors.Join(validityErr, fmt.Errorf("PID-page0 original map/binding changed between phases"))
+		}
+	}
+	if err := errors.Join(probeErr, clockErr, runErr, validityErr); err != nil {
+		return unavailable(err)
+	}
+	// Only this existing test goroutine commits the first fully valid identity.
+	if state.first.MapID == 0 {
+		state.first = value
+	}
+	return nativePIDPage0Diagnostic{value: value, begin: begin, end: end}
+}
+
+func (f *compositionFixture) nativeJoinedSnapshot(t *testing.T, stage string) error {
+	t.Helper()
+	running := func() error { return nativeHeldRunFailure(f.ctx, f.done, func() error { return f.runError }) }
+	if err := running(); err != nil {
+		text, size, truncated := nativeJoinedDiagnosticText(fmt.Sprintf("pid_page0=%s", nativePIDPage0Diagnostic{err: err}))
+		t.Logf("joined diagnostic snapshot=%s nonfinal=true bytes=%d truncated=%t %s", stage, size, truncated, text)
+		f.lastDiagnosticSnapshot = fmt.Sprintf("stage=%s bytes=%d truncated=%t %s", stage, size, truncated, text)
+		return err
+	}
+	// These live-phase reads precede sample gates; never retry from failure/cleanup.
+	f.nativeJoinedStage(t, stage+"_snapshot_start")
+	var value tracer.NativeCompositionSnapshot
+	snapshotErr := running()
+	if snapshotErr == nil {
+		value, snapshotErr = f.resolver.Tracer.Snapshot()
+	}
+	pid := nativePIDPage0Probe(stage, value, snapshotErr, &f.pidPage0Probe, nativePIDPage0ProbeView{
+		running: running,
+		now:     (LinuxBootClock{}).Now,
+		observe: f.resolver.Tracer.ObservePIDPage0,
+	})
+	text, size, truncated := nativeJoinedDiagnosticText(fmt.Sprintf("binding=%+v reader=%+v retired=%t requested=%t reader_joined=%t source_error=%v snapshot_error=%v rows=%+v pid_page0=%s", value.Binding, value.Reader, value.Retired, value.Requested, value.ReaderJoined, value.SourceError, snapshotErr, value.Rows, pid))
+	t.Logf("joined diagnostic snapshot=%s nonfinal=true bytes=%d truncated=%t %s", stage, size, truncated, text)
+	f.lastDiagnosticSnapshot = fmt.Sprintf("stage=%s bytes=%d truncated=%t %s", stage, size, truncated, text)
+	if pid.err != nil {
+		return fmt.Errorf("diagnostic original snapshot %s: %w", stage, pid.err)
+	}
+	return nil
+}
+
+func (f *compositionFixture) nativeJoinedFailure(t *testing.T) {
+	t.Helper()
+	buffer := make([]byte, 1<<20)
+	n := runtime.Stack(buffer, true)
+	f.nativeJoinedStage(t, "held_preparation_failed")
+	// The done close publishes the Run-owned boundary without a concurrent read.
+	select {
+	case <-f.done:
+		if f.run != nil && f.run.nativeRunBoundary.available {
+			v := f.run.nativeRunBoundary
+			watch := "unavailable_not_done"
+			if v.watchDone {
+				watch = fmt.Sprintf("%v", v.watchErr)
+			}
+			text, size, truncated := nativeJoinedDiagnosticText(fmt.Sprintf("run_start=%s hard_deadline=%s observed_at=%s clock=go_time_monotonic_when_retained request_err=%v request_cause=%v run_context_err=%v run_cause=%v owned_err=%v owned_cause=%v fatal_err=%v run_err=%v event_err=%v watch_done=%t watch_err=%s unordered_nonfinal=true", v.runStart, v.hardDeadline, v.observedAt, v.requestErr, v.requestCause, v.runContextErr, v.runCause, v.ownedErr, v.ownedCause, v.fatalErr, v.runErr, v.eventErr, v.watchDone, watch))
+			t.Logf("joined diagnostic run_boundary bytes=%d truncated=%t %s", size, truncated, text)
+		} else {
+			t.Log("joined diagnostic run_boundary unavailable_before_boundary")
+		}
+	default:
+		t.Log("joined diagnostic run_boundary unavailable_run_not_done")
+	}
+	t.Logf("joined diagnostic last_nonfinal_snapshot=%s", f.lastDiagnosticSnapshot)
+	t.Logf("joined diagnostic failure_stack bytes=%d truncated=%t\n%s", n, n == len(buffer), buffer[:n])
+}
+
+func nativeAwait(t *testing.T, ctx context.Context, description string, condition func() bool) {
+	t.Helper()
+	for !condition() {
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("%s: %v", description, err)
+		}
+		runtime.Gosched()
+	}
+}
+
+const nativeAwaitTimeoutHeaderMax = 256
+
+type nativeAwaitObservation struct {
+	names         []string
+	matched       bool
+	rawTruncated  bool
+	raw           []byte
+	runDoneKnown  bool
+	runDoneClosed bool
+}
+
+func nativeAwaitReporting(t *testing.T, ctx context.Context, description string, observe func() (bool, nativeAwaitObservation)) {
+	t.Helper()
+	for {
+		matched, last := observe()
+		if matched {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("%s: %v\n%s", description, err, formatNativeAwaitTimeout(description, last))
+		}
+		runtime.Gosched()
+	}
+}
+
+func formatNativeAwaitTimeout(stage string, obs nativeAwaitObservation) string {
+	stageBytes := []byte(stage)
+	for i, b := range stageBytes {
+		if b < 0x20 || b > 0x7e || b == '"' || b == '\\' {
+			stageBytes[i] = '?'
+		}
+	}
+	if len(stageBytes) > 80 {
+		stageBytes = stageBytes[:80]
+	}
+	var body string
+	absent := false
+	switch {
+	case len(obs.raw) == 0:
+		body, absent = "snapshot_absent\n", true
+	case obs.rawTruncated:
+		body = "incomplete_snapshot_prefix\n" + string(obs.raw)
+	default:
+		var relevant []string
+		for _, stack := range strings.Split(string(obs.raw), "\n\n") {
+			keep := strings.Contains(stack, "lockSlow") || strings.Contains(stack, ".Lock(")
+			for _, name := range obs.names {
+				keep = keep || strings.Contains(stack, name)
+			}
+			if keep {
+				relevant = append(relevant, stack)
+			}
+		}
+		if len(relevant) == 0 {
+			absent = true
+			body = "relevant_goroutine_absent\n" + string(obs.raw)
+		} else {
+			body = strings.Join(relevant, "\n\n")
+		}
+	}
+	cut := len(body) > nativeJoinedDiagnosticTextLimit
+	if cut {
+		body = body[:nativeJoinedDiagnosticTextLimit]
+	}
+	header := fmt.Sprintf("native_await_timeout stage=\"%s\" matched=%t raw_truncated=%t raw_bytes=%d emitted_bytes=%d emit_truncated=%t relevant_absent=%t", stageBytes, obs.matched, obs.rawTruncated, len(obs.raw), len(body), cut, absent)
+	if obs.runDoneKnown {
+		state := "open"
+		if obs.runDoneClosed {
+			state = "closed"
+		}
+		header += " run_done=" + state
+	}
+	if len(header) > nativeAwaitTimeoutHeaderMax {
+		header = header[:nativeAwaitTimeoutHeaderMax]
+	}
+	return header + "\n" + body
+}
+
+func nativeBlockedStack(functions ...string) bool {
+	matched, _ := nativeObserveBlockedStack(functions...)
+	return matched
+}
+
+func nativeObserveBlockedStack(functions ...string) (bool, nativeAwaitObservation) {
+	buffer := make([]byte, 1<<20)
+	n := runtime.Stack(buffer, true)
+	truncated := n == len(buffer)
+	matched := nativeBlockedStackMatch(buffer[:n], truncated, functions...)
+	return matched, nativeAwaitObservation{names: append([]string(nil), functions...), matched: matched, rawTruncated: truncated, raw: buffer[:n]}
+}
+
+func nativeBlockedStackMatch(snapshot []byte, truncated bool, functions ...string) bool {
+	if truncated {
+		return false
+	}
+	for _, stack := range strings.Split(string(snapshot), "\n\n") {
+		if !strings.Contains(stack, "lockSlow") && !strings.Contains(stack, ".Lock(") {
+			continue
+		}
+		matched := true
+		for _, name := range functions {
+			matched = matched && strings.Contains(stack, name)
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeReaderHeld() bool {
+	buffer := make([]byte, 1<<20)
+	n := runtime.Stack(buffer, true)
+	if n == len(buffer) {
+		return false
+	}
+	for _, stack := range strings.Split(string(buffer[:n]), "\n\n") {
+		if strings.Contains(stack, "tracer.sendTrace") && (strings.Contains(stack, "[select]") || strings.Contains(stack, "[chan send]")) {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeEnv(t *testing.T, name string) string {
+	t.Helper()
+	value := os.Getenv(name)
+	if value == "" {
+		t.Fatalf("required reviewed native selection %s is missing (not a skip)", name)
+	}
+	return value
+}
+
+func compositionTarget(pid int) (wire.Target, error) {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return wire.Target{}, err
+	}
+	ticks, err := preflight.ParseStartTicks(string(stat))
+	if err != nil {
+		return wire.Target{}, err
+	}
+	cgroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return wire.Target{}, err
+	}
+	var path string
+	for _, line := range strings.Split(string(cgroup), "\n") {
+		if p, ok := strings.CutPrefix(line, "0::"); ok {
+			if path != "" || !filepath.IsAbs(p) || filepath.Clean(p) != p {
+				return wire.Target{}, fmt.Errorf("invalid unified cgroup %q", p)
+			}
+			path = p
+		}
+	}
+	if path == "" {
+		return wire.Target{}, fmt.Errorf("unified cgroup unavailable")
+	}
+	var cg, ns unix.Stat_t
+	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", path), &cg); err != nil {
+		return wire.Target{}, err
+	}
+	if err := unix.Stat(fmt.Sprintf("/proc/%d/ns/mnt", pid), &ns); err != nil {
+		return wire.Target{}, err
+	}
+	return wire.Target{PID: uint32(pid), StartTicks: ticks, CgroupID: cg.Ino, MountNS: ns.Ino}, nil
+}
+
+func newCompositionFixture(t *testing.T) *compositionFixture {
+	t.Helper()
+	if compositionCases[t.Name()] == 0 || os.Getenv("MW_NATIVE_COMPOSITION_CASE") != t.Name() {
+		t.Fatal("exact selected native leaf required before acquiring pipes")
+	}
+	f := newCompositionOwner(t, t.Name())
+	if GadgetPatchSHA == "" {
+		t.Fatal("native binary must be built with actual selected patch-id, not assigned by the fixture")
+	}
+	java := nativeEnv(t, "MW_NATIVE_COMPOSITION_JAVA")
+	if !filepath.IsAbs(java) {
+		t.Fatal("selected Java path must be absolute")
+	}
+	source, err := filepath.Abs("../../tests/native-composition/DefinitionCompositionTarget.java")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(java, "-Xms32m", "-Xmx128m", "-XX:+UseG1GC", source)
+	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+	if err := f.child.launch(command); err != nil {
+		t.Fatal(err)
+	}
+	target := f.child.target
+	current, err := compositionTarget(command.Process.Pid)
+	if err != nil || current != target {
+		t.Fatal("registered target changed", current, target, err)
+	}
+	cfg := Config{profile: wire.Observed25, ExpectedTarget: target, PID: int(target.PID), DrainFull: true, Image: nativeEnv(t, "MW_NATIVE_COMPOSITION_IMAGE"), Store: nativeEnv(t, "MW_NATIVE_COMPOSITION_STORE")}
+	nativeCompositionMetrics.Do(func() { metrics.Start(noop.Meter{}) })
+	request, stop := context.WithCancel(f.ctx)
+	var stopOnce sync.Once
+	f.requestStop = func() { stopOnce.Do(stop) }
+	w := &compositionOutput{ready: make(chan struct{}), diagnostic: t.Name() == "TestKernelCaptureDefinitionComposition/joined" || t.Name() == "TestKernelCaptureDefinitionComposition/direct_drain"}
+	f.output = w
+	if err := f.child.work(); err != nil {
+		t.Fatal(err)
+	}
+	f.run = &captureRun{}
+	f.runAttempted = true
+	go func() {
+		if err := f.child.work(); err != nil {
+			f.runError = err
+		} else {
+			f.runError = f.run.run(request, cfg, w)
+		}
+		close(f.done)
+	}()
+	select {
+	case <-w.ready:
+		if w.diagnostic {
+			f.nativeJoinedStage(t, "ready_observed")
+		}
+	case <-f.done:
+		t.Fatal("actual capture failed before readiness", f.runError)
+	case <-f.ctx.Done():
+		t.Fatal("actual capture readiness", f.ctx.Err())
+	}
+	f.resolver, err = otel.NativeCompositionOriginalResolver(f.run.symbolizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.events, err = ebpfoperator.NativeCompositionOriginalEvents(f.run.gadget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := f.resolver.Lifetime()
+	if l.HostTGID() != target.PID || l.Birth() != target.StartTicks || l.Validate() != nil {
+		t.Fatal("constructor did not retain the actual Run lifetime")
+	}
+	t.Logf("actual Run target=%+v session=%s", target, l.Session())
+	return f
+}
+
+func (f *compositionFixture) burst(t *testing.T) {
+	t.Helper()
+	if err := f.child.burst(); err != nil {
+		f.child.fail(err)
+		t.Fatal(err)
+	}
+}
+
+func newCompositionOwner(t *testing.T, selected string) *compositionFixture {
+	t.Helper()
+	f := &compositionFixture{child: newCompositionChild(t, selected), done: make(chan struct{})}
+	// The sole cleanup is installed before transport setup and the first pipe.
+	t.Cleanup(func() {
+		if err := f.cleanup(); err != nil {
+			t.Error("composition cleanup", err)
+		}
+	})
+	d, err := compositionRemaining(f.child.T)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx, f.cancelWork = context.WithTimeout(context.Background(), d)
+	go func() {
+		select {
+		case <-f.child.failed:
+			f.cancelWork()
+		case <-f.ctx.Done():
+		}
+	}()
+	if err = f.child.transport(); err != nil {
+		f.child.fail(err)
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f *compositionFixture) retireNative() error {
+	for i := len(f.gates) - 1; i >= 0; i-- {
+		f.gates[i]()
+	}
+	if f.requestStop != nil {
+		f.requestStop()
+	}
+	if !f.runAttempted {
+		return nil
+	}
+	d, err := compositionRemaining(f.child.C)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	select {
+	case <-f.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if f.run == nil || f.resolver == nil || f.events == nil || f.run.enrichment == nil {
+		return fmt.Errorf("unknown partial Run ownership")
+	}
+	if err = f.resolver.Tracer.JoinReader(ctx); err != nil {
+		return err
+	}
+	if err = f.resolver.JoinConsumer(ctx); err != nil {
+		return err
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- f.run.enrichment.Finish() }()
+	select {
+	case err = <-finished:
+		var nativeErr syscall.Errno
+		if err != nil && (errors.As(err, &nativeErr) || (!errors.Is(err, context.Canceled) && !f.resolver.Tracer.Abandoned(err))) {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err = f.events.CleanupFailed(ctx); err != nil {
+		return err
+	}
+	if err = f.resolver.Tracer.ReleaseOriginalHandles(ctx); err != nil {
+		return err
+	}
+	// These cells exist only after the separately bound native-only patch.
+	barrier := &f.run.nativeBarrierClose
+	pidfd := &f.run.nativePidfdClose
+	if barrier.state == nativeCloseRetained {
+		if _, err = compositionRemaining(f.child.C); err != nil {
+			return err
+		}
+		barrier.record(f.run.barrier.Close())
+	}
+	if pidfd.state == nativeCloseRetained {
+		if _, err = compositionRemaining(f.child.C); err != nil {
+			return err
+		}
+		pidfd.record(unix.Close(f.run.pidfd))
+	}
+	if barrier.state != nativeCloseClosed || pidfd.state != nativeCloseClosed {
+		return errors.Join(fmt.Errorf("original Run close not proven"), barrier.err, pidfd.err)
+	}
+	return nil
+}
+
+func (f *compositionFixture) cleanup() error {
+	f.cleanupOnce.Do(func() {
+		if f.cancelWork != nil {
+			defer f.cancelWork()
+		}
+		f.cleanupErr = f.child.finish(f.retireNative())
+	})
+	return f.cleanupErr
+}
+
+func (f *compositionFixture) result(t *testing.T) error {
+	t.Helper()
+	select {
+	case <-f.done:
+		return f.runError
+	case <-f.ctx.Done():
+		t.Fatal("actual Run did not return", f.ctx.Err())
+		return f.ctx.Err()
+	}
+}

@@ -16,6 +16,22 @@ import (
 	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
 )
 
+func verifyMappedJVMFile(proc string, selected mapping, file *os.File) error {
+	var st unix.Stat_t
+	if err := unix.Fstat(int(file.Fd()), &st); err != nil {
+		return err
+	}
+	// maps uses s_dev, while Btrfs stat uses a subvolume device; compare two stat identities.
+	var mapped unix.Stat_t
+	if err := unix.Stat(fmt.Sprintf("%s/map_files/%x-%x", proc, selected.start, selected.end), &mapped); err != nil {
+		return fmt.Errorf("stat mapped JVM file identity: %w", err)
+	}
+	if st.Ino != selected.inode || st.Ino != mapped.Ino || st.Dev != mapped.Dev {
+		return fmt.Errorf("mapped JVM file identity changed")
+	}
+	return nil
+}
+
 // Discover is read-only. The caller must own an exec barrier before calling it.
 func Discover(pid int, ticks uint64) (Target, error) {
 	return discoverProfile(pid, ticks, false)
@@ -66,12 +82,8 @@ func discoverProfile(pid int, ticks uint64, observed bool) (Target, error) {
 		return target, err
 	}
 	defer f.Close()
-	var st unix.Stat_t
-	if err = unix.Fstat(int(f.Fd()), &st); err != nil {
+	if err = verifyMappedJVMFile(fmt.Sprintf("/proc/%d", pid), *selected, f); err != nil {
 		return target, err
-	}
-	if st.Ino != selected.inode || unix.Major(st.Dev) != selected.major || unix.Minor(st.Dev) != selected.minor {
-		return target, fmt.Errorf("mapped JVM file identity changed")
 	}
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil {

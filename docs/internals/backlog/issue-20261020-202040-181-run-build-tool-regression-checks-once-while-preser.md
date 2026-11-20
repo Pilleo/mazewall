@@ -41,4 +41,13 @@ native checks, verifier inputs and failure handling.
 4. Scoped PR and real hosted timing/runner/memory/native evidence; merge only through approval path with remaining security rollout gaps explicit.
 
 ---
+## Repository-review coordination — 2026-11-04
+
+[BUILD-04](../reviews/2026-11-04-repository-review-findings.md#build-04) is owned by the
+existing buildSrc140 scope: the three Kotlin JUnit tests are omitted by the root bridge. This
+single-pass work and the proposed November2 smoke/full plan must preserve their real execution
+and failure propagation rather than calling Java-only selection exhaustive. No new optimization,
+threshold reduction or duplicate full-suite run was approved by the review.
+
+---
 <!-- id: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser  file: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md -->

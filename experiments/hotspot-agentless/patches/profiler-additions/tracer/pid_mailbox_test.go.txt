@@ -1,0 +1,1657 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"golang.org/x/sys/unix"
+)
+
+type testLifetime struct {
+	session     string
+	hostTGID    uint32
+	birth       uint64
+	validateErr error
+}
+
+func (l *testLifetime) Session() string  { return l.session }
+func (l *testLifetime) HostTGID() uint32 { return l.hostTGID }
+func (l *testLifetime) Birth() uint64    { return l.birth }
+func (l *testLifetime) Validate() error  { return l.validateErr }
+
+// gatePIDMap is a model of blocking map calls, not evidence about a kernel map.
+type gatePIDMap struct {
+	*fakePIDMap
+	block string
+	entered chan struct{}
+	release chan struct{}
+	nextCalls atomic.Int32
+	batchCalls atomic.Int32
+}
+
+func (f *gatePIDMap) wait(kind string) {
+	if f.block == kind {
+		close(f.entered)
+		<-f.release
+	}
+}
+
+func (f *gatePIDMap) NextKey(key, nextKeyOut any) error {
+	f.nextCalls.Add(1)
+	return f.fakePIDMap.NextKey(key, nextKeyOut)
+}
+
+func (f *gatePIDMap) Lookup(key, valueOut any) error {
+	f.wait("lookup")
+	return f.fakePIDMap.Lookup(key, valueOut)
+}
+
+func (f *gatePIDMap) Delete(key any) error {
+	f.wait("delete")
+	return f.fakePIDMap.Delete(key)
+}
+
+func (f *gatePIDMap) BatchLookupAndDelete(cursor *cebpf.MapBatchCursor, keysOut, valuesOut any, opts *cebpf.BatchOptions) (int, error) {
+	if f.batchCalls.Add(1) == 1 {
+		f.wait("batch")
+	}
+	return f.fakePIDMap.BatchLookupAndDelete(cursor, keysOut, valuesOut, opts)
+}
+
+func TestPIDProductionWrappersStopWithoutMapEffects(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		for _, reason := range []string{"cancel", "deadline", "seal"} {
+			t.Run(fmt.Sprintf("%v-%s", batch, reason), func(t *testing.T) {
+				f := &gatePIDMap{fakePIDMap: &fakePIDMap{}}
+				tr := &Tracer{pidEventsMapOverride: f}
+				if reason == "seal" {
+					tr.pidMailbox = &pidMailbox{normalWorkSealed: true}
+				} else if reason == "cancel" {
+					ctx, cancel := context.WithCancel(context.Background())
+					tr.auxiliaryScope = periodiccaller.NewOwnedScope(ctx, nil)
+					cancel()
+				} else {
+					ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+					defer cancel()
+					tr.auxiliaryScope = periodiccaller.NewOwnedScope(ctx, nil)
+				}
+				if batch { tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapBatch } else { tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapSingle }
+				keys := make([]libpf.PIDTID, 0)
+				if tr.pollAndEnqueuePIDEvents(context.Background(), &keys) { t.Fatal("closed poll continued") }
+				require.Zero(t, f.nextCalls.Load())
+				require.Zero(t, f.batchCalls.Load())
+			})
+		}
+	}
+}
+
+type changingPIDDeadline struct {
+	calls atomic.Int32
+	done chan struct{}
+}
+
+func (c *changingPIDDeadline) Deadline() (time.Time, bool) {
+	if c.calls.Add(1) == 1 { return time.Unix(1, 0), true }
+	return time.Now().Add(time.Hour), true
+}
+func (c *changingPIDDeadline) Done() <-chan struct{} { return c.done }
+func (c *changingPIDDeadline) Err() error { return nil }
+func (c *changingPIDDeadline) Value(any) any { return nil }
+
+func TestPIDWrapperKeepsOriginalExpiredDecision(t *testing.T) {
+	ctx := &changingPIDDeadline{done: make(chan struct{})}
+	scope := periodiccaller.NewOwnedScope(ctx, nil)
+	defer scope.Stop(context.Background())
+	f := &gatePIDMap{fakePIDMap: &fakePIDMap{}}
+	tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+	tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapSingle
+	keys := make([]libpf.PIDTID, 0)
+	if tr.pollAndEnqueuePIDEvents(context.Background(), &keys) { t.Fatal("expired gate decision was renewed") }
+	require.Zero(t, f.nextCalls.Load())
+	require.Equal(t, int32(1), ctx.calls.Load())
+}
+
+func TestPIDProductionEmptyNilPollIsNotStop(t *testing.T) {
+	f := &fakePIDMap{}
+	tr := &Tracer{pidEventsMapOverride: f}
+	tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapSingle
+	var keys []libpf.PIDTID
+	if !tr.pollAndEnqueuePIDEvents(context.Background(), &keys) { t.Fatal("successful empty poll stopped") }
+}
+
+func TestPIDProductionBatchUnsupportedFallsBack(t *testing.T) {
+	f := &gatePIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}, batchLookupDeleteErr: fmt.Errorf("batch: %w", unix.EOPNOTSUPP)}}
+	tr := &Tracer{pidEventsMapOverride: f, pidEvents: make(chan libpf.PIDTID, 1)}
+	tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapBatch
+	keys := make([]libpf.PIDTID, 0)
+	if !tr.pollAndEnqueuePIDEvents(context.Background(), &keys) { t.Fatal("eligible fallback stopped") }
+	require.Equal(t, int32(1), f.batchCalls.Load())
+	require.NotZero(t, f.nextCalls.Load())
+	require.Equal(t, []uint64{7}, f.deletedKeys)
+}
+
+func TestPIDBatchUnsupportedDoesNotFallbackAfterStop(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scope := periodiccaller.NewOwnedScope(parent, nil)
+	f := &gatePIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}, batchLookupDeleteErr: unix.EOPNOTSUPP}, block: "batch", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+	tr.monitorPIDEventsMapMethod = tr.monitorPIDEventsMapBatch
+	result := make(chan bool, 1)
+	require.True(t, scope.Go(func() { keys := make([]libpf.PIDTID, 0); result <- tr.pollAndEnqueuePIDEvents(context.Background(), &keys) }))
+	<-f.entered
+	cancel()
+	close(f.release)
+	if <-result { t.Fatal("stopped worker continued") }
+	require.Zero(t, f.nextCalls.Load())
+}
+
+type hostilePIDBatchError struct { called atomic.Bool }
+
+func (e *hostilePIDBatchError) Error() string { e.called.Store(true); panic("unexpected Error callback") }
+func (e *hostilePIDBatchError) Unwrap() error { e.called.Store(true); panic("unexpected Unwrap callback") }
+func (e *hostilePIDBatchError) Is(error) bool { e.called.Store(true); panic("unexpected Is callback") }
+
+// These local same-name models cannot have Cilium's compiler package identity.
+type wrappedErrno struct { syscall.Errno }
+type syscallError struct { error; errno syscall.Errno }
+
+func TestPIDCiliumScalarModelsAndIdentityRejection(t *testing.T) {
+	value := wrappedErrno{Errno: syscall.Errno(unix.EOPNOTSUPP)}
+	if code, ok := pidErrnoField(reflect.ValueOf(value), 0); !ok || code != unix.EOPNOTSUPP { t.Fatal("numeric model") }
+	if _, ok := pidCiliumErrno(value); ok { t.Fatal("wrong package accepted") }
+	if _, ok := pidCiliumErrno(&value); ok { t.Fatal("pointer-to-value wrapper accepted") }
+	if pidBatchUnsupportedErrno(nil) { t.Fatal("nil accepted") }
+	poison := &hostilePIDBatchError{}
+	pointer := &syscallError{error: poison, errno: syscall.Errno(524)}
+	if code, ok := pidErrnoField(reflect.ValueOf(pointer).Elem(), 1); !ok || code != syscall.Errno(524) || poison.called.Load() { t.Fatal("unexported scalar model") }
+	if _, ok := pidCiliumErrno(pointer); ok || poison.called.Load() { t.Fatal("wrong package or embedded callback accepted") }
+	var typedNil *syscallError
+	if _, ok := pidCiliumErrno(typedNil); ok { t.Fatal("typed nil accepted") }
+	if _, ok := pidErrnoField(reflect.Value{}, 0); ok { t.Fatal("invalid value accepted") }
+	if _, ok := pidErrnoField(reflect.ValueOf(struct{ Errno uint64 }{Errno: ^uint64(0)}), 0); ok { t.Fatal("wrong scalar type accepted") }
+	maxScalar := ^uint64(0)
+	if pidBatchUnsupportedErrno(syscall.Errno(maxScalar)) { t.Fatal("oversized errno accepted") }
+	if _, ok := pidErrnoField(reflect.ValueOf(value), 1); ok { t.Fatal("wrong index accepted") }
+	if pidBatchUnsupportedErrno(wrappedErrno{Errno: syscall.Errno(unix.EOPNOTSUPP)}) { t.Fatal("same-name wrong package accepted") }
+}
+
+func TestPIDBatchUnsupportedDepthAndCodes(t *testing.T) {
+	for _, code := range []syscall.Errno{unix.EOPNOTSUPP, 524} {
+		var err error = code
+		for i := 0; i < 15; i++ { err = fmt.Errorf("wrapped: %w", err) }
+		if !pidBatchUnsupportedErrno(err) { t.Fatal("supported bounded chain rejected") }
+		err = fmt.Errorf("wrapped: %w", err)
+		if pidBatchUnsupportedErrno(err) { t.Fatal("over-budget chain accepted") }
+	}
+	for _, code := range []syscall.Errno{unix.EPERM, unix.EACCES, unix.EIO} {
+		if pidBatchUnsupportedErrno(fmt.Errorf("wrapped: %w", code)) { t.Fatal("unexpected errno accepted", code) }
+	}
+}
+
+func TestPIDBatchUnknownErrorCallbacksNotInvoked(t *testing.T) {
+	bad := &hostilePIDBatchError{}
+	if pidBatchUnsupportedErrno(bad) || bad.called.Load() { t.Fatal("unknown unsupported callback") }
+	f := &fakePIDMap{batchLookupDeleteErr: bad}
+	tr := &Tracer{pidEventsMapOverride: f}
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsBatch(&keys)
+	if err != bad || classifyPIDPoll(err) != pidPollFatal || bad.called.Load() { t.Fatal("unknown batch error callback or fallback") }
+}
+
+func TestPIDMapFailureAfterCancellationRemainsFatal(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scope := periodiccaller.NewOwnedScope(parent, nil)
+	f := &gatePIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}, lookupErr: unix.EPERM}, block: "lookup", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+	result := make(chan error, 1)
+	require.True(t, scope.Go(func() { var keys []libpf.PIDTID; result <- tr.pollPIDEventsSingle(&keys) }))
+	<-f.entered
+	cancel()
+	close(f.release)
+	err := <-result
+	if !errors.Is(err, unix.EPERM) || classifyPIDPoll(err) != pidPollFatal { t.Fatal("late map error lost", err) }
+}
+
+func TestPIDPollClassifierKeepsActualErrorsFatal(t *testing.T) {
+	if !pidBatchUnsupportedErrno(fmt.Errorf("wrapped: %w", unix.EOPNOTSUPP)) { t.Fatal("wrapped unsupported not recognized") }
+	if pidBatchUnsupportedErrno(fmt.Errorf("wrapped: %w", errors.Join(unix.EOPNOTSUPP, unix.EIO))) { t.Fatal("mixed failure allowed fallback") }
+	for _, cause := range []error{unix.EPERM, unix.EACCES, context.Canceled, context.DeadlineExceeded} {
+		parent, cancel := context.WithCancel(context.Background())
+		scope := periodiccaller.NewOwnedScope(parent, nil)
+		f := &fakePIDMap{keys: []uint64{7}, lookupErr: cause}
+		tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+		var keys []libpf.PIDTID
+		err := tr.pollPIDEventsSingle(&keys)
+		cancel()
+		if !errors.Is(err, cause) || classifyPIDPoll(err) != pidPollFatal { t.Fatal("actual map failure not fatal", cause, err) }
+	}
+	for _, cause := range []error{unix.EPERM, unix.EACCES, errors.Join(unix.EOPNOTSUPP, unix.EIO)} {
+		f := &fakePIDMap{batchLookupDeleteErr: cause}
+		tr := &Tracer{pidEventsMapOverride: f}
+		var keys []libpf.PIDTID
+		if err := tr.pollPIDEventsBatch(&keys); !errors.Is(err, cause) || classifyPIDPoll(err) != pidPollFatal { t.Fatal("batch failure not fatal", cause, err) }
+	}
+	f := &fakePIDMap{batchLookupDeleteKeys: []uint64{7}, batchLookupDeleteErr: unix.EOPNOTSUPP}
+	tr := &Tracer{pidEventsMapOverride: f}
+	var keys []libpf.PIDTID
+	if err := tr.pollPIDEventsBatch(&keys); classifyPIDPoll(err) != pidPollFatal { t.Fatal("partial unsupported batch allowed fallback", err) }
+}
+
+func TestPIDPollGateKeepsActualQueryOwned(t *testing.T) {
+	for _, kind := range []string{"lookup", "delete", "batch"} {
+		t.Run(kind, func(t *testing.T) {
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			scope := periodiccaller.NewOwnedScope(parent, nil)
+			f := &gatePIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}, batchLookupDeleteKeys: []uint64{7}}, block: kind, entered: make(chan struct{}), release: make(chan struct{})}
+			tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+			op, err := scope.AdmitOperation()
+			require.NoError(t, err)
+			first := make(chan error, 1)
+			terminal := make(chan struct{})
+			require.True(t, scope.Go(func() {
+				var keys []libpf.PIDTID
+				if kind == "batch" { first <- tr.pollPIDEventsBatch(&keys) } else { first <- tr.pollPIDEventsSingle(&keys) }
+				_ = op.Complete()
+				close(terminal)
+			}))
+			<-f.entered
+			if tr.pidPollMu.TryLock() {
+				tr.pidPollMu.Unlock()
+				t.Fatal("map operation did not retain poll gate")
+			}
+			select { case <-terminal: t.Fatal("operation ended before map returned"); default: }
+			waiting := make(chan struct{})
+			second := make(chan error, 1)
+			require.True(t, scope.Go(func() {
+				close(waiting)
+				var keys []libpf.PIDTID
+				if kind == "batch" { second <- tr.pollPIDEventsSingle(&keys) } else { second <- tr.pollPIDEventsBatch(&keys) }
+			}))
+			<-waiting
+			select { case <-second: t.Fatal("second poll bypassed the gate"); default: }
+			if kind == "batch" { require.Zero(t, f.nextCalls.Load()) } else { require.Zero(t, f.batchCalls.Load()) }
+			cancel()
+			<-scope.Context().Done()
+			select { case <-terminal: t.Fatal("cancellation ended an in-flight query"); default: }
+			close(f.release)
+			require.NoError(t, <-first)
+			<-terminal
+			require.ErrorIs(t, <-second, context.Canceled)
+			if kind == "batch" { require.Zero(t, f.nextCalls.Load()) } else { require.Zero(t, f.batchCalls.Load()) }
+		})
+	}
+}
+
+func TestPIDSealRequestDoesNotWaitForMapReturn(t *testing.T) {
+	f := &gatePIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}, block: "lookup", entered: make(chan struct{}), release: make(chan struct{})}
+	m := &pidMailbox{origMap: f}
+	tr := &Tracer{pidMailbox: m, pidEventsMapOverride: f}
+	first := make(chan error, 1)
+	go func() { var keys []libpf.PIDTID; first <- tr.pollPIDEventsSingle(&keys) }()
+	<-f.entered
+	sealed := make(chan error, 1)
+	go func() { sealed <- tr.sealPIDMailbox() }()
+	require.Eventually(t, func() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.normalWorkSealed }, time.Second, time.Millisecond)
+	select { case <-first: t.Fatal("query returned before release"); default: }
+	select { case <-sealed: t.Fatal("physical seal returned before query"); default: }
+	second := make(chan error, 1)
+	go func() { var keys []libpf.PIDTID; second <- tr.pollPIDEventsBatch(&keys) }()
+	close(f.release)
+	require.NoError(t, <-first)
+	require.Error(t, <-second)
+	<-sealed
+	require.Zero(t, f.batchCalls.Load())
+}
+
+func TestPIDResidualWithoutMailboxIsUnobserved(t *testing.T) {
+	facts := (&Tracer{}).pidRemovalSnapshot()
+	require.True(t, facts.unknown)
+	require.False(t, facts.residualObserved)
+}
+
+func TestPIDPollGateRechecksDeadlineAndSeal(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(fmt.Sprint(batch), func(t *testing.T) {
+			parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(50*time.Millisecond))
+			defer cancel()
+			scope := periodiccaller.NewOwnedScope(parent, nil)
+			f := &gatePIDMap{fakePIDMap: &fakePIDMap{}}
+			tr := &Tracer{auxiliaryScope: scope, pidEventsMapOverride: f}
+			tr.pidPollMu.Lock()
+			result := make(chan error, 1)
+			go func() { var keys []libpf.PIDTID; if batch { result <- tr.pollPIDEventsBatch(&keys) } else { result <- tr.pollPIDEventsSingle(&keys) } }()
+			<-scope.Context().Done()
+			tr.pidPollMu.Unlock()
+			require.ErrorIs(t, <-result, context.DeadlineExceeded)
+			require.Zero(t, f.nextCalls.Load())
+			require.Zero(t, f.batchCalls.Load())
+			sealed := &Tracer{pidMailbox: &pidMailbox{sealed: true}, pidEventsMapOverride: f}
+			var keys []libpf.PIDTID
+			if batch { require.Error(t, sealed.pollPIDEventsBatch(&keys)) } else { require.Error(t, sealed.pollPIDEventsSingle(&keys)) }
+			require.Zero(t, f.nextCalls.Load())
+			require.Zero(t, f.batchCalls.Load())
+		})
+	}
+}
+
+// modelPendingPIDMap models NOEXIST interleavings; it is not a kernel test.
+type modelPendingPIDMap struct {
+	*fakePIDMap
+	pending, coalesceOnLookup, insertAfterDelete bool
+	coalesced, inserted int
+}
+
+func (f *modelPendingPIDMap) Lookup(key, valueOut any) error {
+	if f.coalesceOnLookup && f.pending {
+		f.coalesced++
+	}
+	return f.fakePIDMap.Lookup(key, valueOut)
+}
+
+func (f *modelPendingPIDMap) Delete(key any) error {
+	if !f.pending {
+		return cebpf.ErrKeyNotExist
+	}
+	f.pending = false
+	if f.insertAfterDelete {
+		f.pending = true
+		f.inserted++
+	}
+	return f.fakePIDMap.Delete(key)
+}
+
+func TestPIDNoexistModelCoalesceThenReinsert(t *testing.T) {
+	f := &modelPendingPIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}, pending: true, coalesceOnLookup: true, insertAfterDelete: true}
+	m := &pidMailbox{origMap: f, expectedBinding: PIDMailboxBinding{MapID: 3, Generation: 4}}
+	tr := &Tracer{pidMailbox: m, pidEventsMapOverride: f}
+	var keys []libpf.PIDTID
+	require.NoError(t, tr.pollPIDEventsSingle(&keys))
+	require.Equal(t, 1, f.coalesced)
+	require.Equal(t, 1, f.inserted)
+	require.True(t, f.pending)
+	require.Equal(t, uint64(1), m.removalSnapshot().committed)
+	f.cursor = 0
+	f.coalesceOnLookup = false
+	f.insertAfterDelete = false
+	keys = nil
+	require.NoError(t, tr.pollPIDEventsSingle(&keys))
+	require.False(t, f.pending)
+	require.Equal(t, uint64(2), m.removalSnapshot().committed)
+}
+
+func TestPIDResidualBindingKeepsGenerationDomainsSeparate(t *testing.T) {
+	actual := libpf.AuxiliaryBinding{Source: libpf.AuxiliarySourcePeriodicCaller, Session: "residual", HostTGID: 12, Birth: 34, Generation: 7}
+	mailbox := PIDMailboxBinding{Session: "residual", HostTGID: 12, Birth: 34, Generation: 7, MapID: 56}
+	report := reportProducerBinding{Session: "residual", Config: reportProducerConfig{Schema: 2, Enabled: 1, PID: 12, Birth: 34, Generation: 99}}
+	report.Maps[3].ID = 56
+	if err := validatePIDResidualBinding(actual, mailbox, report); err != nil { t.Fatal(err) }
+	for _, change := range []func(*libpf.AuxiliaryBinding, *PIDMailboxBinding, *reportProducerBinding){
+		func(a *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, _ *reportProducerBinding) { a.Generation++ },
+		func(_ *libpf.AuxiliaryBinding, m *PIDMailboxBinding, _ *reportProducerBinding) { m.MapID++ },
+		func(_ *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, r *reportProducerBinding) { r.Session = "other" },
+		func(_ *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, r *reportProducerBinding) { r.Config.PID++ },
+		func(_ *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, r *reportProducerBinding) { r.Config.Birth++ },
+		func(_ *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, r *reportProducerBinding) { r.Config.Generation = 0 },
+		func(_ *libpf.AuxiliaryBinding, _ *PIDMailboxBinding, r *reportProducerBinding) { r.Config.Schema = 1 },
+	} {
+		a, m, r := actual, mailbox, report
+		change(&a, &m, &r)
+		if err := validatePIDResidualBinding(a, m, r); err == nil { t.Fatal("contradictory original binding accepted") }
+	}
+}
+
+type residualPastBudgetContext struct {
+	context.Context
+	deadline time.Time
+	done chan struct{}
+}
+func (c residualPastBudgetContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c residualPastBudgetContext) Done() <-chan struct{} { return c.done }
+func (c residualPastBudgetContext) Err() error { return nil }
+
+func TestPIDResidualAdapterRejectsExpiredOriginalBeforeGate(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	ctx := residualPastBudgetContext{Context: context.Background(), deadline: time.Now().Add(-time.Hour), done: make(chan struct{})}
+	if err := scope.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("missing original deadline: %v", err) }
+	defer scope.Stop(context.Background())
+	// These wrappers identify fixture owners only; no FD/native method may be called.
+	pidMap, configMap := &cebpf.Map{}, &cebpf.Map{}
+	owner := &definitionOwner{state: definitionOwnerOpen, ctx: context.Background()}
+	effects := 0
+	source := &traceDefinitionSource{owner: owner, ops: traceDefinitionMapOps{
+		info: func(*cebpf.Map) (traceDefinitionMapInfo, error) { effects++; panic("expired readout queried map") },
+		lookup: func(*cebpf.Map, any, any) error { effects++; panic("expired readout looked up map") },
+	}}
+	report := &reportProducerSource{}
+	report.maps[3], report.maps[1] = pidMap, configMap
+	mailbox := &pidMailbox{scope: scope, origMap: pidMap}
+	tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, reportProducer: report,
+		pidMailbox: mailbox, ebpfMaps: map[string]*cebpf.Map{"pid_events": pidMap, "report_producer_config": configMap}}
+	tracer.pidPollMu.Lock()
+	defer tracer.pidPollMu.Unlock()
+	// A misplaced preflight would wait on this held gate instead of rejecting.
+	obs, err := tracer.readPIDResidual()
+	if !errors.Is(err, context.DeadlineExceeded) || effects != 0 || obs.state != pidResidualUnobserved || !mailbox.normalWorkSealed {
+		t.Fatalf("expired adapter admitted work: observation=%+v effects=%d error=%v", obs, effects, err)
+	}
+}
+
+type residualPIDMap struct {
+	*fakePIDMap
+	calls, failAt int
+	firstNil bool
+	entered, release chan struct{}
+}
+
+func (f *residualPIDMap) NextKey(key, nextKeyOut any) error {
+	f.calls++
+	if f.calls == 1 { f.firstNil = key == nil }
+	if f.calls == 1 && f.entered != nil { close(f.entered); <-f.release }
+	if f.calls == f.failAt { return unix.EIO }
+	return f.fakePIDMap.NextKey(key, nextKeyOut)
+}
+
+type retainedPIDTestLifetime struct { *testLifetime }
+
+func (l *retainedPIDTestLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	return l, func() error { return nil }, nil
+}
+
+func residualGuardFixture() (reportProducerBinding, *residualPIDMap, pidResidualEffects, *[]string) {
+	pidInfo := traceDefinitionMapInfo{Type: uint32(cebpf.Hash), ID: 3, KeySize: 8, ValueSize: 1, MaxEntries: 2}
+	configInfo := traceDefinitionMapInfo{ID: 2}
+	expected := reportProducerBinding{Config: reportProducerConfig{Schema: 2, Enabled: 1, PID: 7, Birth: 8, Generation: 99}}
+	expected.Maps[1], expected.Maps[3] = reportProducerMapFacts(configInfo), reportProducerMapFacts(pidInfo)
+	f := &residualPIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}}
+	var calls []string
+	effects := pidResidualEffects{
+		admit: func() error { return nil },
+		step: func(action func() error) error { return action() },
+		validateBinding: func() (bool, error) { calls = append(calls, "binding"); return false, nil },
+		configInfo: func() (traceDefinitionMapInfo, error) { calls = append(calls, "config-info"); return configInfo, nil },
+		pidInfo: func() (traceDefinitionMapInfo, error) { calls = append(calls, "pid-info"); return pidInfo, nil },
+		config: func() (reportProducerConfig, error) { calls = append(calls, "config-lookup"); return expected.Config, nil },
+	}
+	return expected, f, effects, &calls
+}
+
+func TestPIDResidualGuardAdmissionAfterGate(t *testing.T) {
+	expected, m, effects, calls := residualGuardFixture()
+	var gate sync.Mutex
+	gate.Lock()
+	entered := make(chan struct{})
+	var denied atomic.Bool
+	effects.admit = func() error { if denied.Load() { return context.DeadlineExceeded }; close(entered); return nil }
+	result := make(chan error, 1)
+	go func() { _, err := guardedPIDResidual(&gate, expected, m, effects); result <- err }()
+	<-entered
+	denied.Store(true)
+	gate.Unlock()
+	err := <-result
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Empty(t, *calls)
+	require.Zero(t, m.calls)
+}
+
+func TestPIDResidualGuardHeldAndLateEffect(t *testing.T) {
+	expected, m, effects, calls := residualGuardFixture()
+	var gate sync.Mutex
+	owner := &definitionOwner{state: definitionOwnerOpen, ctx: context.Background()}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var late atomic.Bool
+	effects.admit = func() error { if late.Load() { return context.DeadlineExceeded }; return nil }
+	effects.step = func(action func() error) error { if err := action(); err != nil { return err }; return effects.admit() }
+	info := effects.configInfo
+	effects.configInfo = func() (traceDefinitionMapInfo, error) { close(entered); <-release; return info() }
+	result := make(chan error, 1)
+	go func() { result <- owner.WithCoveredReadout(func() error { _, err := guardedPIDResidual(&gate, expected, m, effects); return err }) }()
+	<-entered
+	locked := !gate.TryLock()
+	if !locked { gate.Unlock() }
+	owner.mu.Lock(); covered := owner.enteredCount; owner.mu.Unlock()
+	late.Store(true)
+	close(release)
+	err := <-result
+	require.True(t, locked)
+	require.Positive(t, covered)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, []string{"binding", "config-info"}, *calls)
+	require.True(t, gate.TryLock()); gate.Unlock()
+	owner.mu.Lock(); covered = owner.enteredCount; owner.mu.Unlock()
+	require.Zero(t, covered)
+}
+
+func TestPIDResidualGuardFinalConfigInfo(t *testing.T) {
+	expected, m, effects, calls := residualGuardFixture()
+	info := effects.configInfo
+	n := 0
+	effects.configInfo = func() (traceDefinitionMapInfo, error) { v, err := info(); n++; if n == 2 { v.ID++ }; return v, err }
+	var gate sync.Mutex
+	obs, err := guardedPIDResidual(&gate, expected, m, effects)
+	require.Error(t, err)
+	require.True(t, obs.bindingChanged)
+	require.Equal(t, pidResidualObservedUnknown, obs.state)
+	require.Equal(t, []string{"binding", "config-info", "pid-info", "config-lookup", "pid-info", "config-lookup", "config-info"}, *calls)
+}
+
+func TestPIDResidualGuardRealScopeErrorHook(t *testing.T) {
+	var scope *periodiccaller.OwnedScope
+	hook := make(chan error, 1)
+	scope = periodiccaller.NewOwnedScope(context.Background(), func(err error) { _ = scope.CommitStopReadout(func() error { return nil }); hook <- err })
+	lifetime := &retainedPIDTestLifetime{&testLifetime{session: "session", hostTGID: 7, birth: 8}}
+	require.NoError(t, scope.BindLifetime(lifetime))
+	expected, m, effects, calls := residualGuardFixture()
+	var gate sync.Mutex
+	owner := &definitionOwner{state: definitionOwnerOpen, ctx: context.Background()}
+	effects.step = scope.WithStopReadoutStep
+	effects.configInfo = func() (traceDefinitionMapInfo, error) { return traceDefinitionMapInfo{}, syscall.EACCES }
+	result := make(chan error, 1)
+	require.NoError(t, scope.AddFinalizer(func() error {
+		err := owner.WithCoveredReadout(func() error { _, err := guardedPIDResidual(&gate, expected, m, effects); return err })
+		result <- err
+		return nil
+	}))
+	stop := make(chan error, 1)
+	go func() { stop <- scope.Stop(context.Background()) }()
+	err := <-result
+	stopErr := <-stop
+	hookErr := <-hook
+	require.ErrorIs(t, err, syscall.EACCES)
+	require.ErrorIs(t, stopErr, syscall.EACCES)
+	require.ErrorIs(t, hookErr, syscall.EACCES)
+	require.Equal(t, []string{"binding"}, *calls)
+	require.True(t, gate.TryLock()); gate.Unlock()
+	owner.mu.Lock(); covered := owner.enteredCount; owner.mu.Unlock()
+	require.Zero(t, covered)
+}
+
+func TestPIDResidualBoundOriginalEffects(t *testing.T) {
+	expected, m, controls, _ := residualGuardFixture()
+	pidMap, configMap := &cebpf.Map{}, &cebpf.Map{}
+	report := &reportProducerSource{}
+	report.maps[3], report.maps[1] = pidMap, configMap
+	var calls []string
+	ops := traceDefinitionMapOps{
+		info: func(got *cebpf.Map) (traceDefinitionMapInfo, error) {
+			switch got {
+			case pidMap: calls = append(calls, "pid-info"); return traceDefinitionMapInfo(expected.Maps[3]), nil
+			case configMap: calls = append(calls, "config-info"); return traceDefinitionMapInfo(expected.Maps[1]), nil
+			default: t.Fatal("unexpected Info map"); return traceDefinitionMapInfo{}, nil
+			}
+		},
+		lookup: func(got *cebpf.Map, key, out any) error {
+			calls = append(calls, "config-lookup")
+			if got != configMap || key != uint32(0) { t.Fatal("unexpected Lookup map or key", got, key) }
+			target, ok := out.(*reportProducerConfig)
+			if !ok || target == nil { t.Fatal("unexpected Lookup output", out) }
+			*target = expected.Config
+			return nil
+		},
+	}
+	boundPID, boundConfig, effects := bindPIDResidualEffects(report, ops)
+	report.expected = expected
+	effects.admit, effects.step, effects.validateBinding = controls.admit, controls.step, controls.validateBinding
+	var gate sync.Mutex
+	obs, err := guardedPIDResidual(&gate, report.expected, m, effects)
+	require.NoError(t, err)
+	require.Same(t, pidMap, boundPID)
+	require.Same(t, configMap, boundConfig)
+	require.Equal(t, pidResidualObservedUnknown, obs.state)
+	require.True(t, obs.eof)
+	require.Equal(t, []string{"config-info", "pid-info", "config-lookup", "pid-info", "config-lookup", "config-info"}, calls)
+}
+
+func TestPIDResidualFacadeRejectsReplacedMaps(t *testing.T) {
+	for _, mode := range []string{"pid", "config", "swapped"} {
+		t.Run(mode, func(t *testing.T) {
+			scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+			defer scope.Stop(context.Background())
+			pidMap, configMap, replacement := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			owner := &definitionOwner{state: definitionOwnerOpen, ctx: context.Background()}
+			calls := 0
+			source := &traceDefinitionSource{owner: owner, ops: traceDefinitionMapOps{
+				info: func(*cebpf.Map) (traceDefinitionMapInfo, error) { calls++; return traceDefinitionMapInfo{}, nil },
+				lookup: func(*cebpf.Map, any, any) error { calls++; return nil },
+			}}
+			report := &reportProducerSource{}
+			report.maps[3], report.maps[1] = pidMap, configMap
+			maps := map[string]*cebpf.Map{"pid_events": pidMap, "report_producer_config": configMap}
+			switch mode { case "pid": maps["pid_events"] = replacement; case "config": maps["report_producer_config"] = replacement; case "swapped": maps["pid_events"], maps["report_producer_config"] = configMap, pidMap }
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, reportProducer: report,
+				pidMailbox: &pidMailbox{scope: scope, origMap: pidMap}, ebpfMaps: maps}
+			_, err := tracer.readPIDResidual()
+			require.ErrorContains(t, err, "original maps unavailable")
+			require.Zero(t, calls)
+		})
+	}
+}
+
+func TestPIDResidualScannerActualEOFAndBounds(t *testing.T) {
+	step := func(action func() error) error { return action() }
+	for _, tc := range []struct{ name string; keys []uint64; limit uint32; failAt int; count uint64; eof bool; reason pidResidualReason }{
+		{"empty", nil, 2, 0, 0, true, pidResidualEOF},
+		{"zero-and-one", []uint64{0, 1}, 2, 0, 2, true, pidResidualEOF},
+		{"duplicate", []uint64{4, 4}, 2, 0, 1, false, pidResidualDuplicate},
+		{"bound", []uint64{4, 5, 6}, 2, 0, 2, false, pidResidualBound},
+		{"error", []uint64{4}, 2, 2, 1, false, pidResidualIncomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &residualPIDMap{fakePIDMap: &fakePIDMap{keys: tc.keys}, failAt: tc.failAt}
+			obs, err := scanPIDResidual(f, tc.limit, step)
+			if obs.state != pidResidualObservedUnknown || obs.count != tc.count || obs.eof != tc.eof || obs.reason != tc.reason || !f.firstNil { t.Fatal("residual observation", obs, err) }
+			if tc.eof && err != nil { t.Fatal(err) }
+			if !tc.eof && err == nil { t.Fatal("incomplete scan accepted") }
+			require.Empty(t, f.deletedKeys)
+		})
+	}
+}
+
+func TestPIDResidualModelHeldQueryAndOriginalDeadline(t *testing.T) {
+	f := &residualPIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}, entered: make(chan struct{}), release: make(chan struct{})}
+	var gate sync.Mutex
+	result := make(chan pidResidualObservation, 1)
+	go func() { gate.Lock(); defer gate.Unlock(); obs, _ := scanPIDResidual(f, 2, func(action func() error) error { return action() }); result <- obs }()
+	<-f.entered
+	if gate.TryLock() { gate.Unlock(); t.Fatal("gate released before query return") }
+	select { case <-result: t.Fatal("scan returned before query"); default: }
+	close(f.release)
+	if obs := <-result; obs.state != pidResidualObservedUnknown || !obs.eof { t.Fatal("scan result", obs) }
+	deadline := time.Unix(1, 0)
+	openDone := make(chan struct{})
+	late := &residualPIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}}
+	step := func(action func() error) error { select { case <-openDone: return context.Canceled; default: }; if !time.Now().Before(deadline) { return context.DeadlineExceeded }; return action() }
+	obs, err := scanPIDResidual(late, 2, step)
+	if !errors.Is(err, context.DeadlineExceeded) || obs.state != pidResidualUnobserved || late.calls != 0 { t.Fatal("expired scan admitted", obs, err) }
+}
+
+func TestPIDResidualModelBindingAndAdmission(t *testing.T) {
+	info := traceDefinitionMapInfo{Type: uint32(cebpf.Hash), ID: 3, KeySize: 8, ValueSize: 1, MaxEntries: 2}
+	config := reportProducerConfig{Schema: 2, Enabled: 1, PID: 7, Birth: 8, Generation: 9}
+	for _, mode := range []string{"complete", "denied", "map-change", "config-change"} {
+		t.Run(mode, func(t *testing.T) {
+			f := &residualPIDMap{fakePIDMap: &fakePIDMap{keys: []uint64{7}}}
+			infoCalls := 0
+			step := func(action func() error) error { if mode == "denied" { return context.DeadlineExceeded }; return action() }
+			infoFn := func() (traceDefinitionMapInfo, error) { infoCalls++; value := info; if mode == "map-change" && infoCalls == 2 { value.ID++ }; return value, nil }
+			configFn := func() (reportProducerConfig, error) { value := config; if mode == "config-change" { value.Generation++ }; return value, nil }
+			obs, err := observePIDResidual(f, info, config, step, infoFn, configFn)
+			switch mode {
+			case "complete": if err != nil || obs.state != pidResidualObservedUnknown || !obs.eof || obs.count != 1 { t.Fatal("model result", obs, err) }
+			case "denied": if !errors.Is(err, context.DeadlineExceeded) || obs.state != pidResidualUnobserved || f.calls != 0 { t.Fatal("denied effects", obs, err) }
+			case "map-change": if err == nil || !obs.bindingChanged || obs.state != pidResidualObservedUnknown { t.Fatal("changed map", obs, err) }
+			case "config-change": if err == nil || !obs.bindingChanged || obs.state != pidResidualUnobserved || f.calls != 0 { t.Fatal("changed config", obs, err) }
+			}
+			require.Empty(t, f.deletedKeys)
+		})
+	}
+}
+
+func TestPIDCommittedSingleRemoval(t *testing.T) {
+	for _, cause := range []error{nil, cebpf.ErrKeyNotExist, syscall.EPERM, syscall.EACCES} {
+		t.Run(fmt.Sprint(cause), func(t *testing.T) {
+			f := &fakePIDMap{keys: []uint64{7}, deleteErr: cause}
+			m := &pidMailbox{origMap: f, expectedBinding: PIDMailboxBinding{MapID: 3, Generation: 4}}
+			tr := &Tracer{pidMailbox: m, pidEventsMapOverride: f}
+			var keys []libpf.PIDTID
+			err := tr.pollPIDEventsSingle(&keys)
+			facts := m.removalSnapshot()
+			if cause == nil {
+				require.NoError(t, err)
+				require.Equal(t, uint64(1), facts.committed)
+			} else {
+				require.ErrorIs(t, err, cause)
+				require.Zero(t, facts.committed)
+				require.True(t, facts.unknown)
+			}
+			require.False(t, facts.residualObserved)
+		})
+	}
+}
+
+func TestPIDBatchEOFCountsReturnedRemovals(t *testing.T) {
+	f := &fakePIDMap{batchLookupDeleteKeys: []uint64{7}}
+	m := &pidMailbox{origMap: f, expectedBinding: PIDMailboxBinding{MapID: 3, Generation: 4}}
+	tr := &Tracer{pidMailbox: m, pidEventsMapOverride: f}
+	var keys []libpf.PIDTID
+	require.NoError(t, tr.pollPIDEventsBatch(&keys))
+	require.Equal(t, uint64(1), m.removalSnapshot().committed)
+}
+
+func TestPIDPartialBatchRemovalRemainsUnknown(t *testing.T) {
+	f := &fakePIDMap{batchLookupDeleteKeys: []uint64{7}, batchLookupDeleteErr: syscall.EFAULT}
+	m := &pidMailbox{origMap: f, expectedBinding: PIDMailboxBinding{MapID: 3, Generation: 4}}
+	tr := &Tracer{pidMailbox: m, pidEventsMapOverride: f}
+	var keys []libpf.PIDTID
+	require.ErrorIs(t, tr.pollPIDEventsBatch(&keys), syscall.EFAULT)
+	facts := m.removalSnapshot()
+	require.Zero(t, facts.committed)
+	require.Equal(t, uint64(1), facts.partialReported)
+	require.True(t, facts.partialError)
+	require.True(t, facts.unknown)
+	require.False(t, facts.residualObserved)
+}
+
+func TestPIDRemovalOverflowIsSticky(t *testing.T) {
+	m := &pidMailbox{}
+	m.committedRemoval(math.MaxUint64)
+	m.committedRemoval(1)
+	m.committedRemoval(0)
+	facts := m.removalSnapshot()
+	require.Equal(t, uint64(math.MaxUint64), facts.committed)
+	require.True(t, facts.overflow)
+	require.True(t, facts.unknown)
+}
+
+type fakePIDMap struct {
+	mu                    sync.Mutex
+	keys                  []uint64
+	cursor                int
+	nextKeyErr            error
+	lookupErr             error
+	deleteErr             error
+	batchDeleteErr        error
+	batchLookupDeleteErr  error
+	batchLookupDeleteKeys []uint64
+	deletedKeys           []uint64
+}
+
+func (f *fakePIDMap) NextKey(key, nextKeyOut any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nextKeyErr != nil {
+		return f.nextKeyErr
+	}
+	if f.cursor >= len(f.keys) {
+		return cebpf.ErrKeyNotExist
+	}
+	k := f.keys[f.cursor]
+	f.cursor++
+	setUint64(nextKeyOut, k)
+	return nil
+}
+
+func (f *fakePIDMap) Lookup(key, valueOut any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lookupErr != nil {
+		return f.lookupErr
+	}
+	setBool(valueOut, true)
+	return nil
+}
+
+func (f *fakePIDMap) Delete(key any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	k := getUint64(key)
+	f.deletedKeys = append(f.deletedKeys, k)
+	return nil
+}
+
+func (f *fakePIDMap) BatchDelete(keys any, opts *cebpf.BatchOptions) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.batchDeleteErr != nil {
+		return 0, f.batchDeleteErr
+	}
+	slice, ok := keys.([]uint64)
+	if ok {
+		f.deletedKeys = append(f.deletedKeys, slice...)
+		return len(slice), nil
+	}
+	return 0, nil
+}
+
+func (f *fakePIDMap) BatchLookupAndDelete(cursor *cebpf.MapBatchCursor, keysOut, valuesOut any, opts *cebpf.BatchOptions) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	kOut, okK := keysOut.([]uint64)
+	vOut, okV := valuesOut.([]bool)
+	if !okK || !okV {
+		return 0, fmt.Errorf("invalid slice types in BatchLookupAndDelete")
+	}
+
+	n := len(f.batchLookupDeleteKeys)
+	if n > len(kOut) {
+		n = len(kOut)
+	}
+	for i := 0; i < n; i++ {
+		kOut[i] = f.batchLookupDeleteKeys[i]
+		vOut[i] = true
+	}
+	f.batchLookupDeleteKeys = f.batchLookupDeleteKeys[n:]
+
+	if f.batchLookupDeleteErr != nil {
+		return n, f.batchLookupDeleteErr
+	}
+	if n == 0 {
+		return 0, cebpf.ErrKeyNotExist
+	}
+	return n, cebpf.ErrKeyNotExist
+}
+
+func setUint64(target any, val uint64) {
+	switch v := target.(type) {
+	case unsafe.Pointer:
+		*(*uint64)(v) = val
+	case *uint64:
+		*v = val
+	}
+}
+
+func getUint64(source any) uint64 {
+	switch v := source.(type) {
+	case unsafe.Pointer:
+		return *(*uint64)(v)
+	case *uint64:
+		return *v
+	case uint64:
+		return v
+	default:
+		return 0
+	}
+}
+
+func setBool(target any, val bool) {
+	switch v := target.(type) {
+	case unsafe.Pointer:
+		*(*bool)(v) = val
+	case *bool:
+		*v = val
+	}
+}
+
+func newTestTracerWithMailbox(t *testing.T, lifetime *testLifetime, fakeMap *fakePIDMap, mapID uint32) *Tracer {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	// Under conservative enrollment, unvalidated lifetime is rejected on initial BindLifetime with zero callbacks
+	if err := scope.BindLifetime(lifetime); err == nil {
+		t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+	}
+
+	tracer := &Tracer{
+		auxiliaryScope:       scope,
+		pidEvents:            make(chan libpf.PIDTID, 128),
+		pidEventsMapOverride: fakeMap,
+		pidMapInfoOverride: func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+			return traceDefinitionMapInfo{
+				Type:       uint32(cebpf.Hash),
+				ID:         mapID,
+				KeySize:    8,
+				ValueSize:  1,
+				MaxEntries: 65536,
+			}, nil
+		},
+		hasBatchOperations: false,
+	}
+
+	cfg := &Config{TraceDefinitionLifetime: lifetime}
+	tracer.preparePIDMailbox(cfg)
+	require.NotNil(t, tracer.pidMailbox)
+	return tracer
+}
+
+func encodePIDTID(pid, tid uint32) uint64 {
+	return (uint64(pid) << 32) | uint64(tid)
+}
+
+func TestPIDMailboxPositive_PolledKeysQueued(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-1",
+		hostTGID: 1000,
+		birth:    100,
+	}
+	targetKey := encodePIDTID(1000, 1)
+	foreignKey := encodePIDTID(2000, 2)
+	fakeMap := &fakePIDMap{
+		keys: []uint64{targetKey, foreignKey},
+	}
+
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 42)
+
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsSingle(&keys)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(keys))
+
+	ctx := context.Background()
+	ok := tr.enqueuePolledPIDEvents(ctx, &keys)
+	require.True(t, ok)
+	require.Empty(t, keys)
+
+	k1 := <-tr.pidEvents
+	k2 := <-tr.pidEvents
+	require.Equal(t, libpf.PIDTID(targetKey), k1)
+	require.Equal(t, libpf.PIDTID(foreignKey), k2)
+
+	stopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopErr := tr.auxiliaryScope.Stop(stopCtx)
+	require.Error(t, stopErr)
+	require.Contains(t, stopErr.Error(), "pid map info unavailable: no covering lease")
+
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.True(t, obs.UnpolledResidualUnknown)
+	require.False(t, obs.ScanIncomplete)
+	require.Equal(t, uint64(2), obs.Counts.Admitted)
+	require.Equal(t, uint64(2), obs.Counts.Queued)
+	require.Equal(t, uint64(0), obs.Counts.HeldResidual)
+	require.Equal(t, uint64(0), obs.Counts.DeletionFailed)
+	require.Equal(t, uint64(0), obs.Counts.Aborted)
+	require.Equal(t, uint64(0), obs.Counts.TargetAdmitted)
+	require.Equal(t, uint64(0), obs.Counts.ForeignAdmitted)
+	require.Equal(t, uint64(2), obs.Counts.Unpartitioned)
+	require.Equal(t, obs.Counts.Admitted, obs.Counts.TargetAdmitted+obs.Counts.ForeignAdmitted+obs.Counts.Unpartitioned, "conservation")
+	require.False(t, obs.Counts.Overflow)
+}
+
+func TestPIDMailboxCancel_SentPrefixQueuedUnsentSuffixAborted(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-cancel",
+		hostTGID: 1000,
+		birth:    200,
+	}
+	k1 := encodePIDTID(1000, 1)
+	k2 := encodePIDTID(1000, 2)
+	k3 := encodePIDTID(1000, 3)
+	fakeMap := &fakePIDMap{
+		keys: []uint64{k1, k2, k3},
+	}
+
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 43)
+	// Replace channel with unbuffered channel to control sends
+	tr.pidEvents = make(chan libpf.PIDTID)
+
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsSingle(&keys)
+	require.NoError(t, err)
+	require.Equal(t, 3, len(keys))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var ok bool
+	go func() {
+		defer wg.Done()
+		ok = tr.enqueuePolledPIDEvents(ctx, &keys)
+	}()
+
+	// Read 1 key
+	received := <-tr.pidEvents
+	require.Equal(t, libpf.PIDTID(k1), received)
+
+	// Cancel context so remaining 2 keys are aborted
+	cancel()
+	wg.Wait()
+
+	require.False(t, ok)
+	require.Empty(t, keys)
+
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, uint64(3), obs.Counts.Admitted)
+	require.Equal(t, uint64(1), obs.Counts.Queued)
+	require.Equal(t, uint64(2), obs.Counts.Aborted)
+	require.Equal(t, uint64(0), obs.Counts.HeldResidual)
+	require.Equal(t, uint64(0), obs.Counts.DeletionFailed)
+	require.Equal(t, uint64(0), obs.Counts.TargetAdmitted)
+	require.Equal(t, uint64(0), obs.Counts.ForeignAdmitted)
+	require.Equal(t, uint64(3), obs.Counts.Unpartitioned)
+	require.Equal(t, obs.Counts.Admitted, obs.Counts.TargetAdmitted+obs.Counts.ForeignAdmitted+obs.Counts.Unpartitioned, "conservation")
+}
+
+func TestPIDMailboxBatch_UnexpectedErrorAdmitsBeforeAbort(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-batch-err",
+		hostTGID: 1000,
+		birth:    300,
+	}
+	k1 := encodePIDTID(1000, 1)
+	k2 := encodePIDTID(2000, 2)
+	fakeMap := &fakePIDMap{
+		batchLookupDeleteKeys: []uint64{k1, k2},
+		batchLookupDeleteErr:  errors.New("unexpected batch error"),
+	}
+
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 44)
+
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsBatch(&keys)
+	require.Error(t, err)
+	require.Empty(t, keys)
+
+	obs, _ := tr.PIDMailboxObservation()
+	require.True(t, obs.ScanIncomplete)
+	require.Equal(t, uint64(2), obs.Counts.Admitted)
+	require.Equal(t, uint64(2), obs.Counts.Aborted)
+	require.Equal(t, uint64(0), obs.Counts.Queued)
+	require.Equal(t, uint64(0), obs.Counts.HeldResidual)
+	require.Equal(t, uint64(0), obs.Counts.TargetAdmitted)
+	require.Equal(t, uint64(0), obs.Counts.ForeignAdmitted)
+	require.Equal(t, uint64(2), obs.Counts.Unpartitioned)
+	require.Equal(t, obs.Counts.Admitted, obs.Counts.TargetAdmitted+obs.Counts.ForeignAdmitted+obs.Counts.Unpartitioned, "conservation")
+}
+
+func TestPIDMailboxSingle_DeleteFailureAfterLookup(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-delete-fail",
+		hostTGID: 1000,
+		birth:    400,
+	}
+	k1 := encodePIDTID(1000, 1)
+	fakeMap := &fakePIDMap{
+		keys:      []uint64{k1},
+		deleteErr: errors.New("delete error"),
+	}
+
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 45)
+
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsSingle(&keys)
+	require.Error(t, err)
+	require.Empty(t, keys)
+
+	obs, _ := tr.PIDMailboxObservation()
+	require.Equal(t, uint64(1), obs.Counts.Admitted)
+	require.Equal(t, uint64(1), obs.Counts.DeletionFailed)
+	require.Equal(t, uint64(0), obs.Counts.HeldResidual)
+	require.Equal(t, uint64(0), obs.Counts.Queued)
+}
+
+func TestPIDMailboxOverflow_MaxUintPrimeStickyFails(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-overflow",
+		hostTGID: 1000,
+		birth:    500,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 46)
+
+	tr.pidMailbox.mu.Lock()
+	tr.pidMailbox.counts.Admitted = math.MaxUint64
+	tr.pidMailbox.mu.Unlock()
+
+	err := tr.admitPIDEvent(libpf.PIDTID(encodePIDTID(1000, 1)))
+	require.Error(t, err)
+
+	obs, obsErr := tr.PIDMailboxObservation()
+	require.Error(t, obsErr)
+	require.True(t, obs.Counts.Overflow)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+}
+
+func TestPIDMailboxSeal_MapIDOrHostTGIDMismatch(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-mismatch",
+		hostTGID: 1000,
+		birth:    600,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 47)
+
+	// Change map ID returned at seal
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         999,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, nil
+	}
+
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	err := tr.sealPIDMailbox()
+	require.Error(t, err) // An unretained owner remains unavailable.
+
+	obs, obsErr := tr.PIDMailboxObservation()
+	require.Error(t, obsErr)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, uint32(0), obs.Binding.MapID) // No owned map identity was enrolled.
+}
+
+func TestPIDMailboxObservation_BeforeSealNotSealed_ParentFailStaysFailed(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-parent-fail",
+		hostTGID: 1000,
+		birth:    700,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 48)
+
+	var infoCalls int32
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		atomic.AddInt32(&infoCalls, 1)
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         48,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, nil
+	}
+
+	// Before seal: the unretained fixture is already unavailable.
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+
+	// Parent fail
+	parentErr := errors.New("parent failed")
+	tr.auxiliaryScope.Fail(parentErr)
+
+	stopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = tr.auxiliaryScope.Stop(stopCtx)
+
+	// Seal runs: must not query info
+	require.Error(t, tr.sealPIDMailbox())
+
+	obs, err = tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.True(t, errors.Is(err, parentErr), "expected parentErr to be preserved: %v", err)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "info query must not be called when parent already failed")
+
+	// Post-seal late admit rejected
+	lateErr := tr.admitPIDEvent(libpf.PIDTID(encodePIDTID(1000, 1)))
+	require.Error(t, lateErr)
+}
+
+func TestPIDMailboxSeal_ParentDeadlineDuringQuery_StaysFailed(t *testing.T) {
+	// Under conservative design, fresh queries are suppressed (zero calls).
+	// Proves that when an admitted held worker forces Stop expiry, Stop fails with
+	// DeadlineExceeded, mailbox stays failed, and no subsequent queries occur.
+	lt := &testLifetime{
+		session:  "session-deadline-during-query",
+		hostTGID: 1000,
+		birth:    800,
+	}
+	fakeMap := &fakePIDMap{
+		keys: []uint64{encodePIDTID(1000, 1)},
+	}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 50)
+
+	var keys []libpf.PIDTID
+	require.NoError(t, tr.pollPIDEventsSingle(&keys))
+	require.True(t, tr.enqueuePolledPIDEvents(context.Background(), &keys))
+
+	var infoCalls int32
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		atomic.AddInt32(&infoCalls, 1)
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         50,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, errors.New("suppressed query must not be called")
+	}
+
+	// Enroll an admitted held worker to force Stop deadline expiry without sleeps
+	workerRunning := make(chan struct{})
+	releaseWorker := make(chan struct{})
+	workerDone := make(chan struct{})
+	enrolled := tr.auxiliaryScope.Go(func() {
+		close(workerRunning)
+		<-releaseWorker
+		close(workerDone)
+	})
+	require.True(t, enrolled, "failed to enroll held worker in owned scope")
+
+	// Register release/cancel/boundedStop+exitJOIN cleanup before waiting
+	defer func() {
+		select {
+		case <-releaseWorker:
+		default:
+			close(releaseWorker)
+		}
+		select {
+		case <-workerDone:
+		case <-time.After(time.Second):
+			t.Errorf("timed out waiting for held worker exit during cleanup")
+		}
+		if !tr.auxiliaryScope.IsRetired() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+			defer cleanupCancel()
+			_ = tr.auxiliaryScope.Stop(cleanupCtx)
+		}
+	}()
+
+	// Bounded wait for held worker start
+	select {
+	case <-workerRunning:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for held worker start")
+	}
+
+	// Stop with short deadline; held worker forces deadline expiry
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stopCancel()
+
+	stopErr := tr.auxiliaryScope.Stop(stopCtx)
+	require.Error(t, stopErr)
+	require.True(t, errors.Is(stopErr, context.DeadlineExceeded), "expected deadline exceeded: %v", stopErr)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "zero query calls during deadlined Stop")
+
+	// Release held worker and boundedly join
+	close(releaseWorker)
+	select {
+	case <-workerDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for held worker exit")
+	}
+
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Second)
+	defer joinCancel()
+	joinErr := tr.auxiliaryScope.Stop(joinCtx)
+	require.Error(t, joinErr)
+	require.True(t, tr.auxiliaryScope.IsRetired(), "auxiliary scope must be retired after release and bounded join")
+
+	obs, err := tr.PIDMailboxObservation()
+	require.Equal(t, PIDMailboxFailed, obs.Outcome, "mailbox must never observe sealed when parent deadline occurred")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.DeadlineExceeded), "error must carry original deadline: %v", err)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "no subsequent query after failure")
+}
+
+func TestPIDMailbox_NegativeHeldResidualConservationFailsSeal(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-held-defect",
+		hostTGID: 1000,
+		birth:    900,
+	}
+	fakeMap := &fakePIDMap{
+		keys: []uint64{encodePIDTID(1000, 1)},
+	}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 60)
+
+	var keys []libpf.PIDTID
+	require.NoError(t, tr.pollPIDEventsSingle(&keys))
+	// keys admitted, so HeldResidual is 1
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	require.Error(t, tr.sealPIDMailbox())
+
+	obs, err := tr.PIDMailboxObservation()
+	require.Equal(t, PIDMailboxFailed, obs.Outcome, "nonzero held residual must fail seal")
+	require.Error(t, err)
+	require.Equal(t, uint64(1), obs.Counts.HeldResidual)
+}
+
+func TestPIDMailboxNil_PreservesOriginalBehavior(t *testing.T) {
+	targetKey := encodePIDTID(1000, 1)
+	fakeMap := &fakePIDMap{
+		keys: []uint64{targetKey},
+	}
+
+	tr := &Tracer{
+		pidEvents:            make(chan libpf.PIDTID, 10),
+		pidEventsMapOverride: fakeMap,
+		hasBatchOperations:   false,
+	}
+	tr.preparePIDMailbox(&Config{})
+	require.Nil(t, tr.pidMailbox)
+
+	var keys []libpf.PIDTID
+	err := tr.pollPIDEventsSingle(&keys)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(keys))
+
+	ctx := context.Background()
+	ok := tr.enqueuePolledPIDEvents(ctx, &keys)
+	require.True(t, ok)
+	require.Empty(t, keys)
+
+	received := <-tr.pidEvents
+	require.Equal(t, libpf.PIDTID(targetKey), received)
+
+	obs, err := tr.PIDMailboxObservation()
+	require.NoError(t, err)
+	require.Equal(t, PIDMailboxNotConfigured, obs.Outcome)
+}
+
+func TestPIDMailboxSeal_HostTGIDMismatch(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-tgid-mismatch",
+		hostTGID: 1000,
+		birth:    650,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 49)
+
+	// Change host TGID at seal
+	lt.hostTGID = 9999
+
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	err := tr.sealPIDMailbox()
+	require.Error(t, err) // An unretained owner remains unavailable.
+
+	obs, obsErr := tr.PIDMailboxObservation()
+	require.Error(t, obsErr)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, uint32(0), obs.Binding.HostTGID) // No owned target was enrolled.
+}
+
+func TestPIDMailbox_UnfrozenSentenceFailureNotBypassed(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-unfrozen-sentence",
+		hostTGID: 1000,
+		birth:    700,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 48)
+
+	var infoCalls int32
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		atomic.AddInt32(&infoCalls, 1)
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         48,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, nil
+	}
+
+	// Before Stop the unretained fixture is unavailable, with no info calls.
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls))
+
+	// Parent failed with the exact unfrozen display sentence
+	unfrozenSentenceErr := errors.New("auxiliary snapshot not yet frozen")
+	tr.auxiliaryScope.Fail(unfrozenSentenceErr)
+
+	stopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = tr.auxiliaryScope.Stop(stopCtx)
+
+	// Seal must detect parent failure and MUST NOT query info
+	require.Error(t, tr.sealPIDMailbox())
+
+	obs, err = tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.True(t, errors.Is(err, unfrozenSentenceErr), "parent error must be retained without display-text bypass")
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "info query must not be called when parent failed")
+}
+
+func TestPIDMailbox_JoinedCausesRetainedWithoutInfo(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-joined-causes",
+		hostTGID: 1000,
+		birth:    700,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 48)
+
+	var infoCalls int32
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		atomic.AddInt32(&infoCalls, 1)
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         48,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, nil
+	}
+
+	unfrozenSentenceErr := errors.New("auxiliary snapshot not yet frozen")
+	cancelErr := context.Canceled
+	deadlineErr := context.DeadlineExceeded
+	eaccesErr := syscall.EACCES
+	joinedCauses := errors.Join(unfrozenSentenceErr, cancelErr, deadlineErr, eaccesErr)
+	tr.auxiliaryScope.Fail(joinedCauses)
+
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	require.Error(t, tr.sealPIDMailbox())
+
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.True(t, errors.Is(err, unfrozenSentenceErr))
+	require.True(t, errors.Is(err, cancelErr))
+	require.True(t, errors.Is(err, deadlineErr))
+	require.True(t, errors.Is(err, eaccesErr))
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "info query must not be called")
+}
+
+func TestPIDMailbox_PrematureSealUnfrozenFailsClosed(t *testing.T) {
+	lt := &testLifetime{
+		session:  "session-premature-seal",
+		hostTGID: 1000,
+		birth:    700,
+	}
+	fakeMap := &fakePIDMap{}
+	tr := newTestTracerWithMailbox(t, lt, fakeMap, 48)
+
+	var infoCalls int32
+	tr.pidMapInfoOverride = func(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+		atomic.AddInt32(&infoCalls, 1)
+		return traceDefinitionMapInfo{
+			Type:       uint32(cebpf.Hash),
+			ID:         48,
+			KeySize:    8,
+			ValueSize:  1,
+			MaxEntries: 65536,
+		}, nil
+	}
+
+	// Before Stop the unretained fixture is unavailable.
+	obs, err := tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls))
+
+	// Premature seal before Stop/freeze MUST fail closed
+	require.Error(t, tr.sealPIDMailbox())
+
+	obs, err = tr.PIDMailboxObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDMailboxFailed, obs.Outcome)
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls), "info query must not be called during premature seal")
+
+	// Even if parent later stops and seals, premature seal cannot upgrade
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	_ = tr.sealPIDMailbox()
+
+	obsAfter, errAfter := tr.PIDMailboxObservation()
+	require.Error(t, errAfter)
+	require.Equal(t, PIDMailboxFailed, obsAfter.Outcome, "premature seal cannot later upgrade by joining")
+	require.Equal(t, int32(0), atomic.LoadInt32(&infoCalls))
+}
+
+func TestPIDMailboxOwnedStopModel(t *testing.T) {
+	for _, mode := range []string{"positive", "mismatch", "late-failure", "parent-cancel", "registration", "block-config", "block-pid"} {
+		t.Run(mode, func(t *testing.T) {
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "mailbox-model", tgid: 1234, birth: 5678}}
+			heldProbe := &stopFactsBlockProbe{armed: true, name: "never", nth: 1, entered: make(chan struct{}), release: make(chan struct{})}
+			held := &stopFactsBlockingLifetime{TraceDefinitionLifetime: mock, probe: heldProbe}
+			rawProbe := &stopFactsBlockProbe{armed: true, name: "never", nth: 1, entered: make(chan struct{}), release: make(chan struct{})}
+			raw := &stopFactsBlockingLifetime{TraceDefinitionLifetime: &mockRetainerLifetime{session: "unused", tgid: 7, birth: 8}, probe: rawProbe}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf: {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 103},
+				pid: {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var mu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) { info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil }
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) { info, ok := infos[m]; if !ok { return nil, unix.EINVAL }; clone := &cebpf.Map{}; infos[clone] = info; return clone, nil }
+			traceDefinitionMapCloser = func(m *cebpf.Map) error { mu.Lock(); closed[m]++; mu.Unlock(); return nil }
+			parent, cancelParent := context.WithCancel(context.Background())
+			scope := periodiccaller.NewOwnedScope(parent, nil)
+			stopCtx, cancelStop := context.WithCancel(context.Background())
+			stopDone := make(chan struct{})
+			stopLaunched := false
+			var asyncStopErr error
+			var releaseOnce sync.Once
+			blockName := "config-lookup"
+			if mode == "block-pid" { blockName = "pid" }
+			blockProbe := &stopFactsBlockProbe{name: blockName, nth: 1, entered: make(chan struct{}), release: make(chan struct{})}
+			var owner *definitionOwner
+			t.Cleanup(func() {
+				releaseOnce.Do(func() { close(blockProbe.release) })
+				cancelStop()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := scope.Stop(ctx)
+				scopeDone := ctx.Err() == nil
+				cancel()
+				if !scopeDone { t.Error("scope cleanup timed out") }
+				if err != nil && !(mode == "mismatch" && strings.Contains(err.Error(), "auxiliary stop pid map changed")) && !(mode == "late-failure" && errors.Is(err, unix.EACCES)) && !(mode == "registration" && scope.Failure() != nil && errors.Is(err, scope.Failure())) && !((mode == "block-config" || mode == "block-pid") && errors.Is(err, context.Canceled)) { t.Errorf("scope cleanup: %v", err) }
+				stopJoined := !stopLaunched
+				if stopLaunched { select { case <-stopDone: stopJoined = true; case <-time.After(2*time.Second): t.Error("stop caller cleanup timed out") } }
+				physicalDone := owner == nil
+				if owner != nil && scopeDone {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					err := owner.closeWithContext(ctx)
+					cancel()
+					if err != nil { t.Errorf("owner cleanup: %v", err) }
+					select { case <-owner.closeReqDone: physicalDone = true; case <-time.After(2*time.Second): t.Error("owner cleanup timed out") }
+				}
+				cancelParent()
+				if scopeDone && physicalDone && stopJoined { traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+			})
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(parent, held, maps)
+			if err != nil { var pending *traceDefinitionOwnerError; if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }; t.Fatalf("acquire owner: %v", err) }
+			clones := []*cebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+			if len(infos) != 8 { t.Fatal("expected four distinct owned clones") }
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("bind scope: %v", err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("scope callback did not complete") }
+			native := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			fresh := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			mismatch, pidReads, lookups := false, 0, 0
+			ops := traceDefinitionMapOps{
+				info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) { info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; if m == clones[3] { pidReads++; blockProbe.call("pid"); if mismatch { info.ID++ } }; return info, nil },
+				lookup: func(m *cebpf.Map, key, value any) error { out, ok := value.(*traceDefinitionConfig); if !ok || m != clones[1] || key != uint32(0) { return unix.EINVAL }; lookups++; blockProbe.call("config-lookup"); *out = fresh; return nil },
+				update: func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error { return unix.EINVAL }, close: traceDefinitionMapCloser,
+			}
+			owner.ops = ops
+			// MODEL: source construction values use acquired clone references, not native source construction.
+			source := &traceDefinitionSource{owner: owner, lifetime: owner.HeldLifetime(), origCounter: counts, origConfig: config, origPerf: perf, counter: clones[0], config: clones[1], perf: clones[2], configID: 102, nativeConfig: native, ops: owner.ops,
+				binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "mailbox-model", HostTGID: 1234, Birth: 5678, CounterMapID: 101, PerfMapID: 103, PossibleCPUs: 2, Generation: native.Generation}}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps}
+			if mode == "registration" {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := scope.Stop(ctx); cancel(); if err != nil { t.Fatalf("initial scope stop: %v", err) }
+			}
+			tracer.preparePIDMailbox(&Config{TraceDefinitionLifetime: raw})
+			m := tracer.pidMailbox
+			if m == nil { t.Fatal("mailbox unavailable") }
+			rawProbe.mu.Lock(); rawCalls := rawProbe.calls; rawProbe.mu.Unlock()
+			if rawCalls != 0 { t.Fatal("borrowed configuration lifetime was queried") }
+			if mode == "registration" {
+				obs, err := m.observation()
+				if err == nil || obs.Outcome != PIDMailboxFailed || scope.Failure() == nil { t.Fatal("registration failure was not propagated") }
+				return
+			}
+			if m.expectedBinding.MapID != owner.PIDID() || m.expectedBinding.MapID != 104 || m.expectedBinding.Generation == native.Generation { t.Fatal("enrollment identity was not independently captured") }
+			key := libpf.PIDTID(encodePIDTID(1234, 1))
+			if err := m.admit(key); err != nil { t.Fatalf("admit: %v", err) }
+			m.recordQueued(key)
+			if mode == "late-failure" { if err := scope.AddFinalizer(func() error { return unix.EACCES }); err != nil { t.Fatalf("add late finalizer: %v", err) } }
+			if mode == "block-config" || mode == "block-pid" {
+				blockProbe.mu.Lock(); blockProbe.armed = true; blockProbe.mu.Unlock()
+				stopLaunched = true
+				go func() { asyncStopErr = scope.Stop(stopCtx); close(stopDone) }()
+				select { case <-blockProbe.entered: case <-time.After(2*time.Second): t.Fatal("selected mailbox readout did not enter") }
+				heldProbe.mu.Lock(); heldAtEntry := heldProbe.calls; heldProbe.mu.Unlock()
+				cancelStop()
+				select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("cancelled mailbox stop did not return") }
+				if !errors.Is(asyncStopErr, context.Canceled) { t.Fatalf("stop lost cancellation: %v", asyncStopErr) }
+				before, beforeErr := m.observation()
+				if before.Outcome == PIDMailboxObservedSealed || !errors.Is(beforeErr, context.Canceled) || before.Counts.Admitted != 1 || before.Counts.Queued != 1 || !before.UnpolledResidualUnknown { t.Fatal("blocked mailbox did not expose cancellation nonpositively") }
+				mu.Lock(); n := len(closed); mu.Unlock()
+				if n != 0 || mock.holds.Load() != 2 || owner.Closing() || owner.Quarantined() || owner.Closed() { t.Fatal("blocked mailbox lost its owners") }
+				if scope.ExecuteCallback(func() { t.Error("stopped scope reenrolled callback") }) { t.Fatal("stopped scope accepted callback") }
+				releaseOnce.Do(func() { close(blockProbe.release) })
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				joinErr := scope.Stop(ctx); expired := ctx.Err(); cancel()
+				if expired != nil || !errors.Is(joinErr, context.Canceled) { t.Fatalf("scope join: %v", joinErr) }
+				if !m.localSnapshot.ready.Load() || m.localSnapshot.value.Outcome != PIDMailboxFailed { t.Fatal("mailbox did not retain a failed local seal") }
+				cached := m.localSnapshot.value
+				after, afterErr := m.observation()
+				if after.Outcome == PIDMailboxObservedSealed || !errors.Is(afterErr, context.Canceled) || m.localSnapshot.value != cached || !after.UnpolledResidualUnknown { t.Fatal("late mailbox result upgraded") }
+				heldProbe.mu.Lock(); heldAfter := heldProbe.calls; heldProbe.mu.Unlock()
+				if heldAfter != heldAtEntry || lookups != 1 || (mode == "block-config" && pidReads != 0) || (mode == "block-pid" && pidReads != 1) { t.Fatal("a later mailbox primitive ran") }
+				mu.Lock(); n = len(closed); mu.Unlock()
+				if n != 0 || mock.holds.Load() != 1 { t.Fatal("scope join prematurely closed owner") }
+				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+				err = owner.closeWithContext(ctx); cancel(); if err != nil { t.Fatalf("owner close: %v", err) }
+				select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close timed out") }
+				mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+				if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("model resources not released exactly once") }
+				return
+			}
+			mismatch = mode == "mismatch"
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			stopErr := scope.Stop(ctx); expired := ctx.Err(); cancel()
+			if expired != nil { t.Fatalf("scope stop deadline: %v", expired) }
+			obs, obsErr := m.observation()
+			heldProbe.mu.Lock(); heldCalls := heldProbe.calls; heldProbe.mu.Unlock()
+			if heldCalls == 0 { t.Fatal("retained lifetime was not measured") }
+			if pidReads != 1 || lookups != 1 { t.Fatalf("fresh clone readbacks missing: pid=%d config=%d", pidReads, lookups) }
+			if mode == "mismatch" {
+				if stopErr == nil || obsErr == nil || obs.Outcome != PIDMailboxFailed || !strings.Contains(stopErr.Error(), "auxiliary stop pid map changed") || obs.Binding.MapID != 104 { t.Fatal("PID mismatch was not rejected") }
+			} else if mode == "late-failure" {
+				if !errors.Is(stopErr, unix.EACCES) || !errors.Is(obsErr, unix.EACCES) || obs.Outcome != PIDMailboxFailed || !m.localSnapshot.ready.Load() || m.localSnapshot.value.Outcome != PIDMailboxObservedSealed { t.Fatal("late parent failure did not veto local seal") }
+			} else if stopErr != nil || obsErr != nil || obs.Outcome != PIDMailboxObservedSealed { t.Fatalf("local seal failed: %v / %v", stopErr, obsErr) }
+			if !obs.UnpolledResidualUnknown || obs.Counts.Admitted != 1 || obs.Counts.TargetAdmitted != 1 || obs.Counts.Queued != 1 || obs.Counts.HeldResidual != 0 { t.Fatal("mailbox local accounting incorrect") }
+			cached := m.localSnapshot.value
+			obs.Binding.Session = "changed"; obs.Counts.Admitted++
+			again, againErr := m.observation()
+			if again.Binding.Session != "mailbox-model" || again.Counts.Admitted != 1 || m.localSnapshot.value != cached { t.Fatal("returned observation changed cached values") }
+			if mode == "late-failure" && !errors.Is(againErr, unix.EACCES) { t.Fatal("repeat observation lost parent failure") }
+			ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			err = owner.closeWithContext(ctx); cancel(); if err != nil { t.Fatalf("owner close: %v", err) }
+			select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close timed out") }
+			if mode == "parent-cancel" {
+				cancelParent()
+				after, afterErr := m.observation()
+				if !errors.Is(afterErr, context.Canceled) || after.Outcome != PIDMailboxFailed || m.localSnapshot.value != cached { t.Fatal("parent cancellation did not overlay frozen local data") }
+			} else if mode == "positive" {
+				after, afterErr := m.observation()
+				if afterErr != nil || after.Outcome != PIDMailboxObservedSealed { t.Fatal("clean retirement invalidated frozen observation") }
+			}
+			heldProbe.mu.Lock(); afterHeldCalls := heldProbe.calls; heldProbe.mu.Unlock()
+			rawProbe.mu.Lock(); afterRawCalls := rawProbe.calls; rawProbe.mu.Unlock()
+			if pidReads != 1 || lookups != 1 || afterHeldCalls != heldCalls || afterRawCalls != 0 { t.Fatal("post-stop observation queried model resources") }
+			mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+			if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("owner resources not released once") }
+		})
+	}
+}

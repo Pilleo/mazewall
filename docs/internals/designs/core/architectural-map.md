@@ -184,7 +184,7 @@ To maintain security and stability at the kernel-JVM boundary, `mazewall` adhere
 ### A. Type-State Machine Pattern (Safety-by-Construction)
 Interfacing with kernel APIs and IPC protocols is sequentially fragile. Type-states restrict
 legal construction sequences; exhaustive runtime reducers separately reject protocol violations.
-- **Application:** `BpfBuilder<State>` (enforces Arch Check -> Load NR -> Filtering) and `HandshakeSession<State>` (prevents deadlocks by enforcing the 0xAC protocol).
+- **Application:** `BpfBuilder` exposes concrete `Uninitialized → ArchVerified → Active → Terminated` stages backed by a private owner. Immutable `BpfProgram<Verified>` values require structural verification before installation. `HandshakeSession<State>` enforces the 0xAC protocol sequence.
 
 ### B. Functional Programming at the Native Boundary
 Native calls return `errno` and raw values that are easily lost or misinterpreted.

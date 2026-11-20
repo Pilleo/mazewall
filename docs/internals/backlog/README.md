@@ -1,9 +1,84 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 284 | *Total Resolved Issues:* 719
+*Total Active Issues:* 411 | *Total Resolved Issues:* 741
 
-Active status detail: 282 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 409 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
+
+Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
+records 20 completed reviewer sessions across six lanes and four levels including
+the coordinator. Fourteen retained changes produce five new scoped issues and
+nine existing-owner extensions; already-covered opportunities are not duplicated.
+The focus is authoritative state/evidence, payload-bearing phases, pure decisions,
+validated boundaries and actual resource retirement. Two changes are design-only;
+JDBC consolidation is optional, and retained ingestion remains conditional on
+retirement. No application implementation, closure or native qualification follows.
+
+Repository-wide review (2026-11-04): the [whole-repo review and twenty work packages](../reviews/2026-11-04-repository-review.md)
+link the [detailed findings](../reviews/2026-11-04-repository-review-findings.md),
+[exact backlog owners/dependencies](../reviews/2026-11-04-repository-review-tracking.md)
+and [verification evidence](../reviews/2026-11-04-repository-review-evidence.md).
+Fifty-nine new scoped issues are indexed below; aliases reuse canonical owners,
+existing issues receive expanded evidence, and no implementation or closure follows.
+Frontmatter inventory confirms 325 active/739 resolved; that review's full build
+failed at supervisor helper prewarm, with its initiating cause unresolved.
+
+The [recursive follow-up](../reviews/2026-11-04-repository-review-recursive.md)
+completed 18 additional review executions with working nested delegation. Six P2
+residuals expand existing retention910, readiness816 and prepared888; no new issues
+or closures. It also records newer passing owner build/native receipts and the
+changed small-lockdown strategy, without claiming whole-checkout qualification.
+
+BPF generation hardening (2026-11-03): the [scoped review](../reviews/2026-11-03-bpf-generation-hardening.md)
+records concrete builder stages, immutable verified programs, closed instruction
+types, payload validation, x32 rejection and JVM-floor/inspection fixes. Focused
+host and native x32 regressions pass; the full build passed in 22m 40s. The four
+implementation issues now carry that completion evidence.
+
+BPF upstream validation (2026-11-03): the [research note](../research/bpf-upstream-validation.md)
+pins Go/C/Rust sources and records reusable semantic fixtures, bytecode coverage
+and Linux conformance cases. Two source-confirmed follow-ups remain open:
+fragment-local exit validation and rejection of missing simulator verdicts.
+
+Portal codegen hardening (2026-11-03): the [review](../reviews/2026-11-03-portal-codegen-hardening.md)
+tracks seven open corrective issues (CG01–CG07): compilable type emission, complete
+DTO validation, versioned schema identity, strict decoding, validation-owned worker
+checkout, bounded encoding and disjoint output publication. Six groups were
+reproduced; checkout lifetime is source-confirmed pending a real-worker regression.
+P02/P03 reuse these corrections, and P10 measures the resulting codec rather than
+owning a separate safety fix.
+
+Portal developer experience (2026-11-03): the [implementation plan](../../superpowers/plans/2026-11-03-portal-developer-experience.md)
+and [proposed design](../designs/portal/portal-developer-experience.md) organize thirteen
+feature issues (P01–P13): comparable measurements, simpler builds, typed submission,
+coroutine waits, warm-up, batching, state locality, file inputs, bounded replacement,
+measured optimization, conditional bulk-input research, aggregate capacity checks
+and tested process-boundary usage guidance. P01 now qualifies host-plus-worker memory,
+queues/results and cache replication. The convenience baseline uses the existing
+64 MiB default heap; custom heap/cgroup limits stay paired. The plan reuses the
+existing [worker packaging](issue-20261028-230731-061-separate-production-portal-worker-packaging-from-p.md)
+and [representative adoption](issue-20261028-230731-805-measure-realistic-packaged-application-adoption-an.md)
+issues. P13 also qualifies abrupt host death separately from graceful close; current
+coverage does not establish that cleanup guarantee. All implementation tasks remain open.
+The [detailed execution guide](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md)
+adds junior-oriented work cards for every CG/P task, regression/verification recipes,
+capacity examples and benchmark/crash-test walkthroughs; it adds no implementation
+or closure evidence.
+
+State-design review (2026-11-03): all nine findings are tracked below. Findings 1-6
+reuse existing issues with updated design guidance and scope. Finding 9 is split
+into two independently implementable changes; the reducer issue follows the
+authoritative-state issue.
+
+1. [Validate profile completeness against its evidence](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md).
+2. [Validate seccomp action payloads and unify their encoding](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
+3. [Own immutable policy collections at every construction boundary](issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md).
+4. [Bind policy scope to validated filesystem intent](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md).
+5. [Separate installation outcome from irreversible progress](issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md).
+6. [Bind measured coverage to its observed behavior](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md).
+7. [Make orchestrator task state authoritative for persistence](issue-20261103-083002-763-make-orchestrator-task-state-the-authoritative-per.md).
+8. [Make orchestrator reducers the single pure decision path](issue-20261103-083030-072-make-orchestrator-reducers-the-single-pure-decisio.md).
+9. [Bind invocation worker identity to its phase](issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) and [make broker close preparation exclusive](issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md).
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
 [maintained presenter guide](../../presentation/PRESENTER_GUIDE.md).
@@ -17,6 +92,17 @@ Integration-contract completion: eighteen current task/alignment issues archived
 [actual accepted P617 receipts](../reviews/2026-10-12-integration-contract-completion.md).
 Their index rows remain below with resolved links; historical/operator rows are retained.
 Optional tooling87-error debt and unsupported FORK callback bypass remain active.
+
+HotSpot 2026-10-23: [current four-lane qualification handoff](../reviews/2026-10-23-hotspot-runtime-qualification.md)
+records accepted storage/native-fixture source corrections and the scoped historical
+storage-doc amendment. Release/remote graph, public native, persisted live and full
+quality remain blocked; issue912/528 stay open. The previous host-source plan is
+complete, not reopened; no issue archive or backlog-count change follows.
+
+Dated correction (2026-11-04) to the historical HotSpot summary above:
+[issue528 was resolved on 2026-11-03](resolved/issue-20261022-221346-528-restore-profiler-test-detekt-gate-without-weakenin.md);
+[issue912 remains open](issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md).
+This amendment preserves the earlier summary as historical context and closes no issue.
 
 Agent-development documentation resolved: [canonical build guidance, coding standards, and removal of unused workflow documents](resolved/issue-20261010-223954-987-consolidate-agent-documentation-and-remove-unused-.md).
 
@@ -50,6 +136,128 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261110-085945-106](issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier | high | core |
+| [issue-20261110-090012-628](issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy | high | core |
+| [issue-20261110-090012-980](issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation | high | core |
+| [issue-20261107-045431-849](issue-20261107-045431-849-preserve-executable-info-ownership-across-partial-.md) | Preserve executable-info ownership across partial map-installation failures | high | core |
+| [issue-20261105-182827-544](issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends | high | profiler |
+| [issue-20261105-182737-637](issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts | medium | platform |
+| [issue-20261105-182827-530](issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) | Reject unterminated quoted values in recorded eBPF evidence | medium | profiler |
+| [issue-20261105-183230-840](issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) | Require complete class-lifetime coverage before native canonical-cache admission | medium | profiler |
+| [issue-20261105-182947-263](issue-20261105-182947-263-encode-production-supervisor-authority-work-phase-.md) | Encode production supervisor authority-work phase payloads in one closed state — design-only | low | enforcer |
+| [issue-20261103-234851-768](issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) | Correct AArch64 renameat metadata before policy compilation | high | core |
+| [issue-20261103-235243-934](issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic | medium | core |
+| [issue-20261103-235244-414](issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission | high | core |
+| [issue-20261103-235244-769](issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) | Preserve descriptor close errors and pre-dispatch cleanup ownership | medium | core |
+| [issue-20261103-235245-104](issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch | medium | core |
+| [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |
+| [issue-20261103-235246-003](issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) | Serialize eventfd completion signaling with native retirement | medium | core |
+| [issue-20261103-235246-361](issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) | Repoll canceled seccomp receives without retiring a live listener | medium | core |
+| [issue-20261103-235246-772](issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) | Route every profiler executor admission through collector installation | high | profiler |
+| [issue-20261103-235247-255](issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) | Keep published profiler events awaiting ACK during pass-through requests | medium | profiler |
+| [issue-20261103-235247-666](issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) | Propagate profiler listener handshake failure before installation readiness | medium | profiler |
+| [issue-20261103-235248-095](issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) | Preserve pending application exceptions during native capture cleanup | high | profiler |
+| [issue-20261103-235248-477](issue-20261103-235248-477-contain-allocation-failure-inside-native-profiler-.md) | Contain allocation failure inside native profiler capture boundaries | high | profiler |
+| [issue-20261103-235248-781](issue-20261103-235248-781-keep-symbolization-closed-until-the-owning-replace.md) | Keep symbolization closed until the owning replacement completes | high | profiler |
+| [issue-20261103-235249-167](issue-20261103-235249-167-publish-native-invocation-watermarks-independently.md) | Publish native invocation watermarks independently of completion order | medium | profiler |
+| [issue-20261103-235249-509](issue-20261103-235249-509-bound-total-hotspot-line-table-decoding-and-refill.md) | Bound total HotSpot line-table decoding and refill allocation | high | profiler |
+| [issue-20261103-235249-904](issue-20261103-235249-904-bind-packaged-hotspot-executables-to-their-actual-.md) | Bind packaged HotSpot executables to their actual build and source provenance | medium | profiler |
+| [issue-20261103-235250-240](issue-20261103-235250-240-verify-materialized-hotspot-dependency-sources-bef.md) | Verify materialized HotSpot dependency sources before preparation reuse | medium | profiler |
+| [issue-20261103-235250-506](issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md) | Accept contract-permitted pre-ready HotSpot events in the shared Go decoder | high | profiler |
+| [issue-20261103-235250-806](issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) | Bind strict HotSpot terminal evidence to negotiated provider and captured epoch | medium | profiler |
+| [issue-20261103-235251-281](issue-20261103-235251-281-validate-strict-hotspot-finalization-and-selected-.md) | Validate strict HotSpot finalization and selected accounting before completion | medium | profiler |
+| [issue-20261103-235251-822](issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) | Keep autonomous HotSpot deadline enforcement active through finishing | medium | profiler |
+| [issue-20261103-235252-265](issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
+| [issue-20261103-235252-762](issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) | Isolate cross-process signals in the required Portal worker baseline | high | portal-runtime |
+| [issue-20261103-235253-262](issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) | Retain replacement worker ownership across broker close races | high | portal-runtime |
+| [issue-20261103-235253-722](issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation | medium | portal-runtime |
+| [issue-20261103-235254-202](issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) | Dispatch legal Object-name Portal service overloads to the guest | high | portal-runtime |
+| [issue-20261103-235254-619](issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) | Preserve fatal failures during Portal declared-exception reconstruction | medium | portal-runtime |
+| [issue-20261103-235255-089](issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) | Tie Spring lifecycle completion to physical retirement and retained dependencies | medium | spring |
+| [issue-20261103-235255-561](issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) | Complete Kotlin upgrade locks and independent optional consumer approvals | high | build |
+| [issue-20261103-235256-009](issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) | Select existing API ABI and package topology checks in required CI | medium | build |
+| [issue-20261103-235256-471](issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) | Restore intended enforcer and profiler mutation target inventories | medium | build |
+| [issue-20261103-235256-949](issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) | Make the KILL_THREAD kernel oracle reject survival and setup failures | medium | core |
+| [issue-20261103-235257-446](issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) | Reject benchmark throughput inconsistent with its enclosed sample clocks | medium | benchmarks |
+| [issue-20261103-235257-865](issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) | Align packaged consumer matrix deadline with owned child budgets | medium | build |
+| [issue-20261103-235258-396](issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) | Invalidate the C ABI oracle when effective native build inputs change | medium | core |
+| [issue-20261103-235258-789](issue-20261103-235258-789-guard-supported-portal-binary-compatibility-with-t.md) | Guard supported Portal binary compatibility with the existing ABI mechanism | medium | portal-runtime |
+| [issue-20261103-235259-123](issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con.md) | Retire removed orchestrator entrypoints before control-plane effects | medium | tooling |
+| [issue-20261103-235259-662](issue-20261103-235259-662-preserve-canonical-issue-identities-in-any-retaine.md) | Preserve canonical issue identities in any retained standalone ingestion | medium | tooling |
+| [issue-20261103-235300-192](issue-20261103-235300-192-return-failure-after-unsuccessful-or-ambiguous-ret.md) | Return failure after unsuccessful or ambiguous retained ingestion writes | medium | tooling |
+| [issue-20261103-235357-491](issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md) | Keep healthy supervisor listeners alive across idle request intervals | high | core |
+| [issue-20261103-235357-847](issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) | Align approved accept routing with tracee authority execution | high | core |
+| [issue-20261103-235358-296](issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects | high | core |
+| [issue-20261103-235358-819](issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) | Retain supervisor helper capacity across fatal worker replacement | medium | core |
+| [issue-20261103-235359-257](issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md) | Bound supervisor validation and daemon diagnostic retention | medium | core |
+| [issue-20261103-235359-647](issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) | Preserve typed ADDFD notification-gone and native-error outcomes | low | core |
+| [issue-20261103-235400-034](issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) | Escape observed paths as Kotlin literals in generated policy DSL | medium | profiler |
+| [issue-20261103-235400-350](issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) | Hide incomplete-conversion test seams from ordinary Java consumers | medium | profiler |
+| [issue-20261103-235400-690](issue-20261103-235400-690-own-late-created-strace-descendants-through-cancel.md) | Own late-created strace descendants through cancellation and retirement | medium | profiler |
+| [issue-20261103-235400-980](issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md) | Reject unknown io_uring operations as complete read-only evidence | medium | profiler |
+| [issue-20261103-235401-320](issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) | Report iterative profiling exhaustion separately from convergence | medium | profiler |
+| [issue-20261103-235401-641](issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) | Distinguish failed dmesg probes from successful empty triage evidence | medium | profiler |
+| [issue-20261103-235402-001](issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) | Roll back acquired demo processes when output pump startup fails | medium | demos |
+| [issue-20261103-235911-795](issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) | Preserve Linux USER_NOTIF precedence over TRACE in policy intersection | high | core |
+| [issue-20261103-235912-106](issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) | Install effective allow-list narrowing and restrictive default escalation | high | core |
+| [issue-20261103-235912-401](issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) | Use canonical action ordering throughout installed policy planning and state | high | core |
+| [issue-20261103-235912-625](issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) | Preserve required manual Landlock file grants and acquisition failures | medium | core |
+| [issue-20261103-235912-820](issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) | Qualify bootstrap-directory loading before synchronous profiler stack capture | medium | profiler |
+| [issue-20261103-235434-538](issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) | Diagnose supervisor helper prewarm failure in the full native gate | high | core |
+| [issue-20261103-222740-448](issue-20261103-222740-448-reject-oversized-native-trace-custom-label-counts-.md) | Reject oversized native trace custom-label counts before allocation and indexing | high | profiler |
+| Archived [issue-20261103-180145-173](resolved/issue-20261103-180145-173-select-provenance-compatible-native-bundle-before-.md) | Current-patch compatible bundle validated before fresh grant; current-host 5000ms observation passed with safe cleanup and partial coverage, not kernel/policy qualification | high | profiler |
+| Archived [issue-20261103-124359-339](resolved/issue-20261103-124359-339-expose-validated-readiness-from-the-standalone-hot.md) | Readiness notification complete;16 host tests, scoped review and full build passed | high | core |
+| [issue-20261103-123347-795](issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) | Validate BPF inspection fragment exits before accepting termination | medium | core |
+| [issue-20261103-123359-606](issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) | Fail differential seccomp checks when simulator has no verdict | medium | core |
+| [issue-20261103-113514-264](issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md) | Make BPF verification proof immutable and enforce kernel instruction semantics | high | core |
+| [issue-20261103-113654-623](issue-20261103-113654-623-reject-x32-syscall-numbers-before-native-seccomp-p.md) | Reject x32 syscall numbers before native seccomp policy dispatch | high | core |
+| [issue-20261103-115030-497](issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md) | Preserve safe prctl argument allowances under explicit syscall denial | high | core |
+| [issue-20261103-101536-305](issue-20261103-101536-305-expose-and-validate-aggregate-portal-capacity-befo.md) | Expose and validate aggregate Portal capacity before worker startup | high | portal-runtime |
+| [issue-20261103-101536-562](issue-20261103-101536-562-qualify-portal-process-boundary-usage-safeguards-w.md) | Qualify Portal process-boundary usage safeguards with real consumers | high | portal-runtime |
+| Archived [issue-20261103-101247-569](resolved/issue-20261103-101247-569-add-a-standalone-ordinary-jvm-hotspot-observation-.md) | Add a standalone ordinary-JVM HotSpot observation example | high | core |
+| [issue-20261103-095305-625](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin | high | portal-codegen |
+| [issue-20261103-095306-294](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission | high | portal-codegen |
+| [issue-20261103-095306-992](issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) | Fingerprint the complete versioned Portal wire schema | high | portal-codegen |
+| [issue-20261103-095307-699](issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads | high | portal-codegen |
+| [issue-20261103-095308-453](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation | high | portal-runtime |
+| [issue-20261103-095309-136](issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) | Bound generated Portal encoding before allocation and traversal | high | portal-runtime |
+| [issue-20261103-095309-827](issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication | high | portal-codegen |
+| [issue-20261103-085927-123](issue-20261103-085927-123-compare-warm-portal-calls-with-executor-and-persis.md) | Compare warm Portal calls with executor and persistent HTTP baselines | high | benchmarks |
+| [issue-20261103-090025-581](issue-20261103-090025-581-simplify-portal-registration-and-single-project-wo.md) | Simplify Portal registration and single-project worker packaging | high | portal-codegen |
+| [issue-20261103-090025-757](issue-20261103-090025-757-generate-typed-portal-operations-with-bounded-subm.md) | Generate typed Portal operations with bounded submit-time snapshots | high | portal-runtime |
+| [issue-20261103-090025-919](issue-20261103-090025-919-expose-cancellation-aware-coroutine-awaits-for-own.md) | Expose cancellation-aware coroutine awaits for owned invocation handles | high | core |
+| [issue-20261103-090026-112](issue-20261103-090026-112-add-explicit-portal-warm-up-through-existing-group.md) | Add explicit Portal warm-up through existing group lifecycle owners | high | portal-runtime |
+| [issue-20261103-090026-291](issue-20261103-090026-291-provide-bounded-portal-batching-over-explicit-batc.md) | Provide bounded Portal batching over explicit batch contracts | medium | portal-runtime |
+| [issue-20261103-090026-517](issue-20261103-090026-517-qualify-actor-style-stateful-portal-bindings-on-th.md) | Qualify actor-style stateful Portal bindings on the existing queue | medium | portal-runtime |
+| [issue-20261103-090026-755](issue-20261103-090026-755-make-granted-portal-file-inputs-convenient-and-own.md) | Make granted Portal file inputs convenient and owned across async submission | medium | portal-runtime |
+| [issue-20261103-090026-932](issue-20261103-090026-932-bound-stateless-portal-worker-replacement-with-an-.md) | Bound stateless Portal worker replacement with an explicit restart budget | medium | portal-runtime |
+| [issue-20261103-090027-201](issue-20261103-090027-201-reduce-measured-portal-codec-and-transport-overhea.md) | Reduce measured Portal codec and transport overhead without changing wire semantics | medium | portal-runtime |
+| [issue-20261103-090027-452](issue-20261103-090027-452-evaluate-an-optional-immutable-bulk-input-transpor.md) | Evaluate an optional immutable bulk-input transport for Portals | low | benchmarks |
+| [issue-20261103-085251-359](issue-20261103-085251-359-provide-live-pre-call-stack-context-before-user-no.md) | Provide live pre-call stack context before USER_NOTIF authorization | high | core |
+| [issue-20261103-083002-763](issue-20261103-083002-763-make-orchestrator-task-state-the-authoritative-per.md) | Make orchestrator task state the authoritative persistence model | medium | orchestrator |
+| [issue-20261103-083030-072](issue-20261103-083030-072-make-orchestrator-reducers-the-single-pure-decisio.md) | Make orchestrator reducers the single pure decision path | medium | orchestrator |
+| [issue-20261103-083030-086](issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) | Bind invocation worker identity to its lifecycle phase | low | core |
+| [issue-20261103-083030-123](issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md) | Represent broker close preparation as exclusive outcomes | low | portal-runtime |
+| Archived [issue-20261103-090101-148](resolved/issue-20261103-090101-148-reject-exception-metadata-callbacks-before-live-re.md) | Reject exception metadata callbacks before live recovery formatting | high | core |
+| Archived [issue-20261103-090101-565](resolved/issue-20261103-090101-565-admit-acquisition-shape-validation-before-allocati.md) | Admit acquisition shape validation before allocation | high | core |
+| Archived [issue-20261103-080737-424](resolved/issue-20261103-080737-424-revalidate-handed-off-live-recovery-graph-before-w.md) | Revalidate handed-off live recovery graph before writer authority consumption | high | core |
+| [issue-20261102-232658-695](issue-20261102-232658-695-keep-checkpoint-provider-installation-in-its-origi.md) | Keep checkpoint provider installation in its original setup phase | high | core |
+| [issue-20261102-193152-029](issue-20261102-193152-029-validate-provider-registry-keys-before-keyed-looku.md) | Validate provider registry keys before keyed lookups | high | core |
+| [issue-20261102-193152-428](issue-20261102-193152-428-authenticate-installer-context-before-resolver-ins.md) | Authenticate installer context before resolver inspection | high | core |
+| [issue-20261102-193152-877](issue-20261102-193152-877-post-validate-owned-binding-state-after-provider-i.md) | Post-validate owned binding state after provider install failure | medium | core |
+| Archived [issue-20261102-173407-418](resolved/issue-20261102-173407-418-anchor-checkpoint-accounting-state-to-sealed-decla.md) | Anchor checkpoint accounting state to sealed declarations | high | core |
+| Archived [issue-20261102-173407-812](resolved/issue-20261102-173407-812-authenticate-issued-envelope-handles-independently.md) | Authenticate issued envelope handles independently of mutable registries | high | core |
+| Archived [issue-20261102-173408-255](resolved/issue-20261102-173408-255-check-decoded-envelope-shapes-before-invoking-obje.md) | Check decoded envelope shapes before invoking object protocols | high | core |
+| Archived [issue-20261102-163311-043](resolved/issue-20261102-163311-043-bind-both-adapter-publication-registries-to-the-pr.md) | Bind both adapter publication registries to the produced module | high | core |
+| Archived [issue-20261102-163311-272](resolved/issue-20261102-163311-272-validate-raw-enum-state-before-traversing-adapter-.md) | Validate raw Enum state before traversing adapter definitions | high | core |
+| Archived [issue-20261102-130646-271](resolved/issue-20261102-130646-271-require-codetype-identity-for-owned-setup-installe.md) | Require CodeType identity for owned setup installer frames | high | core |
+| Archived [issue-20261102-114438-470](resolved/issue-20261102-114438-470-retain-actual-acquisition-owner-across-combined-po.md) | Retain actual acquisition owner across combined post-validation failure | high | core |
+| Archived [issue-20261102-104638-868](resolved/issue-20261102-104638-868-guard-source-owned-property-accessor-executable-id.md) | Guard source-owned property accessor executable identity during setup | high | core |
+| Archived [issue-20261102-103137-113](resolved/issue-20261102-103137-113-reject-hidden-nested-fields-in-sealed-live-prepara.md) | Reject hidden nested fields in sealed live preparation contracts | high | core |
+| Archived [issue-20261102-070428-309](resolved/issue-20261102-070428-309-align-independent-consumer-cache-verification-dead.md) | Align independent consumer cache verification deadline with owned child budgets | high | core |
+| Archived [issue-20261102-032138-671](resolved/issue-20261102-032138-671-reject-case-folded-provider-aliases-across-negotia.md) | Reject case-folded provider aliases across negotiated HotSpot wire rows | high | profiler |
+| [issue-20261102-001737-121](issue-20261102-001737-121-verify-controlled-cli-permission-refusals-without-.md) | Verify controlled CLI permission refusals without claiming authenticated denial | high | core |
+| [issue-20261101-211554-659](issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t.md) | Enable Gradle build and configuration caching in the pre-commit hook | high | core |
 | [issue-20261116-072155-079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md) | Retire consumed Tier E A4 one-shot live diagnostic path | medium | profiler |
 | [issue-20261116-002649-322](issue-20261116-002649-322-align-codegen-kotlin-reflection-runtime-with-proje.md) | Align Codegen Kotlin reflection runtime with project Kotlin version | high | core |
 | [issue-20261115-220004-725](issue-20261115-220004-725-separate-confined-helper-drain-observations-from-p.md) | Separate confined-helper drain observations from physical retirement | high | enforcer |
@@ -129,7 +337,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-152002-779](issue-20261103-152002-779-preserve-process-observation-errors-and-watcher-re.md) | Preserve process observation errors and watcher retirement | high | profiler |
 | [issue-20261103-134641-217](issue-20261103-134641-217-package-tier-e-target-registration-and-attach-help.md) | Package Tier E target registration and attach helper | medium | profiler |
 | [issue-20261103-134635-250](issue-20261103-134635-250-enable-opt-in-tier-e-evidence-group-access-and-ato.md) | Enable opt-in Tier E evidence group access and atomic publication | medium | profiler |
-| [issue-20261103-085251-359](issue-20261103-085251-359-provide-live-pre-call-stack-context-before-user-no.md) | Provide live pre-call stack context before USER_NOTIF authorization | high | core |
+| Archived [issue-20261101-205810-601](resolved/issue-20261101-205810-601-prevent-stale-spotbugs-auxiliary-classpath-suffix-.md) | Prevent stale SpotBugs auxiliary classpath suffix after dependency graph shrink | high | core |
 | [issue-20261101-164416-960](issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili.md) | Upgrade Gradle 9.8.2 and qualify build compatibility | high | build |
 | [issue-20261101-142339-773](issue-20261101-142339-773-qualify-kernel-uapi-watcher-input.md) | Qualify kernel UAPI watcher input | high | ci |
 | [issue-20261031-143810-764](issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md) | Fix cold Spring verification and reduce CI cache churn | high | core |
@@ -186,6 +394,33 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261018-115032](implementation/issue-20261018-115032-add-explicit-owned-thread-enforcement-for-synchronous-koog-t.md) | Add explicit owned thread enforcement for synchronous Koog tools | medium | enforcer |
 | [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
 | [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
+| [issue-20261028-232809-819](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) | Reject contradictory completeness in imported profile documents | high | core |
+| [issue-20261028-232810-282](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation | high | core |
+| [issue-20261028-232810-687](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) | Prevent raw policy definitions from asserting invalid process scope | high | core |
+| [issue-20261028-232811-132](issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) | Freeze policy definition collections at every construction boundary | high | core |
+| [issue-20261028-232811-578](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) | Bind measured profile coverage to its observed behavior | medium | core |
+| [issue-20261028-232811-964](issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) | Reject installation receipts containing both success and failure | medium | core |
+| [issue-20261028-230623-718-organize-adoption-guidance-around-explicit-securit](issue-20261028-230623-718-organize-adoption-guidance-around-explicit-securit.md) | Architecture 1: Organize adoption guidance around explicit security boundaries | high | core |
+| [issue-20261028-230730-359-publish-qualified-platform-envelopes-for-each-cont](issue-20261028-230730-359-publish-qualified-platform-envelopes-for-each-cont.md) | Architecture 2: Publish qualified platform envelopes for each containment mode | high | core |
+| [issue-20261028-230730-555-define-the-supported-operation-contract-for-owned-](issue-20261028-230730-555-define-the-supported-operation-contract-for-owned-.md) | Architecture 3: Define the supported operation contract for owned runtime integrations | high | integrations |
+| [issue-20261028-230730-812-define-independent-profiler-outcomes-and-upstream-](issue-20261028-230730-812-define-independent-profiler-outcomes-and-upstream-.md) | Architecture 4: Define independent profiler outcomes and upstream maintenance budget | high | profiler |
+| [issue-20261028-230731-061-separate-production-portal-worker-packaging-from-p](issue-20261028-230731-061-separate-production-portal-worker-packaging-from-p.md) | Architecture 5a: Separate production Portal worker packaging from profiler tooling | high | portal-runtime |
+| [issue-20261028-230731-560-decouple-core-release-qualification-from-optional-](issue-20261028-230731-560-decouple-core-release-qualification-from-optional-.md) | Architecture 5b: Decouple core release qualification from optional integration releases | high | ci |
+| [issue-20261028-230731-805-measure-realistic-packaged-application-adoption-an](issue-20261028-230731-805-measure-realistic-packaged-application-adoption-an.md) | Architecture 6: Measure realistic packaged application adoption and containment cost | high | benchmarks |
+| [issue-20261026-180425-600-accept-valid-relative-oci-layer-root-directories-w](issue-20261026-180425-600-accept-valid-relative-oci-layer-root-directories-w.md) | Actual OCI qualifier root-directory false positive; local fix reviewed, retained guest artifact still unqualified | medium | core |
+| [issue-20261026-003721-395-select-a-bounded-storage-recovery-budget-for-the-e](issue-20261026-003721-395-select-a-bounded-storage-recovery-budget-for-the-e.md) | Actual offline Node production ENOSPC after successful momentary probe; additional16GiB/40→56GiB proposal needs operator selection, no retry | medium | core |
+| [issue-20261025-151201-431-deliver-complete-bounded-sftp-control-receipts-acr](issue-20261025-151201-431-deliver-complete-bounded-sftp-control-receipts-acr.md) | Complete bounded two-case control receipts;36864-byte timeout cause unproved, offline regression/response proposal first | medium | core |
+| [issue-20261025-134521-520-bind-sftp-host-source-device-to-selected-data-file](issue-20261025-134521-520-bind-sftp-host-source-device-to-selected-data-file.md) | Bind SFTP host source device to selected data1792; keep executable2049 distinct and fail closed | medium | core |
+| [issue-20261025-025228-019-qualify-bulk-seed-transport-around-libssh-zero-win](issue-20261025-025228-019-qualify-bulk-seed-transport-around-libssh-zero-win.md) | libssh0.11.3 zero-window false-EOF path reviewed; installed Multipass bulk-transfer cause and safe replacement path remain unqualified | medium | core |
+| [issue-20261023-234809-248-carry-kernel-symbol-permission-into-the-opt-in-hot](issue-20261023-234809-248-carry-kernel-symbol-permission-into-the-opt-in-hot.md) | 2026-10-24: SYSLOG-only source/host regression reviewed; effective post-exec authority/live acceptance still open | medium | profiler |
+| Archived [issue-20261023-232330-761-qualify-hotspot-kernel-symbol-access-under-kptr-re](resolved/issue-20261023-232330-761-qualify-hotspot-kernel-symbol-access-under-kptr-re.md) | CAP_SYSLOG selected and cleared; bounded public-native attempt4 accepted with400marked operations/380useful routes/176compiled events | medium | profiler |
+| Archived [issue-20261023-224745-810-support-capability-granted-hotspot-local-runtime-i](resolved/issue-20261023-224745-810-support-capability-granted-hotspot-local-runtime-i.md) | Capability-aware host initialization verified; source gates pass, native attempt3 reaches distinct kernel-symbol restriction | medium | profiler |
+| Archived [issue-20261023-215710-185-investigate-hotspot-mapped-jvm-device-mismatch-on-](resolved/issue-20261023-215710-185-investigate-hotspot-mapped-jvm-device-mismatch-on-.md) | Fix Btrfs mapped JVM identity binding; regression/race/vet and configured build pass, native requalification separate | medium | profiler |
+| [issue-20261023-085514-293-keep-hotspot-offline-bundle-acceptance-fail-closed](issue-20261023-085514-293-keep-hotspot-offline-bundle-acceptance-fail-closed.md) | HotSpot bundle/runner host corrections reviewed; live acceptance remains blocked | high | profiler |
+| [issue-20261023-074235-300-bind-hotspot-capture-and-profile-image-identities-](issue-20261023-074235-300-bind-hotspot-capture-and-profile-image-identities-.md) | HotSpot image ownership/reference corrections reviewed; runtime custody remains unqualified | high | profiler |
+| [issue-20261022-230122-825-bind-hotspot-workload-oracle-tids-across-pid-names](issue-20261022-230122-825-bind-hotspot-workload-oracle-tids-across-pid-names.md) | Bind HotSpot workload oracle TIDs across PID namespaces; offline host correction, live custody pending | high | profiler |
+| [issue-20261022-223621-210-persist-decoder-accepted-hotspot-readiness-before-](issue-20261022-223621-210-persist-decoder-accepted-hotspot-readiness-before-.md) | Persist decoder-accepted HotSpot readiness before workload gates; host correction verified, native/review pending | high | profiler |
+| Archived [issue-20261022-221346-528-restore-profiler-test-detekt-gate-without-weakenin](resolved/issue-20261022-221346-528-restore-profiler-test-detekt-gate-without-weakenin.md) | Test-analysis gate restored;57 owning tests, scoped review and full build passed | high | profiler |
 | [issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl](issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl.md) | Copy read-only released SDK source into writable staging; host RED/GREEN, distribution qualification remains open | high | profiler |
 | [issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w](issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md) | Deliver late HotSpot watcher lifecycle events and real unregister | high | profiler |
 | [issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti](issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md) | Retain later original HotSpot admission errors in the active owner | high | profiler |
@@ -344,7 +579,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica](issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica.md) | Qualify mounted virtual thread identity and logical scope | high | profiler |
 | [issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-](issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-.md) | Prove selected HotSpot event conservation and all-source loss inventory | high | profiler |
 | [issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-](issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md) | Bound interpreter self-profiling asset validation and dense readout cost | high | profiler |
-| [issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an](issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md) | Align Kubescape HotSpot contribution dependency and storage contracts | medium | experiment |
+| [issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an](issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md) | 2026-10-24: fork published/resolved/host-tested; image/node blocked, API/live NOT_RUN, lint failed; canonical/final acceptance open | medium | experiment |
 | [issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int](issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md) | Investigate intermittent process-wide profiler integration capture failure | medium | profiler |
 | [issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full](issue-20261002-143458-421-drain-owned-strict-hotspot-definitions-before-full.md) | Drain owned strict HotSpot definitions before full capture retirement | high | experiment |
 | [issue-20261002-023246-451-implement-owned-bounded-event-only-ring-finalizati](issue-20261002-023246-451-implement-owned-bounded-event-only-ring-finalizati.md) | Implement owned bounded event-only ring finalization | high | experiment |
@@ -390,7 +625,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema](issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md) | Move active Tier E experiment controllers and remaining analysis to typed Kotlin tooling | high | core |
 | [issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur](code_health/issue-019-refactor-profiler-daemon-to-use-coroutines-structured-concur.md) | Refactor Profiler Daemon to use Coroutines (Structured Concurrency) | low | profiler |
 | [issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in](code_health/issue-20260827-113239-add-capability-based-routing-for-kernel-and-offline-tasks-in.md) | Add capability-based routing for kernel and offline tasks in ComponentRouter | low | orchestrator |
-| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning via Codanna AST verification | low | testing |
+| [issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via](code_health/issue-20260905-130500-implement-automated-tombstoning-and-stale-memory-pruning-via.md) | Implement automated tombstoning and stale memory pruning | low | testing |
 | [issue-20260823-172004-additional-architecture-coverage](implementation/issue-20260823-172004-additional-architecture-coverage.md) | Additional Architecture Coverage: s390x, ppc64le, riscv64 | low | enforcer |
 | [issue-067-unprivileged-pivot-root-empty-tmpfs](security/issue-067-unprivileged-pivot-root-empty-tmpfs.md) | Unprivileged Pivot Root (Empty `tmpfs`) | low | enforcer |
 | [issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping](security/issue-068-supervisor-proxy-pattern-fd-injection-stacktrace-scoping.md) | Supervisor Proxy Pattern (FD Injection) & Stacktrace Scoping | low | enforcer |

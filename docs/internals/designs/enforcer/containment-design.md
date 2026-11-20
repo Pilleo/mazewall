@@ -21,13 +21,13 @@ Policy (syscallActions: Map<Syscall, SeccompAction>, defaultAction: SeccompActio
     │
     ▼
 BpfFilter.build(arch, policy)
-    │  - architecture check prologue (AUDIT_ARCH_* constant)
+    │  - architecture check prologue (AUDIT_ARCH_* constant), rejecting unsupported x32 aliases
     │  - clone3 ENOSYS trap (unconditional)
     │  - argument-inspection sequences for mmap/mprotect, clone, prctl
-    │  - linear scan over restricted syscall numbers (sorted IntArray)
+    │  - small forward BST or grouped linear scan over restricted syscall numbers
     │  - default ALLOW (DENY_LIST) or DENY (ALLOW_LIST) at the tail
     │
-    ▼  List<BpfInstruction>
+    ▼  immutable BpfProgram<Verified> (local structural verification)
 PureJavaBpfEngine.install(policy)  /  installOnProcess(policy)
     │  1. prctl(PR_SET_NO_NEW_PRIVS, 1)
     │  2. pack sock_fprog struct via FFM Arena
@@ -53,35 +53,56 @@ The enforcement engine follows a strict **Dependency Inversion** pattern to ensu
 
 ---
 
-## 2. Why a Linear BPF Scan (Not a BST)
+## 2. BPF Construction and Dispatch Guarantees
 
-BPF jump offsets are 8-bit unsigned integers — the maximum forward jump is 255 instructions.
-A Binary Search Tree layout for even a moderately sized syscall set (e.g. `PURE_COMPUTE_UNSAFE`'s
-~40 syscalls) can require jumps that exceed this limit, requiring complex instruction
-rewriting or label patching.
+The compiler uses closed instruction variants: aligned word loads, AND, conditional
+comparisons, unconditional jumps and typed Seccomp returns. Callers cannot select an
+opcode independently of the instruction's operands. `Ja` carries its skip count in
+32-bit `k`; conditional `Jmp` carries unsigned 8-bit `jt`/`jf`. Native packing retains
+the Linux `sock_filter` field widths **16/8/8/32**, totaling eight bytes.
 
-The linear scan emits two instructions per restricted syscall number. The logic
-is inverted based on the policy mode:
+`BpfBuilder` has concrete `Uninitialized → ArchVerified → Active → Terminated`
+stages. Its owner and append-only instruction buffer are private; there is no generic
+state-conversion method. Initialization cannot be repeated through retained aliases.
+A terminated result fixes its instruction prefix, so later branch emission cannot
+change that result. Labels belong to their issuing builder; unknown, duplicate,
+foreign, backward and oversized conditional destinations fail compilation. `expect`
+reloads the syscall number and requires a current, same-builder terminated block.
 
-**DENY_LIST mode:**
-```
-BPF_JEQ(nr)  → jt=0, jf=1     # if nr matches: jt=0 (no skip) → fall into RET_DENY
-BPF_RET(DENY)                  # if nr does not match: jf=1 (skip this RET_DENY)
-```
+`BpfProgram` privately owns an immutable instruction snapshot. Its constructor cannot
+be used to assert a verification status: the only `Verified` factory first runs
+`BpfStaticVerifier`. Both ordinary and supervised installers retain this type through
+`ScopedBpfProgram` to native packing. The verifier checks **every** instruction,
+including unreachable instructions, a nonempty size of at most 4096, and all forward
+destinations with overflow-safe arithmetic. With all successors advancing within the
+program and a RET tail, every path terminates. This establishes structural validity
+of the supported subset, not policy correctness, kernel support or installation.
+The kernel's verifier and installation-result checks remain required.
 
-**ALLOW_LIST mode:**
-```
-BPF_JEQ(nr)  → jt=0, jf=1     # if nr matches: jt=0 (no skip) → fall into RET_ALLOW
-BPF_RET(ALLOW)                 # if nr does not match: jf=1 (skip this RET_ALLOW)
-```
+Argument slots are a six-value enum. Equality checks own immutable value collections;
+masked checks cannot require bits outside their mask. Duplicate argument inspections
+for one syscall are rejected rather than silently shadowing a later restriction.
+Returns use the existing sealed
+`SeccompAction` hierarchy with validated errno (`1..65535`) and TRACE (`0..65535`)
+payloads, including data-class copies. One encoder retains payloads; profiling-mode
+ERRNO-to-USER_NOTIF substitution remains explicit in the policy compiler.
 
-In Classic BPF, `jt` and `jf` are **instruction skip counts** (not jump labels).
-`jt=0` means "if condition is true, skip 0 instructions" (execute the next instruction immediately).
-`jf=1` means "if condition is false, skip 1 instruction" (skip over the `RET_DENY`).
+The architecture prologue rejects mismatched audit tokens with KILL_PROCESS. AMD64
+also rejects `__X32_SYSCALL_BIT` and the legacy x32 number range 512–547 before any
+argument inspection or policy dispatch. x32 shares `AUDIT_ARCH_X86_64`; checking the
+audit token alone cannot protect native-number deny lists. The guard follows the
+audit ABI even when an architecture metadata object is copied.
 
-For 40 syscalls this produces ~80 BPF instructions — far below both the 255-offset
-and the 4096-instruction kernel BPF limits. Performance: BPF is evaluated in the kernel
-before the syscall; the linear scan overhead is negligible compared to the syscall itself.
+The existing dispatch implementation uses a small BST for 1–32 explicit actions when
+the default is ALLOW. Otherwise it scans action groups in chunks of at most 100
+syscalls, sharing each group's RET. The same symbolic label resolver checks both
+paths; unconditional jumps are not incorrectly limited to 255. Dispatch boundary
+tests compare explicit/default/profiling verdicts on AMD64 and AARCH64, including
+sizes around the BST and chunk thresholds and the unconditional JVM floor.
+
+References: Linux v6.18 [`bpf_check_classic`](https://github.com/torvalds/linux/blob/v6.18/net/core/filter.c)
+and [`seccomp_check_filter`](https://github.com/torvalds/linux/blob/v6.18/kernel/seccomp.c),
+and the x32 ABI discussion in [`seccomp(2)`](https://man7.org/linux/man-pages/man2/seccomp.2.html).
 
 ---
 
@@ -97,15 +118,17 @@ protections.
 `struct seccomp_data` byte offsets: `nr`=0, `arch`=4, `instruction_pointer`=8 (8 bytes), `args[0]`=16, `args[1]`=24, `args[2]`=32, ...
 For `mmap`/`mprotect`, `prot` is the 3rd argument → `args[2]` → **byte offset 32**.
 
+The argument-inspection decision is:
+
 ```
-BPF_JEQ(syscall_nr == mmap, match, skip_3)
-BPF_LD offset=32                             # load args[2] (prot) lower 32 bits
-BPF_JSET 0x04, match, skip_1               # (BPF_JMP|0x40|BPF_K): if PROT_EXEC bit set, jt=0 (deny); else jf=1 (skip deny)
-BPF_RET(DENY)
-# identical 3-instruction sequence for mprotect (syscall_nr == mprotect)
+if nr in {mmap, mprotect, pkey_mprotect} and executable-mapping inspection is enabled:
+    if (args[2] & 0x04) == 0: ALLOW
+    else: ERRNO(EPERM)
 ```
 
-> **`JSET` semantics:** `jt=0, jf=1` — if `(ACC & 0x04) != 0` (PROT_EXEC IS set): jt=0, execute `RET_DENY` immediately; else: jf=1, skip over `RET_DENY`.
+`MaskEquals` emits separate high/low word loads, ANDs and comparisons. Its high-word
+mask is zero here, so irrelevant upper bits do not affect the verdict. The builder
+reloads `nr` before each inspection; symbolic labels determine the actual offsets.
 
 This blocks only `mmap` / `mprotect` calls where the caller requests executable memory.
 HotSpot executable CodeHeap growth also requests `PROT_EXEC`; this check does not
@@ -117,22 +140,21 @@ the latter profile safe for arbitrary HotSpot work.
 ### 3b. `clone` — allow only `CLONE_THREAD`
 
 `clone` flags are the 1st argument → `args[0]` → **byte offset 16**.
-`CLONE_THREAD = 0x00010000`, `CLONE_VM = 0x00000100`, mask = `0x00010100`.
+`CLONE_THREAD = 0x00010000` is the inspected bit.
 
 ```
-BPF_JEQ(syscall_nr == clone, match, skip_4)
-BPF_LD offset=16                          # load args[0] (clone flags)
-BPF_ALU|BPF_AND|BPF_K (0x54) 0x00010100  # mask to CLONE_VM | CLONE_THREAD
-BPF_JEQ(0x00010100, skip_1, match)        # both bits set → JVM thread creation → skip deny
-BPF_RET(DENY)
+if nr == clone:
+    if (args[0] & CLONE_THREAD) == CLONE_THREAD: ALLOW
+    else: per-syscall action, or the policy default
 ```
 
 > **`BPF_AND` note:** There is no standalone `BPF_AND` opcode. This is `BPF_ALU | BPF_AND | BPF_K` = opcode `0x54`. The operand `K` is the mask value.
 
 The JVM creates threads via `clone(CLONE_THREAD | CLONE_VM | CLONE_SIGHAND | ...)`.
-Process forking (`fork`, `vfork`, or `clone` without `CLONE_THREAD`) hits `DENY`.
-An agent who naively adds `Syscall.CLONE` to a policy's block list would bypass
-this inspection and deadlock the JVM at the next thread creation.
+The thread branch always returns ALLOW, even when the policy denies or supervises
+CLONE. Non-thread clone follows policy; `fork` and `vfork` are separate syscall rules.
+Removing this inspection in favor of a syscall-number denial can deadlock JVM
+thread creation. The kernel still validates the dependencies between clone flags.
 
 ### 3b. Int-ABI arguments — `EqualsAny32` low-word comparisons
 For `int`-defined arguments (prctl option, socket domain) use `ArgCheck.EqualsAny32`: emit
@@ -148,7 +170,8 @@ fall back to the inspectable `clone`. This is not controlled by `allowNonThreadC
 ### 3d. `prctl` — whitelist safe options
 
 ```
-BPF_JEQ(syscall_nr == prctl, match, skip_8)
+BPF_LD(nr)
+BPF_JEQ(syscall_nr == prctl, inspect, next_syscall)
 BPF_LD(args[0])                    # load option
 BPF_JEQ(PR_SET_NAME (15), allow, ...)
 BPF_JEQ(PR_GET_NAME (16), allow, ...)
@@ -164,10 +187,12 @@ outright (via `Syscall.PRCTL` in the block list) is **not safe and must never be
 it would block the whitelisted options and prevent `PR_SET_SECCOMP` from being called
 during filter-stacking. The argument-inspection path above restricts `prctl` to the
 safe subset while leaving installation and naming intact.
+The safe branch always returns ALLOW, even under explicit PRCTL denial or a
+denying default; unsafe options remain denied.
 
 > **`allowUnsafePrctl = true`:** Setting this flag on the policy skips the argument
-> inspection entirely, leaving `prctl` unrestricted. Only use this when filter stacking
-> is explicitly required beyond the whitelisted options.
+> inspection entirely. The ordinary per-syscall/default policy action then applies
+> to every option. Use this opt-out only when options beyond the whitelist are required.
 
 ### 3e. Intentionally Unrestricted JVM Syscalls
 

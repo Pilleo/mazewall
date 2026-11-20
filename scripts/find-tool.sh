@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helper script to locate optional developer tools (codanna, jbcontext, ast-grep/sg)
+# Helper script to locate optional developer tools (jbcontext, ast-grep/sg)
 # Safe for use in git hooks and scripts across diverse developer environments and CI.
 
 find_executable() {
@@ -20,18 +20,6 @@ find_executable() {
         done
     done
     return 1
-}
-
-find_codanna() {
-    if [ -n "${CODANNA_BIN:-}" ] && [ -x "$CODANNA_BIN" ]; then
-        echo "$CODANNA_BIN"
-        return 0
-    fi
-    find_executable codanna \
-        "$HOME/.local/bin/codanna" \
-        "$HOME/.cargo/bin/codanna" \
-        "/usr/local/bin/codanna" \
-        "/opt/homebrew/bin/codanna"
 }
 
 find_jbcontext() {
@@ -79,9 +67,6 @@ find_ast_grep() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     target="${1:-status}"
     case "$target" in
-        codanna)
-            find_codanna || { echo "codanna: not found" >&2; exit 1; }
-            ;;
         jbcontext)
             find_jbcontext || { echo "jbcontext: not found" >&2; exit 1; }
             ;;
@@ -90,11 +75,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             ;;
         --status|status)
             echo "Optional Developer Tools Status:"
-            if p=$(find_codanna 2>/dev/null); then
-                echo "  [✓] codanna:   $p"
-            else
-                echo "  [ ] codanna:   not available (hooks will safely skip)"
-            fi
             if p=$(find_jbcontext 2>/dev/null); then
                 echo "  [✓] jbcontext: $p"
             else
@@ -107,7 +87,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             fi
             ;;
         *)
-            echo "Usage: $0 [codanna|jbcontext|ast-grep|--status]" >&2
+            echo "Usage: $0 [jbcontext|ast-grep|--status]" >&2
             exit 2
             ;;
     esac

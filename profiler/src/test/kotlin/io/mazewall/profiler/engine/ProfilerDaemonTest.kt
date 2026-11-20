@@ -1470,10 +1470,10 @@ class ProfilerDaemonTest {
 
         val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
 
-        // Use reflection to replace clientSockets with a list that throws a RuntimeException on add
+        // Use reflection to replace clientSockets with a list that throws an IllegalStateException on add
         val throwingList = object : java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>() {
             override fun add(element: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): Boolean {
-                throw RuntimeException("Simulated runtime exception")
+                error("Simulated client registration failure")
             }
         }
 

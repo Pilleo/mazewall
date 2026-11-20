@@ -1,30 +1,206 @@
 --- a/pkg/symbolizer/symbolizer.go
 +++ b/pkg/symbolizer/symbolizer.go
-@@ -53,1 +53,4 @@
--type Symbolizer struct {
-+type Symbolizer struct {
-+	pruneDone chan struct{}
+@@ -39,13 +39,13 @@
+ 
+ type SymbolizerOptions struct {
+ 	TraceDefinitionLifetime libpf.TraceDefinitionLifetime
+-	HotSpotEpochTarget libpf.HotSpotEpochTarget
+-	OnHotSpotFatal func(error)
+-	HotSpotObservedPID libpf.PID
+-	UseSymtab           bool
+-	UseDebugInfodCache  bool
+-	DebuginfodCachePath string
+-	UseOtelEbpfProfiler bool
++	HotSpotEpochTarget      libpf.HotSpotEpochTarget
++	OnHotSpotFatal          func(error)
++	HotSpotObservedPID      libpf.PID
++	UseSymtab               bool
++	UseDebugInfodCache      bool
++	DebuginfodCachePath     string
++	UseOtelEbpfProfiler     bool
+ 
+ 	// Context for the symbolizer lifetime. Used by the OTel resolver
+ 	// to stop its background goroutines when the gadget is closed.
+@@ -53,7 +53,10 @@
+ }
+ 
+ type Symbolizer struct {
+-	options SymbolizerOptions
++	pruneDone     chan struct{}
 +	pruneStopOnce sync.Once
-+	pruneStopped bool
-@@ -133,2 +135,4 @@
--func (s *Symbolizer) Close() {
++	pruneStopped  bool
++	options       SymbolizerOptions
+ 
+ 	resolvers []ResolverInstance
+ 
+@@ -147,13 +150,20 @@
+ }
+ 
+ func (s *Symbolizer) Close() {
 -	close(s.exit)
-+func (s *Symbolizer) Close() {
-+	ctx,cancel:=context.WithTimeout(context.Background(),2*time.Second)
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 +	defer cancel()
-+	if err:=s.stopPruning(ctx);err!=nil{return}
-@@ -140,1 +145,2 @@
--func (s *Symbolizer) pruneLoop() {
-+func (s *Symbolizer) pruneLoop() {
-+	if s.pruneDone!=nil {defer close(s.pruneDone)}
++	if err := s.stopPruning(ctx); err != nil {
++		return
++	}
+ 	for _, r := range s.resolvers {
+ 		r.Close()
+ 	}
+ }
+ 
+ func (s *Symbolizer) pruneLoop() {
++	if s.pruneDone != nil {
++		defer close(s.pruneDone)
++	}
+ 	ticker := time.NewTicker(s.pruneTickerTime)
+ 	defer ticker.Stop()
+ 	for {
 --- a/pkg/symbolizer/otel/otel.go
 +++ b/pkg/symbolizer/otel/otel.go
-@@ -212,1 +212,7 @@
--	if o.trc != nil {
+@@ -70,10 +70,10 @@
+ 
+ type otelResolverInstance struct {
+ 	definitionDrainMu sync.Mutex
+-	definitionDrain *definitionDrainOwner
+-	definitionCancel context.CancelFunc
+-	consumerDone chan struct{}
+-	options symbolizer.SymbolizerOptions
++	definitionDrain   *definitionDrainOwner
++	definitionCancel  context.CancelFunc
++	consumerDone      chan struct{}
++	options           symbolizer.SymbolizerOptions
+ 
+ 	trc *oteltracer.Tracer
+ 
+@@ -212,10 +212,21 @@
+ 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+ 	defer cancel()
+ 	if _, err := o.StopDefinitions(ctx); err != nil {
+-		if o.options.OnHotSpotFatal != nil { o.options.OnHotSpotFatal(err) }
++		if o.options.OnHotSpotFatal != nil {
++			o.options.OnHotSpotFatal(err)
++		}
+ 		return
+ 	}
+ 
 +	if o.options.HotSpotEpochTarget.PID != 0 || o.options.HotSpotObservedPID != 0 {
-+		if err:=o.StopAuxiliary(ctx);err!=nil {
-+			if o.options.OnHotSpotFatal!=nil{o.options.OnHotSpotFatal(err)}
++		if err := o.StopAuxiliary(ctx); err != nil {
++			if o.options.OnHotSpotFatal != nil {
++				o.options.OnHotSpotFatal(err)
++			}
 +			return
 +		}
 +	}
-+	if o.trc != nil {
++	o.retireAccounting()
+ 	if o.trc != nil {
+ 		o.trc.Close()
+ 	}
+@@ -483,25 +494,25 @@
+ 	// Load the eBPF code and map definitions
+ 	intervals := oteltimes.New(0, monitorInterval, 0)
+ 	trc, err := oteltracer.NewTracer(ctx, &oteltracer.Config{
+-		HotSpotEpochTarget: o.options.HotSpotEpochTarget,
++		HotSpotEpochTarget:      o.options.HotSpotEpochTarget,
+ 		TraceDefinitionLifetime: o.options.TraceDefinitionLifetime,
+-		OnHotSpotFatal: o.options.OnHotSpotFatal,
+-		HotSpotObservedPID: o.options.HotSpotObservedPID,
+-		Intervals:              intervals,
+-		IncludeTracers:         includeTracers,
+-		FilterErrorFrames:      true,
+-		SamplesPerSecond:       otelSamplesPerSecond,
+-		MapScaleFactor:         0,
+-		KernelVersionCheck:     false,
+-		VerboseMode:            log.IsLevelEnabled(log.DebugLevel),
+-		BPFVerifierLogLevel:    bpfVerifierLogLevel(),
+-		ProbabilisticInterval:  0,
+-		ProbabilisticThreshold: 0,
+-		OffCPUThreshold:        0,
+-		IncludeEnvVars:         nil,
+-		ProbeLinks:             nil,
+-		LoadProbe:              true,
+-		TraceReporter:          rep,
++		OnHotSpotFatal:          o.options.OnHotSpotFatal,
++		HotSpotObservedPID:      o.options.HotSpotObservedPID,
++		Intervals:               intervals,
++		IncludeTracers:          includeTracers,
++		FilterErrorFrames:       true,
++		SamplesPerSecond:        otelSamplesPerSecond,
++		MapScaleFactor:          0,
++		KernelVersionCheck:      false,
++		VerboseMode:             log.IsLevelEnabled(log.DebugLevel),
++		BPFVerifierLogLevel:     bpfVerifierLogLevel(),
++		ProbabilisticInterval:   0,
++		ProbabilisticThreshold:  0,
++		OffCPUThreshold:         0,
++		IncludeEnvVars:          nil,
++		ProbeLinks:              nil,
++		LoadProbe:               true,
++		TraceReporter:           rep,
+ 	})
+ 	if err != nil {
+ 		return fmt.Errorf("loading OpenTelemetry eBPF tracer: %w", err)
+@@ -529,18 +540,22 @@
+ 	go func() {
+ 		defer close(o.consumerDone)
+ 		// Poll the output channels
+ 		for {
+ 			select {
+ 			case trace, open := <-traceCh:
+-				if !open { return }
++				if !open {
++					o.channelCloseExit()
++					return
++				}
+-				if trace != nil {
++				if o.admitChannelTrace(trace) {
+ 					trc.HandleTrace(trace)
+ 				}
+ 			case <-ctx.Done():
++				o.channelCancelExit()
+ 				return
+ 			}
+ 		}
+ 	}()
+ 
+ 	return nil
+ }
+--- a/pkg/operators/ebpf/ebpf.go
++++ b/pkg/operators/ebpf/ebpf.go
+@@ -201,11 +201,11 @@
+ }
+ 
+ type ebpfInstance struct {
+-	eventFinalizer *eventStopOwner
+-	eventStopOptions *operators.EventFinalizationOptions
++	eventFinalizer     *eventStopOwner
++	eventStopOptions   *operators.EventFinalizationOptions
+ 	selectedAccounting *selectedAccountingBinding
+-	mu          sync.Mutex
+-	bpfOperator *ebpfOperator
++	mu                 sync.Mutex
++	bpfOperator        *ebpfOperator
+ 
+ 	config *viper.Viper
+ 
+@@ -1126,7 +1126,9 @@
+ }
+ 
+ func (i *ebpfInstance) Stop(gadgetCtx operators.GadgetContext) error {
+-	if i.eventFinalizer != nil { return i.stopOwnedEvents() }
++	if i.eventFinalizer != nil {
++		return i.stopOwnedEvents()
++	}
+ 	for _, t := range i.tracers {
+ 		t.close()
+ 	}
+@@ -1158,7 +1160,9 @@
+ 
+ func (i *ebpfInstance) Close(gadgetCtx operators.GadgetContext) error {
+ 	if i.eventFinalizer != nil {
+-		if err := i.closeOwnedEvents(); err != nil { return err }
++		if err := i.closeOwnedEvents(); err != nil {
++			return err
++		}
+ 	}
+ 	i.detachRawPrograms()
+ 

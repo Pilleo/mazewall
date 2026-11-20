@@ -8,8 +8,14 @@ component: "portals"
 target_modules: [":portals:runtime", ":portals:worker"]
 target_files:
   - "portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/PortalGenerationCaptures.kt"
+  - "portals/runtime/src/test/kotlin/io/mazewall/portal/PortalGenerationCaptureTest.kt"
+  - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerDriver.kt"
+  - "portals/worker/src/test/kotlin/io/mazewall/portal/worker/PortalWorkerDriverTest.kt"
 target_symbols:
   - "ProcessBroker"
+  - "PortalGenerationCaptures"
+  - "PortalWorkerDriver"
 open_questions: false
 ---
 
@@ -37,6 +43,38 @@ Parent permit and ACK precede containment, but final readiness uses a stdout sen
 - M1 new receipt finalization uses existing fatal-first identity-preserving CleanupFailures.merge for startup and execution, with ordinary-primary/fatal-retirement regression and existing inverse coverage.
 - Targeted red: run-3de9063379a1. Final full focused owning/native/Detekt/ratchet gate: run-faaf52845a65. Additional real-cache-generation plus retained prepared-operation fixture gate: run-282446aabf19. Final revised commit/range/counts/full-hook evidence are in the task-1 report round1 appendix. Backlog index remains coordinator-owned.
 - I3 cancellation self-review: FileChannel native close can synchronously wait on I/O inside Thread.interrupt. A real AbstractInterruptibleChannel held-close test failed by startup-result timeout (run-6cbe421fb042). Cancellation callbacks now have separately registered asynchronous physical ownership; both source and cancellation threads must actually terminate/join before the owner retires. This closes the control-plane blocking-cancel gap without asserting that one completion latch is thread/process death.
+
+## Recursive-review residuals — 2026-11-04
+
+The [recursive follow-up](../reviews/2026-11-04-repository-review-recursive.md)
+adds two **P2 source-confirmed residuals** under this issue's M1/I3 ownership.
+Preserve the implemented corrections and historical evidence above; neither case
+reopens the resolved reply-loop/transport issues or establishes a native leak.
+
+- **[PRT-08](../reviews/2026-11-04-repository-review-recursive.md#prt-08), M1:**
+  `PortalWorkerDriver.kt:47–52` suppresses transport-close Error under an ordinary
+  receive/send failure. Outer receipt finalization does not promote that suppressed
+  fatal. Fold outcomes with existing `CleanupFailures.merge`; preserve exact fatal
+  identity, ordinary context, once-only close and no second frame. A native-free
+  driver test must inject IOException then a distinct close Error, plus reversed,
+  fatal/fatal and identical-object controls. This is the inverse order missing from
+  the existing driver tests, not the already-correct receipt fold.
+- **[PRT-09](../reviews/2026-11-04-repository-review-recursive.md#prt-09), I3:**
+  `PortalGenerationCaptures.kt:26–29` registers before final authority check/start.
+  Concurrent cancellation sees NEW (`:128–132`); physical-end accepts NEW (`:95`),
+  then retirement removes the owner and joins its never-produced result (`:47–49`).
+  Resumed startup fails its authority check without starting the sole producer
+  (`:77–82`). Broker close can reach this after startup-join timeout
+  (`ProcessBroker.kt:417–432`). Serialize never-started cancellation with start
+  authority and publish/recognize its terminal outcome; do not forget a still-startable
+  owner or join an unpublished result. Barrier after registration/before start:
+  require zero action entry, deadline-bounded retirement and no retained owner;
+  contrast actual-start/held-physical-work and preserve unobserved-fatal controls.
+
+These schedules were source-reviewed, not executed. Required focused host/worker
+regressions and affected native/full gates remain with implementation. Existing
+physical source/cancellation joins, exact receipt lifetime and stable-cache
+association keep their credit; C4 concurrent pinning remains separate.
 
 ---
 <!-- id: issue-20261008-003135-816-bind-portal-readiness-to-actual-installation-recei  file: issue-20261008-003135-816-bind-portal-readiness-to-actual-installation-recei.md -->

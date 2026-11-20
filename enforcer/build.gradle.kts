@@ -377,10 +377,22 @@ val managedLayoutFixtureJar =
 
 val managedFixturePlatformJar = platformJar
 tasks.named<Test>("test") {
+    val probeParallelism =
+        providers
+            .gradleProperty("mazewall.test.probeParallelism")
+            .orNull
+            ?.toInt()
+            ?: (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
+    systemProperty("junit.jupiter.execution.parallel.enabled", "true")
+    systemProperty("junit.jupiter.execution.parallel.mode.default", "same_thread")
+    systemProperty("junit.jupiter.execution.parallel.mode.classes.default", "same_thread")
+    systemProperty("junit.jupiter.execution.parallel.config.strategy", "fixed")
+    systemProperty("junit.jupiter.execution.parallel.config.fixed.parallelism", probeParallelism.toString())
     filter {
         excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture proves checked original native ownership")
         excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects invalid actual associations")
         excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects duplicate nested helper class")
+        excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture preserves checked helper history retirement")
     }
     dependsOn(platformJar, tasks.named("jar"), managedLayoutFixtureJar)
     jvmArgumentProviders.add(
@@ -423,6 +435,7 @@ if (managedT4FixtureEnabled) {
             includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture proves checked original native ownership")
             includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects invalid actual associations")
             includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects duplicate nested helper class")
+            includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture preserves checked helper history retirement")
         }
         inputs.files(managedT4PlatformFixtureJar, tasks.named<Jar>("jar").flatMap { it.archiveFile }, managedLayoutFixtureJar.flatMap { it.archiveFile }, configurations.runtimeClasspath)
         doFirst {
@@ -441,7 +454,7 @@ if (managedT4FixtureEnabled) {
                         .archiveFile
                         .get()
                         .asFile.canonicalPath,
-                    dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
+                    dependency("kotlin-stdlib-2.4.21.jar"),
                     dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
                     dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
                     dependency("annotations-13.0.jar"),
@@ -455,6 +468,12 @@ if (managedT4FixtureEnabled) {
             systemProperty("mazewall.managed.t4.fixture.expected", file(expected).canonicalPath)
             systemProperty("mazewall.managed.t4.fixture.agent", file(agent).canonicalPath)
             systemProperty("mazewall.managed.t4.fixture.vmArguments", file(vmArguments).canonicalPath)
+            providers.gradleProperty("mazewallT4SupportManifest").orNull?.let {
+                systemProperty("mazewall.managed.t4.fixture.supportManifest", file(it).canonicalPath)
+            }
+            providers.gradleProperty("mazewallT4ApplicationRoot").orNull?.let {
+                systemProperty("mazewall.managed.t4.fixture.applicationRoot", file(it).canonicalPath)
+            }
         }
     }
 }
@@ -477,7 +496,7 @@ tasks.register("managedT4FixtureClasspath") {
                     .archiveFile
                     .get()
                     .asFile.canonicalPath,
-                dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
+                dependency("kotlin-stdlib-2.4.21.jar"),
                 dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
                 dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
                 dependency("annotations-13.0.jar"),

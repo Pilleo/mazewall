@@ -59,7 +59,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             peer.start()
             try {
                 val result = Profiler.profile(processWide = processWide, captureStackTraces = false) {
-                    java.net.Socket().use { socket ->
+                    java.net.Socket(java.net.Proxy.NO_PROXY).use { socket ->
                         socket.connect(java.net.InetSocketAddress(loopback, server.localPort), 5_000)
                         socket.getOutputStream().write(42)
                     }

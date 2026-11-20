@@ -1,0 +1,323 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+// kindMeta holds per-kind cause and admit-time identity. Counters stay on KindLedger.
+type kindMeta struct {
+	expected        libpf.AuxiliaryBinding
+	haveExpected    bool
+	identityMissing bool
+	cause           error
+	sticky          error
+}
+
+// KindBook is shared kind arithmetic. It starts no goroutine and mints no generation.
+type KindBook struct {
+	mu        sync.Mutex
+	frozen    bool
+	ledgers   map[libpf.AuxiliarySource]libpf.KindLedger
+	meta      map[libpf.AuxiliarySource]kindMeta
+	snapshots map[libpf.AuxiliarySource]libpf.KindObservation
+	localSnapshot kindsLocalCache
+}
+
+// KindOp is one admitted kind invocation. release runs after the book lock drops.
+type KindOp struct {
+	book       *KindBook
+	kind       libpf.AuxiliarySource
+	mu         sync.Mutex
+	terminated bool
+	release    func()
+}
+
+var allowedAuxiliarySources = [...]libpf.AuxiliarySource{
+	libpf.AuxiliarySourcePeriodicMetrics,
+	libpf.AuxiliarySourcePIDCleanup,
+	libpf.AuxiliarySourceInterpreterMetrics,
+	libpf.AuxiliarySourcePruneCycle,
+	libpf.AuxiliarySourcePruneScanOtel,
+	libpf.AuxiliarySourcePruneScanSymtab,
+	libpf.AuxiliarySourcePruneScanDebuginfod,
+	libpf.AuxiliarySourceKobjectReceive,
+	libpf.AuxiliarySourceModuleQueued,
+	libpf.AuxiliarySourceModuleCoalesced,
+	libpf.AuxiliarySourceSymbolQueued,
+	libpf.AuxiliarySourceSymbolCoalesced,
+	libpf.AuxiliarySourceModuleExec,
+	libpf.AuxiliarySourceSymbolExec,
+	libpf.AuxiliarySourceReportReloadRecord,
+}
+
+func NewKindBook() *KindBook {
+	return &KindBook{
+		ledgers:   make(map[libpf.AuxiliarySource]libpf.KindLedger),
+		meta:      make(map[libpf.AuxiliarySource]kindMeta),
+		snapshots: make(map[libpf.AuxiliarySource]libpf.KindObservation),
+	}
+}
+
+func isAllowedAuxiliarySource(source libpf.AuxiliarySource) bool {
+	for _, allowed := range allowedAuxiliarySources {
+		if source == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func kindIdentityMatches(expected, actual libpf.AuxiliaryBinding) bool {
+	return expected.Session != "" && expected.HostTGID != 0 && expected.Birth != 0 && expected.Generation != 0 &&
+		expected.Session == actual.Session && expected.HostTGID == actual.HostTGID &&
+		expected.Birth == actual.Birth && expected.Generation == actual.Generation
+}
+
+// Admit records one kind invocation. A nil book is a no-op. It does not touch a waitgroup.
+func (b *KindBook) Admit(kind libpf.AuxiliarySource, expected libpf.AuxiliaryBinding, haveExpected bool) (*KindOp, error) {
+	if b == nil {
+		return nil, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.frozen {
+		return nil, fmt.Errorf("auxiliary admission rejected: kind book frozen")
+	}
+	kl := b.ledgers[kind]
+	meta := b.meta[kind]
+	if kl.Admitted == math.MaxUint64 || kl.InFlight == math.MaxUint64 {
+		err := fmt.Errorf("auxiliary kind counter overflow")
+		kl.Overflow = true
+		b.ledgers[kind] = kl
+		meta.sticky = errors.Join(meta.sticky, err)
+		b.meta[kind] = meta
+		return nil, err
+	}
+	kl.Admitted++
+	kl.InFlight++
+	b.ledgers[kind] = kl
+	if haveExpected && !meta.identityMissing {
+		if !meta.haveExpected {
+			meta.expected = expected
+			meta.haveExpected = true
+		}
+	} else {
+		meta.identityMissing = true
+		meta.haveExpected = false
+		meta.expected = libpf.AuxiliaryBinding{}
+	}
+	b.meta[kind] = meta
+	return &KindOp{book: b, kind: kind}, nil
+}
+
+func (b *KindBook) noteSticky(kind libpf.AuxiliarySource, err error) {
+	if b == nil || err == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta := b.meta[kind]
+	meta.sticky = errors.Join(meta.sticky, err)
+	b.meta[kind] = meta
+}
+
+func (op *KindOp) Complete() error { return op.finish(terminalComplete, nil, "complete") }
+
+func (op *KindOp) Fail(err error) error { return op.finish(terminalFail, err, "fail") }
+
+func (op *KindOp) Abort() error { return op.finish(terminalAbort, nil, "abort") }
+
+func (op *KindOp) Skip() error { return op.finish(terminalSkip, nil, "skip") }
+
+func (op *KindOp) Incomplete(err error) error {
+	return op.finish(terminalIncomplete, err, "incomplete")
+}
+
+func (op *KindOp) finish(term terminalKind, cause error, action string) error {
+	if op == nil {
+		return nil
+	}
+	op.mu.Lock()
+	if op.terminated {
+		kind := op.kind
+		book := op.book
+		op.mu.Unlock()
+		return book.rejectDuplicate(kind, action)
+	}
+	op.terminated = true
+	release := op.release
+	op.release = nil
+	kind := op.kind
+	book := op.book
+	op.mu.Unlock()
+	err := book.recordTerminal(kind, term, cause)
+	if release != nil {
+		release()
+	}
+	return err
+}
+
+func (b *KindBook) rejectDuplicate(kind libpf.AuxiliarySource, action string) error {
+	err := fmt.Errorf("auxiliary kind duplicate terminal rejected on %s", action)
+	if b == nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kl := b.ledgers[kind]
+	kl.Overflow = true
+	b.ledgers[kind] = kl
+	meta := b.meta[kind]
+	meta.sticky = errors.Join(meta.sticky, err)
+	b.meta[kind] = meta
+	return err
+}
+
+func (b *KindBook) recordTerminal(kind libpf.AuxiliarySource, term terminalKind, cause error) error {
+	if b == nil {
+		return fmt.Errorf("nil kind book")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kl := b.ledgers[kind]
+	meta := b.meta[kind]
+	if kl.InFlight == 0 {
+		err := fmt.Errorf("auxiliary kind terminal underflow on %v", kind)
+		kl.Overflow = true
+		b.ledgers[kind] = kl
+		meta.sticky = errors.Join(meta.sticky, err)
+		b.meta[kind] = meta
+		return err
+	}
+	overflow := false
+	switch term {
+	case terminalComplete:
+		overflow = kl.Completed == math.MaxUint64
+	case terminalFail:
+		overflow = kl.Failed == math.MaxUint64
+	case terminalAbort:
+		overflow = kl.Aborted == math.MaxUint64
+	case terminalSkip:
+		overflow = kl.Skipped == math.MaxUint64
+	case terminalIncomplete:
+		overflow = kl.Incomplete == math.MaxUint64
+	default:
+		err := fmt.Errorf("auxiliary kind terminal unknown")
+		meta.sticky = errors.Join(meta.sticky, err)
+		b.meta[kind] = meta
+		return err
+	}
+	if overflow {
+		err := fmt.Errorf("auxiliary kind counter overflow")
+		kl.Overflow = true
+		b.ledgers[kind] = kl
+		meta.sticky = errors.Join(meta.sticky, err)
+		b.meta[kind] = meta
+		return err
+	}
+	kl.InFlight--
+	switch term {
+	case terminalComplete:
+		kl.Completed++
+	case terminalFail:
+		kl.Failed++
+	case terminalAbort:
+		kl.Aborted++
+	case terminalSkip:
+		kl.Skipped++
+	case terminalIncomplete:
+		kl.Incomplete++
+	}
+	if cause != nil {
+		meta.cause = errors.Join(meta.cause, cause)
+	}
+	b.ledgers[kind] = kl
+	b.meta[kind] = meta
+	return nil
+}
+
+// Freeze seals kind admission and writes every allowed kind. It does not wait or query.
+func (b *KindBook) Freeze(expired bool, actual libpf.AuxiliaryBinding, identityErr error) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.frozen {
+		return
+	}
+	b.frozen = true
+	for _, source := range allowedAuxiliarySources {
+		kCounts := b.ledgers[source]
+		meta := b.meta[source]
+		kOutcome := libpf.AuxiliaryNotExercised
+		kHeld := false
+		var kErr error
+		var kBinding libpf.AuxiliaryBinding
+
+		if kCounts.Admitted == 0 {
+			kErr = meta.sticky
+		} else {
+			kOutcome = libpf.SourceLocalNonfinal
+			kHeld = kCounts.InFlight > 0 || expired
+			kErr = errors.Join(meta.cause, meta.sticky, identityErr)
+			if kHeld {
+				if kCounts.InFlight > 0 {
+					kErr = errors.Join(kErr, fmt.Errorf("auxiliary kind work held at retirement barrier"))
+				}
+			}
+			switch {
+			case expired || meta.identityMissing || !meta.haveExpected:
+				kErr = errors.Join(kErr, fmt.Errorf("auxiliary kind identity unknown"))
+			case identityErr != nil || !kindIdentityMatches(meta.expected, actual):
+				kErr = errors.Join(kErr, fmt.Errorf("changed auxiliary kind identity"))
+			default:
+				kBinding = meta.expected
+			}
+			if kErr == nil && (kCounts.Failed > 0 || kCounts.Aborted > 0 || kCounts.Incomplete > 0 || kCounts.Overflow) {
+				kErr = fmt.Errorf("kind %v had failures or incomplete operations", source)
+			}
+		}
+
+		if err := libpf.ReconcileKindLedger(kCounts); err != nil {
+			kErr = errors.Join(kErr, err)
+		}
+		if kCounts.Admitted > 0 && !kHeld && kErr == nil {
+			kOutcome = libpf.AuxiliaryFinal
+		}
+		b.snapshots[source] = libpf.KindObservation{
+			Binding:  kBinding,
+			Counts:   kCounts,
+			Outcome:  kOutcome,
+			HeldWork: kHeld,
+			Err:      kErr,
+		}
+	}
+	b.publishKindsLocalLocked()
+}
+
+func (b *KindBook) Observation(kind libpf.AuxiliarySource) (libpf.KindObservation, error) {
+	if b == nil {
+		return libpf.KindObservation{}, fmt.Errorf("nil kind book")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.frozen {
+		return libpf.KindObservation{}, fmt.Errorf("auxiliary snapshot not yet frozen")
+	}
+	if !isAllowedAuxiliarySource(kind) {
+		return libpf.KindObservation{}, fmt.Errorf("auxiliary source %v not allowed", kind)
+	}
+	obs, ok := b.snapshots[kind]
+	if !ok {
+		return libpf.KindObservation{}, fmt.Errorf("auxiliary source %v not allowed", kind)
+	}
+	return obs, obs.Err
+}

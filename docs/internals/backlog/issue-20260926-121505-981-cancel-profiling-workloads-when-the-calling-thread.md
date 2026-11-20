@@ -46,4 +46,13 @@ Static review on 2026-09-26; not yet runtime-reproduced:
 Residual cancellation gap after [bounded blocking waits](resolved/issue-20260823-172000-bound-blocking-waits.md); the elapsed-time timeout already exists. Read `../designs/core/notification-liveness-contract.md` before changing cleanup order. Keep the public profiling API compatible; expand declared scope before changing another lifecycle owner.
 
 ---
+## Repository-review revalidation — 2026-11-04
+
+[PN05-03](../reviews/2026-11-04-repository-review-findings.md#pn05-03) remains live.
+Test **caller interruption**, separately from elapsed timeout, with a held interrupt-resistant
+workload. Retain its original cancellation/physical-retirement owner and truthful incomplete
+outcome; notification deadlines cannot complete arbitrary Java work. No duplicate issue or
+historical cold-network diagnosis is implied.
+
+---
 <!-- id: issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread  file: issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md -->

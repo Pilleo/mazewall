@@ -1,0 +1,608 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"sync"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+type definitionOwnerState uint8
+
+const (
+	definitionOwnerOpen definitionOwnerState = iota
+	definitionOwnerClosing
+	definitionOwnerFinalizing
+	definitionOwnerClosed
+)
+
+var traceDefinitionInfoFn = traceDefinitionInfo
+var traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+	if m == nil {
+		return nil, fmt.Errorf("nil map")
+	}
+	return m.Clone()
+}
+var traceDefinitionMapCloser = func(m *cebpf.Map) error {
+	if m == nil {
+		return nil
+	}
+	return m.Close()
+}
+
+// definitionOwner manages private profiler map clones and the covering capture hold.
+type definitionOwner struct {
+	mu            sync.Mutex
+	state         definitionOwnerState
+	enteredCount  int
+	closeReqDone  chan struct{}
+	quarantined   bool
+	readoutSealed bool
+	scopeJoinOnce sync.Once
+	scopeJoinDone chan struct{}
+
+	ctx context.Context
+
+	lifetime libpf.TraceDefinitionLifetime
+	release  func() error
+
+	countsMap *cebpf.Map
+	configMap *cebpf.Map
+	perfMap   *cebpf.Map
+	pidMap    *cebpf.Map
+
+	countsID uint32
+	configID uint32
+	perfID   uint32
+	pidID    uint32
+
+	closeErr error
+
+	mapCloser func(*cebpf.Map) error
+	ops       traceDefinitionMapOps
+
+	closeEntered chan struct{}
+}
+
+type traceDefinitionOwnerError struct {
+	cause error
+	owner *definitionOwner
+}
+
+func (e *traceDefinitionOwnerError) Error() string {
+	if e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *traceDefinitionOwnerError) Unwrap() error {
+	return e.cause
+}
+
+func (e *traceDefinitionOwnerError) Is(target error) bool {
+	if e == nil || target == nil {
+		return false
+	}
+	var targetComparable bool
+	if target != nil {
+		targetComparable = reflect.TypeOf(target).Comparable()
+	}
+	seen := make(map[*definitionOwner]struct{})
+
+	var match func(err error) bool
+	match = func(err error) bool {
+		if err == nil {
+			return false
+		}
+		if targetComparable && err == target {
+			return true
+		}
+		if ownerErr, ok := err.(*traceDefinitionOwnerError); ok {
+			if match(ownerErr.cause) {
+				return true
+			}
+			if ownerErr.owner == nil {
+				return false
+			}
+			if _, visited := seen[ownerErr.owner]; visited {
+				return false
+			}
+			seen[ownerErr.owner] = struct{}{}
+			return match(ownerErr.owner.CloseErr())
+		}
+		if x, ok := err.(interface{ Is(error) bool }); ok {
+			if x.Is(target) {
+				return true
+			}
+		}
+		if x, ok := err.(interface{ Unwrap() error }); ok {
+			return match(x.Unwrap())
+		}
+		if x, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, child := range x.Unwrap() {
+				if match(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	return match(e)
+}
+
+func (e *traceDefinitionOwnerError) PendingOwner() *definitionOwner {
+	return e.owner
+}
+
+func (o *definitionOwner) CloseErr() error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.closeErr
+}
+
+func acquireDefinitionOwner(ctx context.Context, lifetime libpf.TraceDefinitionLifetime, ebpfMaps map[string]*cebpf.Map) (*definitionOwner, error) {
+	if lifetime == nil {
+		return nil, nil
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	retainer, ok := lifetime.(libpf.TraceDefinitionRetainer)
+	if !ok {
+		return nil, fmt.Errorf("trace definition lifetime lacks retainer capability")
+	}
+	heldLifetime, release, err := retainer.RetainDefinitionLifetime()
+	if err != nil {
+		return nil, fmt.Errorf("retain trace definition lifetime: %w", err)
+	}
+
+	closer := traceDefinitionMapCloser
+	if closer == nil {
+		closer = func(m *cebpf.Map) error { return m.Close() }
+	}
+
+	ops := defaultTraceDefinitionMapOps()
+	if closer != nil {
+		ops.close = closer
+	}
+
+	owner := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		ctx:          ctx,
+		lifetime:     heldLifetime,
+		release:      release,
+		mapCloser:    closer,
+		ops:          ops,
+	}
+
+	fail := func(cause error) (*definitionOwner, error) {
+		closeErr := owner.Close()
+		joined := errors.Join(cause, closeErr)
+		return nil, &traceDefinitionOwnerError{cause: joined, owner: owner}
+	}
+
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
+	}
+
+	// Validate under covering hold before querying getters
+	if err := heldLifetime.Validate(); err != nil {
+		return fail(fmt.Errorf("validate held trace definition target: %w", err))
+	}
+
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
+	}
+
+	if ebpfMaps == nil {
+		return fail(fmt.Errorf("profiler ebpf maps unavailable"))
+	}
+
+	// Map names to acquire
+	countsOrig := ebpfMaps[traceDefinitionCounterMap]
+	configOrig := ebpfMaps[traceDefinitionConfigMap]
+	perfOrig := ebpfMaps["trace_events"]
+	pidOrig := ebpfMaps["pid_events"]
+
+	if countsOrig == nil || configOrig == nil || perfOrig == nil || pidOrig == nil {
+		return fail(fmt.Errorf("required profiler maps missing for cloning"))
+	}
+
+	if ctx != nil && ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+
+	// 1. Clone trace_definition_counts
+	countsInfo, err := traceDefinitionInfoFn(countsOrig)
+	if err != nil {
+		return fail(fmt.Errorf("counts original map info: %w", err))
+	}
+	if countsInfo.Type != uint32(cebpf.PerCPUArray) || countsInfo.KeySize != 4 || countsInfo.ValueSize != 40 || countsInfo.MaxEntries != 1 {
+		return fail(fmt.Errorf("counts original map layout mismatch"))
+	}
+	countsClone, err := traceDefinitionMapCloner(countsOrig)
+	if err != nil {
+		return fail(fmt.Errorf("clone counts map: %w", err))
+	}
+	owner.countsMap = countsClone
+	countsCloneInfo, err := traceDefinitionInfoFn(countsClone)
+	if err != nil {
+		return fail(fmt.Errorf("counts clone info: %w", err))
+	}
+	if countsCloneInfo.ID != countsInfo.ID {
+		return fail(fmt.Errorf("counts clone info mismatch"))
+	}
+	owner.countsID = countsCloneInfo.ID
+
+	if ctx != nil && ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+
+	// 2. Clone trace_definition_config
+	configInfo, err := traceDefinitionInfoFn(configOrig)
+	if err != nil {
+		return fail(fmt.Errorf("config original map info: %w", err))
+	}
+	if configInfo.Type != uint32(cebpf.Array) || configInfo.KeySize != 4 || configInfo.ValueSize != 24 || configInfo.MaxEntries != 1 {
+		return fail(fmt.Errorf("config original map layout mismatch"))
+	}
+	configClone, err := traceDefinitionMapCloner(configOrig)
+	if err != nil {
+		return fail(fmt.Errorf("clone config map: %w", err))
+	}
+	owner.configMap = configClone
+	configCloneInfo, err := traceDefinitionInfoFn(configClone)
+	if err != nil {
+		return fail(fmt.Errorf("config clone info: %w", err))
+	}
+	if configCloneInfo.ID != configInfo.ID {
+		return fail(fmt.Errorf("config clone info mismatch"))
+	}
+	owner.configID = configCloneInfo.ID
+
+	if ctx != nil && ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+
+	// 3. Clone trace_events
+	perfInfo, err := traceDefinitionInfoFn(perfOrig)
+	if err != nil {
+		return fail(fmt.Errorf("perf original map info: %w", err))
+	}
+	if perfInfo.Type != uint32(cebpf.PerfEventArray) || perfInfo.KeySize != 4 || perfInfo.ValueSize != 4 {
+		return fail(fmt.Errorf("perf original map layout mismatch"))
+	}
+	perfClone, err := traceDefinitionMapCloner(perfOrig)
+	if err != nil {
+		return fail(fmt.Errorf("clone perf map: %w", err))
+	}
+	owner.perfMap = perfClone
+	perfCloneInfo, err := traceDefinitionInfoFn(perfClone)
+	if err != nil {
+		return fail(fmt.Errorf("perf clone info: %w", err))
+	}
+	if perfCloneInfo.ID != perfInfo.ID {
+		return fail(fmt.Errorf("perf clone info mismatch"))
+	}
+	owner.perfID = perfCloneInfo.ID
+
+	if ctx != nil && ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+
+	// 4. Clone pid_events
+	pidInfo, err := traceDefinitionInfoFn(pidOrig)
+	if err != nil {
+		return fail(fmt.Errorf("pid original map info: %w", err))
+	}
+	if pidInfo.Type != uint32(cebpf.Hash) || pidInfo.KeySize != 8 || pidInfo.ValueSize != 1 || pidInfo.MaxEntries == 0 {
+		return fail(fmt.Errorf("pid original map layout mismatch"))
+	}
+	pidClone, err := traceDefinitionMapCloner(pidOrig)
+	if err != nil {
+		return fail(fmt.Errorf("clone pid map: %w", err))
+	}
+	owner.pidMap = pidClone
+	pidCloneInfo, err := traceDefinitionInfoFn(pidClone)
+	if err != nil {
+		return fail(fmt.Errorf("pid clone info: %w", err))
+	}
+	if pidCloneInfo.ID != pidInfo.ID {
+		return fail(fmt.Errorf("pid clone info mismatch"))
+	}
+	owner.pidID = pidCloneInfo.ID
+
+	// Verify distinct IDs
+	if owner.countsID == 0 || owner.configID == 0 || owner.perfID == 0 || owner.pidID == 0 {
+		return fail(fmt.Errorf("zero map ID detected during cloning"))
+	}
+	if owner.countsID == owner.configID || owner.countsID == owner.perfID || owner.configID == owner.perfID {
+		return fail(fmt.Errorf("duplicate map IDs detected during cloning"))
+	}
+
+	return owner, nil
+}
+
+func (o *definitionOwner) HeldLifetime() libpf.TraceDefinitionLifetime {
+	if o == nil {
+		return nil
+	}
+	return o.lifetime
+}
+
+func (o *definitionOwner) CountsMap() *cebpf.Map {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.countsMap
+}
+
+func (o *definitionOwner) ConfigMap() *cebpf.Map {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.configMap
+}
+
+func (o *definitionOwner) PerfMap() *cebpf.Map {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.perfMap
+}
+
+func (o *definitionOwner) PIDMap() *cebpf.Map {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.pidMap
+}
+
+func (o *definitionOwner) CountsID() uint32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.countsID
+}
+
+func (o *definitionOwner) PerfID() uint32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.perfID
+}
+
+func (o *definitionOwner) PIDID() uint32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.pidID
+}
+
+func (o *definitionOwner) Closed() bool {
+	if o == nil {
+		return true
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.state == definitionOwnerClosed
+}
+
+func (o *definitionOwner) Context() context.Context {
+	if o == nil || o.ctx == nil {
+		return context.Background()
+	}
+	return o.ctx
+}
+
+func (o *definitionOwner) Closing() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.state != definitionOwnerOpen
+}
+
+func (o *definitionOwner) Quarantined() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.quarantined
+}
+
+func (o *definitionOwner) sealReadoutAdmission() {
+	o.mu.Lock()
+	o.readoutSealed = true
+	o.mu.Unlock()
+}
+
+func (o *definitionOwner) readoutAdmissionError() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.state != definitionOwnerOpen || o.quarantined || o.readoutSealed {
+		return fmt.Errorf("definition owner not open")
+	}
+	if o.ctx != nil {
+		return o.ctx.Err()
+	}
+	return nil
+}
+
+func (o *definitionOwner) WithCoveredReadout(action func() error) error {
+	if o == nil {
+		return fmt.Errorf("definition owner unavailable")
+	}
+	o.mu.Lock()
+	if o.state != definitionOwnerOpen || o.quarantined || o.readoutSealed {
+		st := o.state
+		o.mu.Unlock()
+		return fmt.Errorf("definition owner not open: %d", st)
+	}
+	if o.ctx != nil && o.ctx.Err() != nil {
+		err := o.ctx.Err()
+		o.mu.Unlock()
+		return err
+	}
+	o.enteredCount++
+	o.mu.Unlock()
+
+	var actionErr error
+	if action != nil {
+		actionErr = action()
+	}
+
+	var startFinalizer bool
+	o.mu.Lock()
+	commitErr := actionErr
+	if commitErr == nil {
+		if o.state != definitionOwnerOpen || o.quarantined || o.readoutSealed {
+			commitErr = fmt.Errorf("definition owner not open before completion commit: %d", o.state)
+		} else if o.ctx != nil && o.ctx.Err() != nil {
+			commitErr = fmt.Errorf("definition owner context expired before completion commit: %w", o.ctx.Err())
+		}
+	}
+	o.enteredCount--
+	if o.enteredCount == 0 && (o.state == definitionOwnerClosing || o.quarantined) && o.state != definitionOwnerFinalizing {
+		o.state = definitionOwnerFinalizing
+		startFinalizer = true
+	}
+	o.mu.Unlock()
+
+	if startFinalizer {
+		go o.runFinalizer()
+	}
+	return commitErr
+}
+
+func (o *definitionOwner) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return o.closeWithContext(ctx)
+}
+
+func (o *definitionOwner) closeWithContext(ctx context.Context) error {
+	if o == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	o.mu.Lock()
+	if o.state == definitionOwnerClosed {
+		err := o.closeErr
+		o.mu.Unlock()
+		return err
+	}
+
+	var expiredAtEntry bool
+	var expiredErr error
+	if ctx != nil && ctx.Err() != nil {
+		expiredAtEntry = true
+		expiredErr = fmt.Errorf("definition owner close context expired: %w", ctx.Err())
+		o.quarantined = true
+	}
+
+	if o.state == definitionOwnerOpen {
+		o.state = definitionOwnerClosing
+		if o.closeEntered != nil {
+			select {
+			case <-o.closeEntered:
+			default:
+				close(o.closeEntered)
+			}
+		}
+	}
+
+	var startFinalizer bool
+	if o.enteredCount == 0 && o.state != definitionOwnerFinalizing {
+		o.state = definitionOwnerFinalizing
+		startFinalizer = true
+	}
+	done := o.closeReqDone
+	o.mu.Unlock()
+
+	if startFinalizer {
+		go o.runFinalizer()
+	}
+
+	if expiredAtEntry {
+		return &traceDefinitionOwnerError{cause: expiredErr, owner: o}
+	}
+
+	select {
+	case <-done:
+		o.mu.Lock()
+		err := o.closeErr
+		o.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		o.mu.Lock()
+		if o.state != definitionOwnerClosed {
+			o.quarantined = true
+			err := fmt.Errorf("definition owner close context expired: %w", ctx.Err())
+			o.mu.Unlock()
+			return &traceDefinitionOwnerError{cause: err, owner: o}
+		}
+		err := o.closeErr
+		o.mu.Unlock()
+		return err
+	}
+}
+
+func (o *definitionOwner) runFinalizer() {
+	o.mu.Lock()
+	counts := o.countsMap
+	config := o.configMap
+	perf := o.perfMap
+	pid := o.pidMap
+	release := o.release
+	closer := o.mapCloser
+	if closer == nil {
+		closer = func(m *cebpf.Map) error { return m.Close() }
+	}
+	o.mu.Unlock()
+
+	var finErr error
+	if counts != nil {
+		finErr = errors.Join(finErr, closer(counts))
+	}
+	if config != nil {
+		finErr = errors.Join(finErr, closer(config))
+	}
+	if perf != nil {
+		finErr = errors.Join(finErr, closer(perf))
+	}
+	if pid != nil {
+		finErr = errors.Join(finErr, closer(pid))
+	}
+	if release != nil {
+		finErr = errors.Join(finErr, release())
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.countsMap = nil
+	o.configMap = nil
+	o.perfMap = nil
+	o.pidMap = nil
+	o.release = nil
+	o.closeErr = errors.Join(o.closeErr, finErr)
+	o.state = definitionOwnerClosed
+	close(o.closeReqDone)
+}

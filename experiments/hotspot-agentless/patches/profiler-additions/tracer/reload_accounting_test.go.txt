@@ -1,0 +1,97 @@
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+func TestReportReloadRecordCompletesBeforeDelete(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	tr := &Tracer{auxiliaryScope: scope}
+	oldReload, oldDelete := reloadKernelSymbols, deleteInhibitEvent
+	t.Cleanup(func() { reloadKernelSymbols, deleteInhibitEvent = oldReload, oldDelete })
+	reloaded, deleted := false, false
+	reloadKernelSymbols = func(*Tracer) { reloaded = true }
+	deleteInhibitEvent = func(_ *ebpf.Map, key *uint32) error {
+		deleted = true
+		assert.True(t, reloaded)
+		assert.Equal(t, uint32(2), *key)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = scope.Stop(ctx)
+		obs, err := scope.KindObservation(libpf.AuxiliarySourceReportReloadRecord)
+		assert.Error(t, err) // no capture identity was configured
+		assert.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+		assert.Equal(t, uint64(1), obs.Counts.Admitted)
+		assert.Equal(t, uint64(1), obs.Counts.Completed)
+		assert.Zero(t, obs.Counts.InFlight)
+		return errors.New("delete failed")
+	}
+	data := make([]byte, 4)
+	binary.LittleEndian.PutUint32(data, 2)
+	tr.triggerReportEvent(data)
+	require.True(t, reloaded)
+	require.True(t, deleted)
+}
+
+func TestReportReloadRecordRepeatedAndGeneric(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	tr := &Tracer{auxiliaryScope: scope, triggerPIDProcessing: make(chan bool, 1)}
+	oldReload, oldDelete := reloadKernelSymbols, deleteInhibitEvent
+	t.Cleanup(func() { reloadKernelSymbols, deleteInhibitEvent = oldReload, oldDelete })
+	reloads, deletes := 0, 0
+	reloadKernelSymbols = func(*Tracer) { reloads++ }
+	deleteInhibitEvent = func(_ *ebpf.Map, _ *uint32) error { deletes++; return nil }
+	data := make([]byte, 4)
+	tr.triggerReportEvent(data)
+	require.Equal(t, 0, reloads)
+	require.Equal(t, 0, deletes)
+	select {
+	case <-tr.triggerPIDProcessing:
+		t.Fatal("type 0 triggered PID processing")
+	default:
+	}
+	binary.LittleEndian.PutUint32(data, 1)
+	tr.triggerReportEvent(data)
+	select {
+	case got := <-tr.triggerPIDProcessing:
+		require.True(t, got)
+	default:
+		t.Fatal("generic PID was not triggered")
+	}
+	binary.LittleEndian.PutUint32(data, 2)
+	tr.triggerReportEvent(data)
+	tr.triggerReportEvent(data)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = scope.Stop(ctx)
+	obs, err := scope.KindObservation(libpf.AuxiliarySourceReportReloadRecord)
+	assert.Error(t, err) // unknown identity remains nonfinal
+	assert.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+	assert.Equal(t, uint64(2), obs.Counts.Admitted)
+	assert.Equal(t, uint64(2), obs.Counts.Completed)
+	assert.Equal(t, 2, reloads)
+	assert.Equal(t, 2, deletes)
+}
+
+func TestReportReloadRecordUnconfigured(t *testing.T) {
+	tr := &Tracer{}
+	oldReload, oldDelete := reloadKernelSymbols, deleteInhibitEvent
+	t.Cleanup(func() { reloadKernelSymbols, deleteInhibitEvent = oldReload, oldDelete })
+	reloadKernelSymbols = func(*Tracer) {}
+	deleteInhibitEvent = func(_ *ebpf.Map, _ *uint32) error { return nil }
+	data := make([]byte, 4)
+	binary.LittleEndian.PutUint32(data, 2)
+	tr.triggerReportEvent(data)
+	_, err := tr.KindObservation(libpf.AuxiliarySourceReportReloadRecord)
+	require.Error(t, err)
+}

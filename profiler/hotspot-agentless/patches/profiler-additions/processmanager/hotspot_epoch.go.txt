@@ -3,8 +3,15 @@
 package processmanager
 
 import (
+	"errors"
+	"bytes"
+	"encoding/json"
+	"io"
+	"unicode/utf8"
 	"fmt"
+	"math"
 	"slices"
+	"sync"
 
 	"go.opentelemetry.io/ebpf-profiler/interpreter"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
@@ -13,6 +20,299 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/traceutil"
 )
+
+type TraceProcessingScalarSnapshot struct {
+	PID             libpf.PID
+	TID             libpf.PID
+	CPU             int
+	Origin          libpf.Origin
+	KTime           int64
+	CorrelationID   uint64
+	HotSpotIdentity libpf.HotSpotIdentity
+}
+
+type TraceProcessingCounts struct {
+	Admitted            uint64
+	PreReporterRejected uint64
+	ReporterOK          uint64
+	ReporterError       uint64
+	InFlight            uint64
+	TargetBound         uint64
+	ForeignToBinding    uint64
+	BindingUnknown      uint64
+	Overflow            bool
+}
+
+type TraceProcessingObservation struct {
+	ExpectedBinding   libpf.TraceDefinitionBinding
+	HasBinding        bool
+	EpochTarget       libpf.HotSpotEpochTarget
+	ObservedPID       libpf.PID
+	Counts            TraceProcessingCounts
+	LastAdmitted      TraceProcessingScalarSnapshot
+	HasLastAdmitted   bool
+	LastClassified    TraceProcessingScalarSnapshot
+	HasLastClassified bool
+	LastTerminal      TraceProcessingTerminal
+	LastReporterErr   error
+	Outcome           libpf.AuxiliaryOutcome
+	ProofErr          error
+}
+
+type TraceProcessingTerminal uint8
+
+const (
+	TraceProcessingNone TraceProcessingTerminal = iota
+	TraceProcessingPreReporterInvalidFrame
+	TraceProcessingReporterOK
+	TraceProcessingReporterError
+)
+
+type traceProcessingState struct {
+	mu                sync.Mutex
+	expectedBinding   libpf.TraceDefinitionBinding
+	hasBinding        bool
+	counts            TraceProcessingCounts
+	lastAdmitted      TraceProcessingScalarSnapshot
+	hasLastAdmitted   bool
+	lastClassified    TraceProcessingScalarSnapshot
+	hasLastClassified bool
+	lastTerminal      TraceProcessingTerminal
+	lastReporterErr   error
+	retired           bool
+	diagnosticsClaimed bool
+	diagnostics []byte
+	diagnosticsFailed bool
+	proofErr          error
+}
+
+type traceProcessingAdmission struct {
+	state        *traceProcessingState
+	scalars      TraceProcessingScalarSnapshot
+	inFlightHeld bool
+	classified   bool
+	terminal     TraceProcessingTerminal
+	reporterErr  error
+}
+
+func ReconcileTraceProcessingCounts(c TraceProcessingCounts) error {
+	if c.Overflow {
+		return errors.New("trace processing counter overflow")
+	}
+	terminals, err := libpf.SumAuxiliaryCounts(c.PreReporterRejected, c.ReporterOK, c.ReporterError, c.InFlight)
+	if err != nil {
+		return err
+	}
+	if terminals != c.Admitted {
+		return fmt.Errorf("trace processing terminal conservation failed: admitted=%d != preReporterRejected=%d + reporterOK=%d + reporterError=%d + inFlight=%d",
+			c.Admitted, c.PreReporterRejected, c.ReporterOK, c.ReporterError, c.InFlight)
+	}
+	bindings, err := libpf.SumAuxiliaryCounts(c.TargetBound, c.ForeignToBinding, c.BindingUnknown)
+	if err != nil {
+		return err
+	}
+	if bindings != c.Admitted {
+		return fmt.Errorf("trace processing binding partition failed: admitted=%d != targetBound=%d + foreignToBinding=%d + bindingUnknown=%d",
+			c.Admitted, c.TargetBound, c.ForeignToBinding, c.BindingUnknown)
+	}
+	return nil
+}
+
+func (s *traceProcessingState) noteProofErrLocked(err error) {
+	if err != nil && s.proofErr == nil {
+		s.proofErr = err
+	}
+}
+
+func (s *traceProcessingState) incrementLocked(n *uint64) bool {
+	if *n == math.MaxUint64 {
+		*n++
+		s.counts.Overflow = true
+		s.noteProofErrLocked(errors.New("trace processing counter overflow"))
+		return false
+	}
+	*n++
+	return true
+}
+
+func (pm *ProcessManager) ConfigureTraceDefinitionBinding(binding libpf.TraceDefinitionBinding) {
+	if pm == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.traceProcessing.mu.Lock()
+	defer pm.traceProcessing.mu.Unlock()
+	if binding == (libpf.TraceDefinitionBinding{}) || binding.HostTGID == 0 {
+		pm.traceProcessing.expectedBinding = libpf.TraceDefinitionBinding{}
+		pm.traceProcessing.hasBinding = false
+		return
+	}
+	pm.traceProcessing.expectedBinding = binding
+	pm.traceProcessing.hasBinding = true
+}
+
+func (pm *ProcessManager) admitTraceProcessing(raw *libpf.EbpfTrace) *traceProcessingAdmission {
+	if pm == nil {
+		return nil
+	}
+	var scalars TraceProcessingScalarSnapshot
+	if raw != nil {
+		scalars = TraceProcessingScalarSnapshot{
+			PID:             raw.PID,
+			TID:             raw.TID,
+			CPU:             raw.CPU,
+			Origin:          raw.Origin,
+			KTime:           raw.KTime,
+			CorrelationID:   raw.CorrelationID,
+			HotSpotIdentity: raw.HotSpotIdentity,
+		}
+	}
+	s := &pm.traceProcessing
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	admittedOK := s.incrementLocked(&s.counts.Admitted)
+	inFlightOK := false
+	if admittedOK {
+		inFlightOK = s.incrementLocked(&s.counts.InFlight)
+		if !s.hasBinding || s.expectedBinding.HostTGID == 0 {
+			s.incrementLocked(&s.counts.BindingUnknown)
+		} else if scalars.PID != 0 && uint32(scalars.PID) == s.expectedBinding.HostTGID {
+			s.incrementLocked(&s.counts.TargetBound)
+		} else {
+			s.incrementLocked(&s.counts.ForeignToBinding)
+		}
+	}
+	s.lastAdmitted = scalars
+	s.hasLastAdmitted = true
+
+	return &traceProcessingAdmission{
+		state:        s,
+		scalars:      scalars,
+		inFlightHeld: inFlightOK,
+	}
+}
+
+func (a *traceProcessingAdmission) classify(terminal TraceProcessingTerminal, reporterErr error) {
+	if a == nil || a.state == nil {
+		return
+	}
+	s := a.state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a.classified {
+		s.noteProofErrLocked(errors.New("duplicate trace processing terminal"))
+		return
+	}
+	a.classified = true
+	a.terminal = terminal
+	a.reporterErr = reporterErr
+	if a.inFlightHeld {
+		if s.counts.InFlight == 0 {
+			s.noteProofErrLocked(errors.New("trace processing inFlight underflow"))
+		} else {
+			s.counts.InFlight--
+		}
+		a.inFlightHeld = false
+	}
+	s.lastClassified = a.scalars
+	s.hasLastClassified = true
+	s.lastTerminal = terminal
+	s.lastReporterErr = reporterErr
+	switch terminal {
+	case TraceProcessingPreReporterInvalidFrame:
+		s.incrementLocked(&s.counts.PreReporterRejected)
+	case TraceProcessingReporterOK:
+		s.incrementLocked(&s.counts.ReporterOK)
+	case TraceProcessingReporterError:
+		s.incrementLocked(&s.counts.ReporterError)
+	default:
+		s.noteProofErrLocked(errors.New("invalid trace processing terminal"))
+	}
+}
+
+func (a *traceProcessingAdmission) classifyPreReporterInvalidFrame() {
+	a.classify(TraceProcessingPreReporterInvalidFrame, nil)
+}
+
+func (a *traceProcessingAdmission) classifyReporter(err error) {
+	if err != nil {
+		a.classify(TraceProcessingReporterError, err)
+	} else {
+		a.classify(TraceProcessingReporterOK, nil)
+	}
+}
+
+func (pm *ProcessManager) retireTraceProcessing() {
+	if pm == nil {
+		return
+	}
+	pm.mu.RLock()
+	target, pid, handler := pm.epochTarget, pm.observedPID, pm.ebpf
+	pm.mu.RUnlock()
+	s := &pm.traceProcessing
+	s.mu.Lock()
+	if s.diagnosticsClaimed { s.retired = true; s.mu.Unlock(); return }
+	s.diagnosticsClaimed = true
+	d := s.processingDiagnosticLocked(target, pid)
+	s.retired = true
+	s.mu.Unlock()
+	raw, err := makeProcessingDiagnostic(d, handler)
+	s.mu.Lock()
+	if err != nil { s.diagnosticsFailed = true } else { s.diagnostics = append([]byte(nil), raw...) }
+	s.mu.Unlock()
+}
+
+func (pm *ProcessManager) TraceProcessingObservation() (TraceProcessingObservation, error) {
+	if pm == nil {
+		err := errors.New("nil process manager")
+		return TraceProcessingObservation{
+			Outcome:  libpf.AuxiliaryNotExercised,
+			ProofErr: err,
+		}, err
+	}
+	pm.mu.RLock()
+	epochTarget := pm.epochTarget
+	observedPID := pm.observedPID
+	pm.mu.RUnlock()
+
+	s := &pm.traceProcessing
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retired {
+		err := errors.New("process manager closed before trace processing readout")
+		return TraceProcessingObservation{
+			ExpectedBinding: s.expectedBinding,
+			HasBinding:      s.hasBinding,
+			EpochTarget:     epochTarget,
+			ObservedPID:     observedPID,
+			Outcome:         libpf.AuxiliaryNotExercised,
+			ProofErr:        err,
+		}, err
+	}
+	obs := TraceProcessingObservation{
+		ExpectedBinding:   s.expectedBinding,
+		HasBinding:        s.hasBinding,
+		EpochTarget:       epochTarget,
+		ObservedPID:       observedPID,
+		Counts:            s.counts,
+		LastAdmitted:      s.lastAdmitted,
+		HasLastAdmitted:   s.hasLastAdmitted,
+		LastClassified:    s.lastClassified,
+		HasLastClassified: s.hasLastClassified,
+		LastTerminal:      s.lastTerminal,
+		LastReporterErr:   s.lastReporterErr,
+		Outcome:           libpf.SourceLocalNonfinal,
+		ProofErr:          s.proofErr,
+	}
+	if err := ReconcileTraceProcessingCounts(obs.Counts); err != nil {
+		if obs.ProofErr == nil {
+			obs.ProofErr = err
+		}
+	}
+	return obs, obs.ProofErr
+}
 
 func (pm *ProcessManager) ConfigureHotSpotEpochTarget(t libpf.HotSpotEpochTarget, onFatal ...func(error)) error {
 	if len(onFatal) != 1 || onFatal[0] == nil {
@@ -63,7 +363,7 @@ type epochAdmission struct {
 
 // Like HandleTrace, this method has one consumer. Metadata calls retain pm.mu;
 // synchronization only reads the instance's original immutable RemoteMemory.
-func (pm *ProcessManager) handleHotSpotEpochTrace(raw *libpf.EbpfTrace) {
+func (pm *ProcessManager) handleHotSpotEpochTrace(raw *libpf.EbpfTrace) error {
 	meta := &samples.TraceEventMeta{Timestamp: libpf.UnixTime64(times.KTime(raw.KTime).UnixNano()), Comm: raw.Comm, PID: raw.PID, TID: raw.TID, CPU: raw.CPU, ProcessName: raw.ProcessName, ExecutablePath: raw.ExecutablePath, ContainerID: raw.ContainerID, Origin: raw.Origin, OffTime: raw.OffTime, EnvVars: raw.EnvVars, CorrelationID: raw.CorrelationID}
 	t := &libpf.Trace{Frames: slices.Clone(raw.KernelFrames), CustomLabels: raw.CustomLabels, CorrelationID: raw.CorrelationID, HotSpotIdentity: raw.HotSpotIdentity}
 	decoder, decodeErr := pm.beginHotSpotEpoch(raw.PID, raw.HotSpotIdentity)
@@ -139,7 +439,181 @@ func (pm *ProcessManager) handleHotSpotEpochTrace(raw *libpf.EbpfTrace) {
 	if libpf.IsHotSpotEpochFatal(t.HotSpotValidation.Err) && pm.epochFatal != nil {
 		pm.epochFatal(t.HotSpotValidation.Err)
 	}
-	if err := pm.traceReporter.ReportTraceEvent(t, meta); err != nil && pm.epochFatal != nil {
+	err := pm.traceReporter.ReportTraceEvent(t, meta)
+	if err != nil && pm.epochFatal != nil {
 		pm.epochFatal(err)
 	}
+	return err
+}
+
+// These DTOs carry detached, source-local diagnostic scalars only.
+type processingBindingDiagnostic struct {
+	Source uint8 `json:"source"`
+	Session string `json:"session"`
+	HostTGID uint32 `json:"host_tgid"`
+	Birth uint64 `json:"birth"`
+	CounterMapID uint32 `json:"counter_map_id"`
+	PerfMapID uint32 `json:"perf_map_id"`
+	PossibleCPUs int64 `json:"possible_cpus"`
+	Generation uint64 `json:"generation"`
+}
+type processingTargetDiagnostic struct {
+	PID uint32 `json:"pid"`
+	ProcessStartTicks uint64 `json:"process_start_ticks"`
+	CounterAddress uint64 `json:"counter_address"`
+	InitialEpoch uint64 `json:"initial_epoch"`
+}
+type processingTraceDiagnostic struct {
+	PID uint32 `json:"pid"`
+	TID uint32 `json:"tid"`
+	CPU int64 `json:"cpu"`
+	Origin uint64 `json:"origin"`
+	KTime int64 `json:"ktime"`
+	CorrelationID uint64 `json:"correlation_id"`
+	HotSpotIdentity processingIdentityDiagnostic `json:"hotspot_identity"`
+}
+type processingIdentityDiagnostic struct {
+	Epoch uint64 `json:"epoch"`
+	State uint8 `json:"state"`
+	ReadError int32 `json:"read_error"`
+}
+type processingDiagnostic struct {
+	Unit string `json:"unit"`
+	HasBinding bool `json:"has_binding"`
+	ExpectedBinding *processingBindingDiagnostic `json:"expected_binding,omitempty"`
+	EpochTarget processingTargetDiagnostic `json:"epoch_target"`
+	ObservedPID uint32 `json:"observed_pid"`
+	Admitted uint64 `json:"admitted"`
+	PreReporterRejected uint64 `json:"pre_reporter_rejected"`
+	ReporterOK uint64 `json:"reporter_ok"`
+	ReporterError uint64 `json:"reporter_error"`
+	InFlight uint64 `json:"in_flight"`
+	TargetBound uint64 `json:"target_bound"`
+	ForeignToBinding uint64 `json:"foreign_to_binding"`
+	BindingUnknown uint64 `json:"binding_unknown"`
+	Overflow bool `json:"overflow"`
+	HasLastAdmitted bool `json:"has_last_admitted"`
+	LastAdmitted *processingTraceDiagnostic `json:"last_admitted,omitempty"`
+	HasLastClassified bool `json:"has_last_classified"`
+	LastClassified *processingTraceDiagnostic `json:"last_classified,omitempty"`
+	LastTerminal TraceProcessingTerminal `json:"last_terminal"`
+	Outcome libpf.AuxiliaryOutcome `json:"outcome"`
+	ReporterErrorPresent bool `json:"reporter_error_present"`
+	ProofErrorPresent bool `json:"proof_error_present"`
+	GetterErrorPresent bool `json:"getter_error_present"`
+	bindingUnrepresentable bool
+}
+func traceDiagnostic(v TraceProcessingScalarSnapshot) *processingTraceDiagnostic {
+	return &processingTraceDiagnostic{uint32(v.PID), uint32(v.TID), int64(v.CPU), uint64(v.Origin), v.KTime,
+		v.CorrelationID, processingIdentityDiagnostic{v.HotSpotIdentity.Epoch, uint8(v.HotSpotIdentity.State), v.HotSpotIdentity.ReadError}}
+}
+func (s *traceProcessingState) processingDiagnosticLocked(target libpf.HotSpotEpochTarget, pid libpf.PID) processingDiagnostic {
+	c := s.counts
+	d := processingDiagnostic{Unit: "handle-trace-input", HasBinding: s.hasBinding,
+		EpochTarget: processingTargetDiagnostic{uint32(target.PID), target.ProcessStartTicks, uint64(target.CounterAddress), target.InitialEpoch},
+		ObservedPID: uint32(pid), Admitted: c.Admitted, PreReporterRejected: c.PreReporterRejected,
+		ReporterOK: c.ReporterOK, ReporterError: c.ReporterError, InFlight: c.InFlight,
+		TargetBound: c.TargetBound, ForeignToBinding: c.ForeignToBinding, BindingUnknown: c.BindingUnknown,
+		Overflow: c.Overflow, HasLastAdmitted: s.hasLastAdmitted, HasLastClassified: s.hasLastClassified,
+		LastTerminal: s.lastTerminal, Outcome: libpf.SourceLocalNonfinal,
+		ReporterErrorPresent: s.lastReporterErr != nil, ProofErrorPresent: s.proofErr != nil, GetterErrorPresent: s.proofErr != nil}
+	if s.hasLastAdmitted { d.LastAdmitted = traceDiagnostic(s.lastAdmitted) }
+	if s.hasLastClassified { d.LastClassified = traceDiagnostic(s.lastClassified) }
+	if s.hasBinding {
+		b := s.expectedBinding
+		if len(b.Session) > 256 || !utf8.ValidString(b.Session) || b.PossibleCPUs < 0 {
+			d.bindingUnrepresentable = true
+		} else {
+			d.ExpectedBinding = &processingBindingDiagnostic{uint8(b.Source), b.Session, b.HostTGID, b.Birth,
+				b.CounterMapID, b.PerfMapID, int64(b.PossibleCPUs), b.Generation}
+		}
+	}
+	return d
+}
+
+type receivedQueueDiagnostic struct {
+	Unit string `json:"unit"`
+	RequestsOwned uint64 `json:"requests_owned"`
+	QueueAccepted uint64 `json:"queue_accepted"`
+	AdmissionHeld uint64 `json:"admission_held"`
+	Refused uint64 `json:"refused"`
+	Applied uint64 `json:"applied"`
+	AppliedPublished uint64 `json:"applied_published"`
+	AppliedNotPublished uint64 `json:"applied_not_published"`
+	Failed uint64 `json:"failed"`
+	Aborted uint64 `json:"aborted"`
+	Pending uint64 `json:"pending"`
+	CleanupFailed uint64 `json:"cleanup_failed"`
+	PendingKnown bool `json:"pending_known"`
+	AllWorkersEnded bool `json:"all_workers_ended"`
+	CallerJoinedClaim bool `json:"caller_joined_claim"`
+	ScopeJoinedWitness bool `json:"scope_joined_witness"`
+	Held bool `json:"held"`
+	LastUnavailable bool `json:"last_unavailable"`
+	LastPublished bool `json:"last_published"`
+	Outcome libpf.AuxiliaryOutcome `json:"outcome"`
+	ProofErrorPresent bool `json:"proof_error_present"`
+	LastApplyErrorPresent bool `json:"last_apply_error_present"`
+	LastCleanupErrorPresent bool `json:"last_cleanup_error_present"`
+}
+type localDiagnosticEnvelope struct {
+	Schema int `json:"schema"`
+	Queue *receivedQueueDiagnostic `json:"queue,omitempty"`
+	Processing *processingDiagnostic `json:"processing,omitempty"`
+	Missing []string `json:"missing"`
+}
+var errDiagnosticPending = errors.New("definition diagnostic pending")
+var errDiagnosticInvalid = errors.New("invalid definition diagnostic")
+var errDiagnosticAbsent = errors.New("definition diagnostic unavailable")
+
+func makeProcessingDiagnostic(d processingDiagnostic, handler any) (json.RawMessage, error) {
+	e := localDiagnosticEnvelope{Schema: 1, Processing: &d, Missing: []string{"processing-source-unverified", "processing-join-unverified"}}
+	if !d.HasBinding { e.Missing = append(e.Missing, "processing-binding-absent") }
+	if d.EpochTarget.PID == 0 { e.Missing = append(e.Missing, "epoch-target-absent") }
+	if d.ObservedPID == 0 { e.Missing = append(e.Missing, "observed-pid-absent") }
+	if d.bindingUnrepresentable { e.Missing = append(e.Missing, "binding-unrepresentable") }
+	counts := TraceProcessingCounts{Admitted: d.Admitted, PreReporterRejected: d.PreReporterRejected,
+		ReporterOK: d.ReporterOK, ReporterError: d.ReporterError, InFlight: d.InFlight,
+		TargetBound: d.TargetBound, ForeignToBinding: d.ForeignToBinding, BindingUnknown: d.BindingUnknown, Overflow: d.Overflow}
+	if ReconcileTraceProcessingCounts(counts) != nil { d.ProofErrorPresent = true; d.GetterErrorPresent = true }
+	if source, ok := handler.(interface { DefinitionSourceDiagnostics() (json.RawMessage, error) }); ok {
+		raw, err := source.DefinitionSourceDiagnostics()
+		if err != nil { e.Missing = append(e.Missing, "queue-getter-error") } else {
+			if len(raw) > 32768 { return nil, errDiagnosticInvalid }
+			var q localDiagnosticEnvelope
+			dec := json.NewDecoder(bytes.NewReader(raw)); dec.DisallowUnknownFields()
+			if dec.Decode(&q) != nil || dec.Decode(new(any)) != io.EOF || q.Schema != 1 || q.Processing != nil || len(q.Missing) > 16 {
+				return nil, errDiagnosticInvalid
+			}
+			for _, reason := range q.Missing {
+				if reason != "queue-binding-absent" && reason != "queue-pool-missing" { return nil, errDiagnosticInvalid }
+				for _, prior := range e.Missing { if prior == reason { return nil, errDiagnosticInvalid } }
+				e.Missing = append(e.Missing, reason)
+			}
+			if q.Queue != nil && (q.Queue.Unit != "owned-map-update-request" || q.Queue.CallerJoinedClaim ||
+				q.Queue.Outcome < libpf.AuxiliaryFinal || q.Queue.Outcome > libpf.SourceLocalNonfinal) { return nil, errDiagnosticInvalid }
+			e.Queue = q.Queue
+		}
+	} else { e.Missing = append(e.Missing, "queue-capability-absent") }
+	raw, err := json.Marshal(e)
+	if err != nil || len(raw) > 32768 { return nil, errDiagnosticInvalid }
+	return raw, nil
+}
+
+// DefinitionSourceDiagnostics reads detached local facts without creating or retiring an owner.
+func (pm *ProcessManager) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	if pm == nil { return nil, errDiagnosticAbsent }
+	pm.mu.RLock(); target, pid, handler := pm.epochTarget, pm.observedPID, pm.ebpf; pm.mu.RUnlock()
+	s := &pm.traceProcessing
+	s.mu.Lock()
+	if s.diagnosticsClaimed {
+		if s.diagnosticsFailed { s.mu.Unlock(); return nil, errDiagnosticInvalid }
+		if s.diagnostics == nil { s.mu.Unlock(); return nil, errDiagnosticPending }
+		raw := append([]byte(nil), s.diagnostics...); s.mu.Unlock(); return json.RawMessage(raw), nil
+	}
+	d := s.processingDiagnosticLocked(target, pid)
+	s.mu.Unlock()
+	raw, err := makeProcessingDiagnostic(d, handler)
+	if err != nil { return nil, err }
+	return append(json.RawMessage(nil), raw...), nil
 }

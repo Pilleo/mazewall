@@ -18,10 +18,15 @@ import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.net.Socket
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.random.Random
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -46,6 +51,23 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
 
     private val arch = io.mazewall.platform.syscall.Arch
         .current()
+
+    @Test
+    fun `x32 aliases and legacy range are killed by the installed kernel filter`(
+        @TempDir directory: Path,
+    ) {
+        assumeTrue(arch.audit == Arch.AUDIT_ARCH_X86_64)
+        for (nr in listOf(0x40000027, 512, 547)) {
+            // A surviving baseline excludes an inherited filter as the source of SIGSYS.
+            IsolatedProcessTester.runIsolatedTest(SeccompAbiProbeChild::class.java.name, nr.toString(), "baseline")
+            val ready = directory.resolve("installed-$nr")
+            val failure = assertFailsWith<IllegalStateException> {
+                IsolatedProcessTester.runIsolatedTest(SeccompAbiProbeChild::class.java.name, nr.toString(), "guarded", ready.toString())
+            }
+            assertTrue(failure.message.orEmpty().contains("exit code 159."), "Expected SIGSYS for nr=$nr: ${failure.message}")
+            assertEquals("installed", Files.readString(ready), "The child must finish installation before the fatal probe")
+        }
+    }
 
     private fun assertKernelVerdictMatchesSimulator(
         program: List<BpfInstruction>,
@@ -150,7 +172,7 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
             listOf(
                 SyscallInspection(
                     syscallNumber = Syscall.GETPPID.numberFor(arch),
-                    argIndex = 0,
+                    argument = SyscallArgument.FIRST,
                     check = ArgCheck.EqualsAny(allowed),
                     ifMatched = SeccompAction.ACT_ALLOW,
                     ifNotMatched = SeccompAction.ACT_ERRNO(NativeConstants.EPERM),

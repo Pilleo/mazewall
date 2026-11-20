@@ -1,0 +1,193 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/process"
+)
+
+type hotspotBootstrapReady interface {
+	interpreter.HotSpotEpochInstance
+	CheckHotSpotEpochBootstrap(libpf.HotSpotEpochTarget) error
+}
+
+type hotspotObservedBootstrap interface {
+	ConfigureHotSpotObservedBootstrap(libpf.PID) error
+	CheckHotSpotObservedBootstrap(libpf.PID) error
+}
+
+const strictObservedBootstrap synchronizationMode = strictEpochBootstrap + 1
+
+func (mode synchronizationMode) strictBootstrap() bool {
+	return mode == strictEpochBootstrap || mode == strictObservedBootstrap
+}
+
+func bootstrapNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+// BootstrapHotSpotObserved synchronizes the configured observed target before PID workers start.
+func (pm *ProcessManager) BootstrapHotSpotObserved(ctx context.Context, pr process.Process, lifetime libpf.TraceDefinitionLifetime) (err error) {
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if bootstrapNil(pr) || bootstrapNil(lifetime) {
+		return fmt.Errorf("missing observed target process or lifetime")
+	}
+	var journal bootstrapJournal
+	defer journal.rollbackOnFailure(pm, &err)
+	if err = lifetime.Validate(); err != nil {
+		return fmt.Errorf("validate target lifetime: %w", err)
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	pid, birth, session := lifetime.HostTGID(), lifetime.Birth(), lifetime.Session()
+	pm.mu.RLock()
+	target, epoch := pm.observedPID, pm.epochTarget.PID
+	pm.mu.RUnlock()
+	if target == 0 || epoch != 0 || uint32(target) != pid || pr.PID() != target || session == "" {
+		return fmt.Errorf("configured observed HotSpot target does not match lifetime")
+	}
+	pm.mu.Lock()
+	err = journal.checkProcessLocked(pm, target)
+	pm.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err = pm.synchronizeProcessChecked(ctx, pr, strictObservedBootstrap, &journal, nil); err != nil {
+		return fmt.Errorf("synchronize observed HotSpot target PID %v: %w", target, err)
+	}
+	return pm.finishHotSpotObservedBootstrap(ctx, pr, lifetime, target, pid, birth, session, &journal)
+}
+
+func (pm *ProcessManager) finishHotSpotObservedBootstrap(ctx context.Context, pr process.Process, lifetime libpf.TraceDefinitionLifetime,
+	target libpf.PID, pid uint32, birth uint64, session string, journal *bootstrapJournal,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	pm.mu.RLock()
+	info := pm.pidToProcessInfo[target]
+	var ready hotspotObservedBootstrap
+	count := 0
+	for _, instance := range pm.interpreters[target] {
+		if candidate, ok := instance.(hotspotObservedBootstrap); ok && !bootstrapNil(candidate) {
+			ready = candidate
+			count++
+		}
+	}
+	validInfo := info != nil && info == journal.info && len(info.mappings) != 0
+	unchanged := pm.observedPID == target && pm.epochTarget.PID == 0
+	pm.mu.RUnlock()
+	if !validInfo || !unchanged || count != 1 {
+		return fmt.Errorf("observed HotSpot target PID %v is not uniquely ready with owned mappings", target)
+	}
+	if err := ready.CheckHotSpotObservedBootstrap(target); err != nil {
+		return fmt.Errorf("check observed HotSpot target PID %v readiness: %w", target, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := lifetime.Validate(); err != nil {
+		return fmt.Errorf("revalidate target lifetime: %w", err)
+	}
+	pm.mu.RLock()
+	unchanged = pm.observedPID == target && pm.epochTarget.PID == 0
+	pm.mu.RUnlock()
+	if !unchanged || pr.PID() != target || lifetime.HostTGID() != pid || lifetime.Birth() != birth || lifetime.Session() != session {
+		return fmt.Errorf("observed HotSpot target lifetime changed during bootstrap")
+	}
+	return ctx.Err()
+}
+
+// BootstrapHotSpotEpoch synchronizes the configured target before PID workers start.
+func (pm *ProcessManager) BootstrapHotSpotEpoch(ctx context.Context, pr process.Process, lifetime libpf.TraceDefinitionLifetime) (err error) {
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if bootstrapNil(lifetime) {
+		return fmt.Errorf("missing target lifetime")
+	}
+	var journal bootstrapJournal
+	defer journal.rollbackOnFailure(pm, &err)
+	if err = lifetime.Validate(); err != nil {
+		return fmt.Errorf("validate target lifetime: %w", err)
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	pid, birth, session := lifetime.HostTGID(), lifetime.Birth(), lifetime.Session()
+	pm.mu.RLock()
+	target := pm.epochTarget
+	pm.mu.RUnlock()
+	if bootstrapNil(pr) || target.Validate() != nil || uint32(target.PID) != pid || pr.PID() != target.PID || target.ProcessStartTicks != birth || session == "" {
+		return fmt.Errorf("configured HotSpot target does not match lifetime")
+	}
+	pm.mu.Lock()
+	err = journal.checkProcessLocked(pm, target.PID)
+	pm.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if err = pm.synchronizeProcessChecked(ctx, pr, strictEpochBootstrap, &journal, nil); err != nil {
+		return fmt.Errorf("synchronize HotSpot target PID %v: %w", target.PID, err)
+	}
+	return pm.finishHotSpotBootstrap(ctx, pr, lifetime, target, pid, birth, session, &journal)
+}
+
+func (pm *ProcessManager) finishHotSpotBootstrap(ctx context.Context, pr process.Process, lifetime libpf.TraceDefinitionLifetime,
+	target libpf.HotSpotEpochTarget, pid uint32, birth uint64, session string, journal *bootstrapJournal,
+) (err error) {
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	pm.mu.RLock()
+	info := pm.pidToProcessInfo[target.PID]
+	var ready hotspotBootstrapReady
+	count := 0
+	for _, instance := range pm.interpreters[target.PID] {
+		if candidate, ok := instance.(hotspotBootstrapReady); ok && !bootstrapNil(candidate) {
+			ready = candidate
+			count++
+		}
+	}
+	validInfo := info != nil && info == journal.info && len(info.mappings) != 0
+	unchanged := pm.epochTarget == target
+	pm.mu.RUnlock()
+	if !validInfo || !unchanged || count != 1 {
+		return fmt.Errorf("HotSpot target PID %v is not uniquely ready with owned mappings", target.PID)
+	}
+	if err = ready.CheckHotSpotEpochBootstrap(target); err != nil {
+		return fmt.Errorf("check HotSpot target PID %v readiness: %w", target.PID, err)
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if err = lifetime.Validate(); err != nil {
+		return fmt.Errorf("revalidate target lifetime: %w", err)
+	}
+	pm.mu.RLock()
+	unchanged = pm.epochTarget == target
+	pm.mu.RUnlock()
+	if !unchanged || pr.PID() != target.PID || lifetime.HostTGID() != pid || lifetime.Birth() != birth || lifetime.Session() != session {
+		return fmt.Errorf("HotSpot target lifetime changed during bootstrap")
+	}
+	return ctx.Err()
+}

@@ -20,7 +20,7 @@ internal interface SyscallInspectionPipeline {
     ): List<SyscallInspection>
 
     fun emitSpecial(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>,
@@ -41,7 +41,7 @@ internal class DefaultSyscallInspectionPipeline(
     }
 
     override fun emitSpecial(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>,

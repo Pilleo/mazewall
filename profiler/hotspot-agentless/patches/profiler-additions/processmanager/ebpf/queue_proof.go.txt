@@ -1,0 +1,518 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package ebpf
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+type asyncQueueTerminal uint8
+
+const (
+	queueTerminalNone asyncQueueTerminal = iota
+	queueRefused
+	queueApplied
+	queueAppliedPublished
+	queueAppliedNotPublished
+	queueFailed
+	queueAborted
+)
+
+type asyncQueueCounts struct {
+	mu                  sync.Mutex
+	requestsOwned       uint64
+	queueAccepted       uint64
+	admissionHeld       uint64
+	refused             uint64
+	applied             uint64
+	appliedPublished    uint64
+	appliedNotPublished uint64
+	failed              uint64
+	aborted             uint64
+	cleanupFailed       uint64
+	proofErr            error
+
+	lastPool       *asyncMapUpdaterPool
+	hasWorkerIdx   bool
+	lastWorkerIdx  int
+	lastWorker     *asyncUpdateWorker
+	lastQueue      chan asyncMapInMapUpdate
+	lastCtx        context.Context
+	lastUnavail    bool
+	lastFileID     host.FileID
+	lastOuter      *cebpf.Map
+	lastInner      *cebpf.Map
+	lastChecked    *checkedMapUpdate
+	lastPublished  bool
+	lastApplyErr   error
+	lastCleanupErr error
+}
+
+type asyncQueueRequest struct {
+	counts        *asyncQueueCounts
+	pool          *asyncMapUpdaterPool
+	hasWorkerIdx  bool
+	workerIdx     int
+	worker        *asyncUpdateWorker
+	queue         chan asyncMapInMapUpdate
+	ctx           context.Context
+	unavailable   bool
+	fileID        host.FileID
+	outer         *cebpf.Map
+	inner         *cebpf.Map
+	checked       *checkedMapUpdate
+	accepted      bool
+	admissionHeld bool
+	classified    bool
+	terminal      asyncQueueTerminal
+	published     bool
+	applyErr      error
+	cleanupErr    error
+}
+
+type asyncQueueWorkerObservation struct {
+	Index       int
+	Worker      *asyncUpdateWorker
+	Queue       chan asyncMapInMapUpdate
+	Ctx         context.Context
+	Unavailable bool
+	ServeEnded  bool
+}
+
+type asyncQueueObservation struct {
+	Pool                *asyncMapUpdaterPool
+	Workers             []asyncQueueWorkerObservation
+	HasWorkerIdx        bool
+	LastWorkerIdx       int
+	LastWorker          *asyncUpdateWorker
+	LastQueue           chan asyncMapInMapUpdate
+	LastCtx             context.Context
+	LastUnavailable     bool
+	LastFileID          host.FileID
+	LastOuter           *cebpf.Map
+	LastInner           *cebpf.Map
+	LastChecked         *checkedMapUpdate
+	LastPublished       bool
+	LastApplyErr        error
+	LastCleanupErr      error
+	RequestsOwned       uint64
+	QueueAccepted       uint64
+	AdmissionHeld       uint64
+	Refused             uint64
+	Applied             uint64
+	AppliedPublished    uint64
+	AppliedNotPublished uint64
+	Failed              uint64
+	Aborted             uint64
+	Pending             uint64
+	PendingKnown        bool
+	CleanupFailed       uint64
+	AllWorkersEnded     bool
+	CallerJoinedClaim   bool
+	ScopeJoinedWitness  bool
+	Held                bool
+	Outcome             libpf.AuxiliaryOutcome
+	ProofErr            error
+}
+
+func (c *asyncQueueCounts) noteProofErrLocked(err error) {
+	if err != nil && c.proofErr == nil {
+		c.proofErr = err
+	}
+}
+
+func (c *asyncQueueCounts) incrementLocked(n *uint64) bool {
+	if *n == math.MaxUint64 {
+		c.noteProofErrLocked(errors.New("async queue accounting overflow"))
+		return false
+	}
+	*n++
+	return true
+}
+
+func (c *asyncQueueCounts) publishDetailLocked(r *asyncQueueRequest) {
+	c.lastPool = r.pool
+	c.hasWorkerIdx = r.hasWorkerIdx
+	c.lastWorkerIdx = r.workerIdx
+	c.lastWorker = r.worker
+	c.lastQueue = r.queue
+	c.lastCtx = r.ctx
+	c.lastUnavail = r.unavailable
+	c.lastFileID = r.fileID
+	c.lastOuter = r.outer
+	c.lastInner = r.inner
+	c.lastChecked = r.checked
+	c.lastPublished = r.published
+	c.lastApplyErr = r.applyErr
+	c.lastCleanupErr = r.cleanupErr
+}
+
+func (c *asyncQueueCounts) beginLegacyRequest(pool *asyncMapUpdaterPool, fileID host.FileID, outer, inner *cebpf.Map) *asyncQueueRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.incrementLocked(&c.requestsOwned)
+	r := &asyncQueueRequest{
+		counts: c,
+		pool:   pool,
+		fileID: fileID,
+		outer:  outer,
+		inner:  inner,
+	}
+	if c.incrementLocked(&c.admissionHeld) {
+		r.admissionHeld = true
+	}
+	return r
+}
+
+func (c *asyncQueueCounts) beginCheckedRequest(pool *asyncMapUpdaterPool, fileID host.FileID, checked *checkedMapUpdate) *asyncQueueRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.incrementLocked(&c.requestsOwned)
+	r := &asyncQueueRequest{
+		counts:  c,
+		pool:    pool,
+		fileID:  fileID,
+		checked: checked,
+	}
+	if c.incrementLocked(&c.admissionHeld) {
+		r.admissionHeld = true
+	}
+	return r
+}
+
+func (r *asyncQueueRequest) bindWorker(idx int, w *asyncUpdateWorker) {
+	if r == nil || r.counts == nil {
+		return
+	}
+	c := r.counts
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r.hasWorkerIdx = true
+	r.workerIdx = idx
+	r.worker = w
+	if w != nil {
+		r.queue = w.queue
+		r.ctx = w.ctx
+		r.unavailable = w.unavailable
+	}
+}
+
+func (r *asyncQueueRequest) accept() {
+	if r == nil || r.counts == nil {
+		return
+	}
+	c := r.counts
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r.accepted {
+		c.noteProofErrLocked(errors.New("duplicate async queue acceptance"))
+		return
+	}
+	if r.admissionHeld {
+		if c.admissionHeld == 0 {
+			c.noteProofErrLocked(errors.New("async queue admissionHeld underflow"))
+		} else {
+			c.admissionHeld--
+		}
+		r.admissionHeld = false
+	}
+	r.accepted = true
+	c.incrementLocked(&c.queueAccepted)
+}
+
+func (r *asyncQueueRequest) noteRejectCleanup(err error) {
+	if r == nil || r.counts == nil || err == nil {
+		return
+	}
+	c := r.counts
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r.classified {
+		return
+	}
+	r.cleanupErr = err
+	c.incrementLocked(&c.cleanupFailed)
+}
+
+func (r *asyncQueueRequest) classify(terminal asyncQueueTerminal, published bool, err error) {
+	if r == nil || r.counts == nil {
+		return
+	}
+	c := r.counts
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r.classified {
+		c.noteProofErrLocked(errors.New("duplicate async queue classification"))
+		return
+	}
+	if terminal == queueRefused && r.admissionHeld {
+		if c.admissionHeld == 0 {
+			c.noteProofErrLocked(errors.New("async queue admissionHeld underflow"))
+		} else {
+			c.admissionHeld--
+		}
+		r.admissionHeld = false
+	}
+	r.classified = true
+	r.terminal = terminal
+	r.published = published
+	r.applyErr = err
+	c.publishDetailLocked(r)
+	switch terminal {
+	case queueRefused:
+		c.incrementLocked(&c.refused)
+	case queueApplied:
+		c.incrementLocked(&c.applied)
+	case queueAppliedPublished:
+		c.incrementLocked(&c.appliedPublished)
+	case queueAppliedNotPublished:
+		c.incrementLocked(&c.appliedNotPublished)
+	case queueFailed:
+		c.incrementLocked(&c.failed)
+	case queueAborted:
+		c.incrementLocked(&c.aborted)
+	default:
+		c.noteProofErrLocked(errors.New("invalid async queue classification"))
+	}
+}
+
+func (r *asyncQueueRequest) classifyCheckedApply(published bool, err error) {
+	terminal := queueAppliedNotPublished
+	if err != nil {
+		terminal = queueFailed
+	} else if published {
+		terminal = queueAppliedPublished
+	}
+	r.classify(terminal, published, err)
+}
+
+func (r *asyncQueueRequest) classifyLegacyApply(err error) {
+	if err != nil {
+		r.classify(queueFailed, false, err)
+	} else {
+		r.classify(queueApplied, false, nil)
+	}
+}
+
+func (p *asyncMapUpdaterPool) queueObservation(joined bool) asyncQueueObservation {
+	if p == nil {
+		return asyncQueueObservation{
+			CallerJoinedClaim: joined,
+			Outcome:           libpf.AuxiliaryNotExercised,
+			ProofErr:          errors.New("nil async map updater pool"),
+		}
+	}
+	workers := make([]asyncQueueWorkerObservation, len(p.workers))
+	allEnded := len(p.workers) > 0
+	scopeJoined := false
+	scopeHeld := false
+	var checkedScope *periodiccaller.OwnedScope
+	for i, w := range p.workers {
+		if w == nil {
+			allEnded = false
+			continue
+		}
+		var ended, unavail bool
+		var q chan asyncMapInMapUpdate
+		var ctx context.Context
+		if w.admission.TryLock() {
+			ended = w.serveEnded
+			unavail = w.unavailable
+			q = w.queue
+			ctx = w.ctx
+			w.admission.Unlock()
+		} else {
+			ended = false
+			unavail = w.unavailable
+			q = w.queue
+			ctx = w.ctx
+		}
+		workers[i] = asyncQueueWorkerObservation{
+			Index:       i,
+			Worker:      w,
+			Queue:       q,
+			Ctx:         ctx,
+			Unavailable: unavail,
+			ServeEnded:  ended,
+		}
+		if !ended && !unavail {
+			allEnded = false
+		}
+		if checkedScope == nil && ctx != nil {
+			checkedScope = periodiccaller.OwnedScopeFrom(ctx)
+		}
+	}
+	if checkedScope != nil {
+		scopeJoined = checkedScope.Joined()
+		if obs, err := checkedScope.Observation(); err != nil || obs.HeldWork {
+			if checkedScope.IsSnapshotted() && obs.HeldWork {
+				scopeHeld = true
+			}
+		}
+	}
+
+	p.counts.mu.Lock()
+	defer p.counts.mu.Unlock()
+
+	obs := asyncQueueObservation{
+		Pool:                p,
+		Workers:             workers,
+		HasWorkerIdx:        p.counts.hasWorkerIdx,
+		LastWorkerIdx:       p.counts.lastWorkerIdx,
+		LastWorker:          p.counts.lastWorker,
+		LastQueue:           p.counts.lastQueue,
+		LastCtx:             p.counts.lastCtx,
+		LastUnavailable:     p.counts.lastUnavail,
+		LastFileID:          p.counts.lastFileID,
+		LastOuter:           p.counts.lastOuter,
+		LastInner:           p.counts.lastInner,
+		LastChecked:         p.counts.lastChecked,
+		LastPublished:       p.counts.lastPublished,
+		LastApplyErr:        p.counts.lastApplyErr,
+		LastCleanupErr:      p.counts.lastCleanupErr,
+		RequestsOwned:       p.counts.requestsOwned,
+		QueueAccepted:       p.counts.queueAccepted,
+		AdmissionHeld:       p.counts.admissionHeld,
+		Refused:             p.counts.refused,
+		Applied:             p.counts.applied,
+		AppliedPublished:    p.counts.appliedPublished,
+		AppliedNotPublished: p.counts.appliedNotPublished,
+		Failed:              p.counts.failed,
+		Aborted:             p.counts.aborted,
+		CleanupFailed:       p.counts.cleanupFailed,
+		AllWorkersEnded:     allEnded,
+		CallerJoinedClaim:   joined,
+		ScopeJoinedWitness:  scopeJoined,
+		ProofErr:            p.counts.proofErr,
+	}
+
+	reqTotal, err := libpf.SumAuxiliaryCounts(obs.QueueAccepted, obs.Refused, obs.AdmissionHeld)
+	if err != nil {
+		if obs.ProofErr == nil {
+			obs.ProofErr = err
+		}
+	} else if reqTotal != obs.RequestsOwned && obs.ProofErr == nil {
+		obs.ProofErr = fmt.Errorf("async queue request conservation failed: owned=%d != accepted=%d + refused=%d + admissionHeld=%d",
+			obs.RequestsOwned, obs.QueueAccepted, obs.Refused, obs.AdmissionHeld)
+	}
+
+	terminals, err := libpf.SumAuxiliaryCounts(obs.Applied, obs.AppliedPublished, obs.AppliedNotPublished, obs.Failed, obs.Aborted)
+	if err != nil {
+		if obs.ProofErr == nil {
+			obs.ProofErr = err
+		}
+	} else if terminals > obs.QueueAccepted {
+		if obs.AdmissionHeld > 0 && terminals <= obs.QueueAccepted+obs.AdmissionHeld {
+			obs.Held = true
+			obs.Pending = 0
+			obs.PendingKnown = false
+		} else if obs.ProofErr == nil {
+			obs.ProofErr = fmt.Errorf("async queue terminal conservation failed: accepted=%d < terminals=%d",
+				obs.QueueAccepted, terminals)
+		}
+	} else {
+		computedPending := obs.QueueAccepted - terminals
+		if scopeHeld || (joined && !allEnded) || obs.AdmissionHeld > 0 {
+			obs.Held = true
+			obs.Pending = 0
+			obs.PendingKnown = false
+		} else {
+			obs.Pending = computedPending
+			obs.PendingKnown = true
+			if computedPending > 0 {
+				obs.Held = true
+			}
+		}
+	}
+
+	if obs.RequestsOwned == 0 && !obs.Held && obs.ProofErr == nil {
+		obs.Outcome = libpf.AuxiliaryNotExercised
+	} else {
+		obs.Outcome = libpf.SourceLocalNonfinal
+	}
+	return obs
+}
+
+// queueDiagnostic contains only detached local facts, never ownership or source authority.
+type queueDiagnostic struct {
+	Unit string `json:"unit"`
+	RequestsOwned uint64 `json:"requests_owned"`
+	QueueAccepted uint64 `json:"queue_accepted"`
+	AdmissionHeld uint64 `json:"admission_held"`
+	Refused uint64 `json:"refused"`
+	Applied uint64 `json:"applied"`
+	AppliedPublished uint64 `json:"applied_published"`
+	AppliedNotPublished uint64 `json:"applied_not_published"`
+	Failed uint64 `json:"failed"`
+	Aborted uint64 `json:"aborted"`
+	Pending uint64 `json:"pending"`
+	CleanupFailed uint64 `json:"cleanup_failed"`
+	PendingKnown bool `json:"pending_known"`
+	AllWorkersEnded bool `json:"all_workers_ended"`
+	CallerJoinedClaim bool `json:"caller_joined_claim"`
+	ScopeJoinedWitness bool `json:"scope_joined_witness"`
+	Held bool `json:"held"`
+	LastUnavailable bool `json:"last_unavailable"`
+	LastPublished bool `json:"last_published"`
+	Outcome libpf.AuxiliaryOutcome `json:"outcome"`
+	ProofErrorPresent bool `json:"proof_error_present"`
+	LastApplyErrorPresent bool `json:"last_apply_error_present"`
+	LastCleanupErrorPresent bool `json:"last_cleanup_error_present"`
+}
+
+type queueDiagnosticEnvelope struct {
+	Schema int `json:"schema"`
+	Queue *queueDiagnostic `json:"queue,omitempty"`
+	Missing []string `json:"missing"`
+}
+
+func projectQueue(o asyncQueueObservation) *queueDiagnostic {
+	return &queueDiagnostic{
+		Unit: "owned-map-update-request",
+		RequestsOwned: o.RequestsOwned,
+		QueueAccepted: o.QueueAccepted,
+		AdmissionHeld: o.AdmissionHeld,
+		Refused: o.Refused,
+		Applied: o.Applied,
+		AppliedPublished: o.AppliedPublished,
+		AppliedNotPublished: o.AppliedNotPublished,
+		Failed: o.Failed,
+		Aborted: o.Aborted,
+		Pending: o.Pending,
+		CleanupFailed: o.CleanupFailed,
+		PendingKnown: o.PendingKnown,
+		AllWorkersEnded: o.AllWorkersEnded,
+		CallerJoinedClaim: o.CallerJoinedClaim,
+		ScopeJoinedWitness: o.ScopeJoinedWitness,
+		Held: o.Held,
+		LastUnavailable: o.LastUnavailable,
+		LastPublished: o.LastPublished,
+		Outcome: o.Outcome,
+		ProofErrorPresent: o.ProofErr != nil,
+		LastApplyErrorPresent: o.LastApplyErr != nil,
+		LastCleanupErrorPresent: o.LastCleanupErr != nil,
+	}
+}
+
+// DefinitionSourceDiagnostics reports a local snapshot; it does not establish a join.
+func (impl *ebpfMapsImpl) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	e := queueDiagnosticEnvelope{Schema: 1, Missing: []string{"queue-binding-absent"}}
+	if impl == nil || impl.updateWorkers == nil {
+		e.Missing = append(e.Missing, "queue-pool-missing")
+	} else {
+		e.Queue = projectQueue(impl.updateWorkers.queueObservation(false))
+	}
+	b, err := json.Marshal(e)
+	return json.RawMessage(b), err
+}

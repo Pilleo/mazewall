@@ -5,13 +5,219 @@ package otel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
+	"reflect"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
+
+func TestChannelDiagnosticProjectsDetachedAccounting(t *testing.T) {
+	o := &otelResolverInstance{}
+	o.admitChannelTrace(nil)
+	trace := &libpf.EbpfTrace{PID: 11, TID: 12, CPU: 13, Origin: libpf.Origin(14), KTime: 15, CorrelationID: math.MaxUint64, HotSpotIdentity: libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable, ReadError: -7}}
+	o.admitChannelTrace(trace)
+	*trace = libpf.EbpfTrace{}
+	o.channelCloseExit()
+	o.channelCancelExit()
+	o.channelBook.overflow = true
+	d := projectChannelDiagnostic(o.channelAccountingSnapshot())
+	if d.Unit != "completed-receive" || d.NilBarrier != 1 || d.NonNilToHandleTrace != 1 || d.CloseExit != 1 || d.CancelExit != 1 || !d.Overflow || d.Retired || d.Last.PID != 11 || d.Last.TID != 12 || d.Last.CPU != 13 || d.Last.Origin != 14 || d.Last.KTime != 15 || d.Last.CorrelationID != math.MaxUint64 || d.Last.HotSpotIdentity.Epoch != 2 || d.Last.HotSpotIdentity.State != uint64(libpf.HotSpotEpochStable) || d.Last.HotSpotIdentity.ReadError != -7 {
+		t.Fatalf("channel projection: %+v", d)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil || !strings.Contains(string(raw), `"correlation_id":18446744073709551615`) || len(raw) > 32768 {
+		t.Fatalf("channel JSON: %s, %v", raw, err)
+	}
+	if !projectChannelDiagnostic(channelSnapshot{retired: true}).Retired {
+		t.Fatal("retired state lost")
+	}
+	assertDiagnosticScalars(t, reflect.TypeOf(d))
+}
+
+func TestStoreDiagnosticProjectsSeparateTerminals(t *testing.T) {
+	o := &otelResolverInstance{}
+	for terminal := storeInvalidIdentity; terminal < storeTerminalCount; terminal++ {
+		a := o.storeBook.admit(uint64(terminal)+1, 11, 12, libpf.HotSpotIdentity{Epoch: 3, State: libpf.HotSpotEpochStable, ReadError: -5})
+		a.finish(terminal)
+	}
+	o.storeBook.admit(99, 11, 12, libpf.HotSpotIdentity{})
+	o.storeBook.overflow, o.storeBook.invalid = true, true
+	o.storeBook.counts[storeNewDistinct] = math.MaxUint64
+	d := projectStoreDiagnostic(o.storeAccountingSnapshot())
+	if d.Unit != "store-call" || d.Inputs != 8 || d.InFlight != 1 || d.InvalidIdentity != 1 || d.IdentityValidate != 1 || d.InvalidChecked != 1 || d.Mismatch != 1 || d.NewDistinct != math.MaxUint64 || d.PreserveChecked != 1 || d.Dedup != 1 || !d.Overflow || !d.Invalid || d.Last.ID != 7 || d.Last.PID != 11 || d.Last.TID != 12 || d.Last.HotSpotIdentity.Epoch != 3 || d.Last.HotSpotIdentity.State != uint64(libpf.HotSpotEpochStable) || d.Last.HotSpotIdentity.ReadError != -5 || d.Last.Terminal != uint64(storeDedup) {
+		t.Fatalf("store projection: %+v", d)
+	}
+	raw, err := json.Marshal(d)
+	if err != nil || !strings.Contains(string(raw), `"new_distinct":18446744073709551615`) || len(raw) > 32768 {
+		t.Fatalf("store JSON: %s, %v", raw, err)
+	}
+	assertDiagnosticScalars(t, reflect.TypeOf(d))
+}
+
+func assertDiagnosticScalars(t *testing.T, typ reflect.Type) {
+	t.Helper()
+	if typ.Kind() == reflect.Struct {
+		for i := 0; i < typ.NumField(); i++ {
+			assertDiagnosticScalars(t, typ.Field(i).Type)
+		}
+		return
+	}
+	switch typ.Kind() {
+	case reflect.Bool, reflect.String, reflect.Int32, reflect.Int64, reflect.Uint32, reflect.Uint64:
+	default:
+		t.Fatalf("diagnostic contains non-scalar %v", typ)
+	}
+}
+
+func TestStoreAccountingReturns(t *testing.T) {
+	o := fixtureResolver()
+	stable := libpf.HotSpotIdentity{State: libpf.HotSpotEpochStable, Epoch: 2}
+	checked := libpf.HotSpotValidation{State: libpf.HotSpotValidationChecked}
+	unavailable := libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable}
+	frames := fixtureFrames()
+	different := fixtureFrames()[:1]
+	cases := []struct {
+		id         uint64
+		pid, tid   uint32
+		identity   libpf.HotSpotIdentity
+		validation libpf.HotSpotValidation
+		frames     libpf.Frames
+		terminal   storeTerminal
+		wantErr    bool
+	}{
+		{0, 1, 1, stable, checked, frames, storeInvalidIdentity, true},
+		{1, 1, 1, libpf.HotSpotIdentity{State: libpf.HotSpotEpochRegressed + 1}, checked, frames, storeIdentityValidate, true},
+		{1, 1, 1, libpf.HotSpotIdentity{}, checked, frames, storeInvalidChecked, true},
+		{1, 1, 1, stable, checked, frames, storeNewDistinct, false},
+		{1, 1, 1, stable, unavailable, different, storePreserveChecked, false},
+		{1, 1, 1, stable, checked, frames, storeDedup, false},
+		{1, 2, 1, stable, checked, frames, storeMismatch, true},
+		{1, 1, 1, stable, checked, different, storeMismatch, true},
+	}
+	for i, tc := range cases {
+		err := o.storeEpochTrace(tc.id, tc.frames, tc.pid, tc.tid, tc.identity, tc.validation)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		if tc.terminal == storeMismatch && !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		s := o.storeAccountingSnapshot()
+		if !s.valid() || s.inputs != uint64(i+1) || s.last.terminal != tc.terminal || s.last.id != tc.id || s.last.pid != tc.pid || s.last.tid != tc.tid || s.last.identity != tc.identity {
+			t.Fatalf("case %d: %+v", i, s)
+		}
+	}
+	if len(o.correlationMap) != 1 || len(o.correlationMap[1].frames) != len(frames) || o.correlationMap[1].frames[0].Value().FunctionName.String() != "nativeLeaf" {
+		t.Fatal("preserve changed stored frames or map length")
+	}
+	if err := o.storeTrace(2, frames, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if s := o.storeAccountingSnapshot(); !s.valid() || s.inputs != 9 || s.counts[storeNewDistinct] != 2 {
+		t.Fatalf("wrapper: %+v", s)
+	}
+}
+
+func TestStoreAccountingConcurrentAndBlocked(t *testing.T) {
+	o := fixtureResolver()
+	o.mu.Lock()
+	done := make(chan error, 1)
+	go func() { done <- o.storeTrace(1, fixtureFrames(), 1, 1) }()
+	for o.storeAccountingSnapshot().inputs == 0 {
+		runtime.Gosched()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	<-ctx.Done()
+	if s := o.storeAccountingSnapshot(); !s.valid() || s.inFlight != 1 {
+		t.Fatalf("blocked: %+v", s)
+	}
+	o.mu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := uint64(2); i <= 33; i++ {
+		wg.Add(1)
+		go func(id uint64) {
+			defer wg.Done()
+			if err := o.storeTrace(id, nil, 1, 1); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if s := o.storeAccountingSnapshot(); !s.valid() || s.inputs != 33 || s.counts[storeNewDistinct] != 33 || s.inFlight != 0 {
+		t.Fatalf("parallel: %+v", s)
+	}
+}
+
+func TestStoreAccountingOverflowDoesNotChangeReturn(t *testing.T) {
+	o := fixtureResolver()
+	o.storeBook.inputs = math.MaxUint64
+	if err := o.storeTrace(1, nil, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if s := o.storeAccountingSnapshot(); !s.overflow || s.valid() || len(o.correlationMap) != 1 {
+		t.Fatalf("overflow: %+v", s)
+	}
+}
+
+func TestStoreAccountingDuplicateFailsClosed(t *testing.T) {
+	var b storeAccounting
+	a := b.admit(1, 2, 3, libpf.HotSpotIdentity{})
+	a.finish(storeNewDistinct)
+	a.finish(storeNewDistinct)
+	if b.storeSnapshot.valid() {
+		t.Fatal("duplicate terminal accepted")
+	}
+}
+
+func TestChannelAccountingCopiesBeforeReclaim(t *testing.T) {
+	o := fixtureResolver()
+	if o.admitChannelTrace(nil) {
+		t.Fatal("nil admitted")
+	}
+	trace := &libpf.EbpfTrace{PID: 11, TID: 12, CPU: 13, Origin: libpf.Origin(14), KTime: 15, CorrelationID: 16, HotSpotIdentity: libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}}
+	if !o.admitChannelTrace(trace) {
+		t.Fatal("trace not admitted")
+	}
+	*trace = libpf.EbpfTrace{}
+	s := o.channelAccountingSnapshot()
+	if !s.valid() || s.nilBarrier != 1 || s.nonNilToHandleTrace != 1 || s.last.pid != 11 || s.last.tid != 12 || s.last.cpu != 13 || s.last.origin != libpf.Origin(14) || s.last.kTime != 15 || s.last.correlationID != 16 || s.last.identity.Epoch != 2 || s.last.identity.State != libpf.HotSpotEpochStable {
+		t.Fatalf("channel snapshot: %+v", s)
+	}
+}
+
+func TestChannelAccountingOverflowAndRetirement(t *testing.T) {
+	o := fixtureResolver()
+	if !o.channelAccountingSnapshot().valid() || !o.storeAccountingSnapshot().valid() {
+		t.Fatal("live owner unavailable")
+	}
+	o.channelBook.nonNilToHandleTrace = math.MaxUint64
+	if !o.admitChannelTrace(&libpf.EbpfTrace{}) {
+		t.Fatal("overflow changed admission")
+	}
+	if s := o.channelAccountingSnapshot(); s.nonNilToHandleTrace != 0 || !s.overflow || s.valid() {
+		t.Fatalf("overflow: %+v", s)
+	}
+	retiredOwner := fixtureResolver()
+	if !retiredOwner.channelAccountingSnapshot().valid() || !retiredOwner.storeAccountingSnapshot().valid() {
+		t.Fatal("fresh owner unavailable")
+	}
+	retiredOwner.retireAccounting()
+	if retiredOwner.channelAccountingSnapshot().valid() || retiredOwner.storeAccountingSnapshot().valid() {
+		t.Fatal("retired owner produced valid snapshot")
+	}
+}
 
 func fixtureResolver() *otelResolverInstance {
 	return &otelResolverInstance{

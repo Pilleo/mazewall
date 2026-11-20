@@ -186,7 +186,7 @@ GRADLE
   else
     grep -q 'GATE DEGRADED' "$case_dir/hook.log" || fail 'excluded portal gate was silent'
   fi
-  printf '%s\n' --no-configuration-cache --no-parallel >> "$case_dir/expected-args"
+  printf '%s\n' --build-cache --configuration-cache --no-parallel >> "$case_dir/expected-args"
   diff -u "$case_dir/expected-args" "$case_dir/gradle-args" || fail 'gate argument selection changed'
   if (( gradle_status == 0 )); then
     [[ $status == 0 && $(cat "$case_dir/hook-status") == 0 ]] || fail 'successful gate aborted commit'
@@ -200,9 +200,106 @@ GRADLE
   echo "PASS: $label — real worktree exports isolated; foreign Git only; gate arguments/status preserved"
 }
 
+run_confined_case() {
+  local label=$1 mode=$2 runner_status=$3
+  local case_dir="$FIXTURE/$label" status
+  mkdir -p "$case_dir/hooks" "$case_dir/repo/scripts" "$case_dir/repo/infra/dev" "$case_dir/repo/gradle/wrapper" "$case_dir/bin"
+  git init -q --initial-branch=main "$case_dir/repo"
+  printf 'baseline\n' > "$case_dir/repo/baseline.txt"
+  printf 'include(":enforcer")\ninclude(":portals:runtime")\n' > "$case_dir/repo/settings.gradle.kts"
+  printf 'distributionUrl=https://example.invalid/gradle.zip\n' > "$case_dir/repo/gradle/wrapper/gradle-wrapper.properties"
+  printf 'FROM scratch\n' > "$case_dir/repo/infra/dev/Containerfile"
+  cat > "$case_dir/repo/gradlew" <<'GRADLE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$CASE_DIR/gradle-args"
+exit 0
+GRADLE
+  chmod +x "$case_dir/repo/gradlew"
+
+  if [[ $mode == docker ]]; then
+    local csha
+    csha=$(sha256sum "$case_dir/repo/infra/dev/Containerfile" | cut -d' ' -f1)
+    cat > "$case_dir/bin/docker" <<DOCKER
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *" info "*) printf '["name=seccomp,profile=builtin"]\n' ;;
+  *"io.mazewall.containerfile.sha256"*) printf '%s\n' "$csha" ;;
+  *"{{.Id}}"*) printf 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n' ;;
+  *) echo "unexpected docker invocation: \$*" >&2; exit 99 ;;
+esac
+DOCKER
+    chmod +x "$case_dir/bin/docker"
+    cat > "$case_dir/repo/scripts/run_confined_helper_tests.sh" <<'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$CASE_DIR/confined-args"
+for name in $(git rev-parse --local-env-vars); do
+  if [[ -v $name ]]; then printf '%s\n' "$name"; fi
+done > "$CASE_DIR/confined-local-names"
+if (( RUNNER_STATUS != 0 )); then echo 'mock confined runner failure'; fi
+exit "$RUNNER_STATUS"
+RUNNER
+    chmod +x "$case_dir/repo/scripts/run_confined_helper_tests.sh"
+  fi
+
+  git -C "$case_dir/repo" add .
+  git -C "$case_dir/repo" commit -q -m baseline
+  cp "$HOOK" "$case_dir/hooks/pre-commit"
+  chmod +x "$case_dir/hooks/pre-commit"
+  printf 'val safe = 2\n' > "$case_dir/repo/Safe.kt"
+  git -C "$case_dir/repo" add Safe.kt
+  git -C "$case_dir/repo" rev-parse HEAD > "$case_dir/original-head"
+
+  export CASE_DIR="$case_dir" RUNNER_STATUS="$runner_status"
+  local test_path="$PATH"
+  if [[ $mode == docker ]]; then
+    test_path="$case_dir/bin:$PATH"
+  fi
+  set +e
+  PATH="$test_path" XDG_CACHE_HOME="$case_dir/cache" \
+    git -C "$case_dir/repo" -c core.hooksPath="$case_dir/hooks" commit -m "$label" > "$case_dir/commit.log" 2>&1
+  status=$?
+  set -e
+
+  printf '%s\n' build :portals:runtime:integrationTest :portals:runtime:test -PmazewallKernelLane=BASELINE --build-cache --configuration-cache --no-parallel > "$case_dir/expected-args"
+  diff -u "$case_dir/expected-args" "$case_dir/gradle-args" || fail "$label: expected BASELINE gradle args"
+
+  if [[ $mode == unavailable ]]; then
+    [[ $status == 0 ]] || fail "$label: commit should succeed when confined lane is unavailable"
+    grep -q 'GATE DEGRADED: Skipping CONFINED kernel lane' "$case_dir/commit.log" || fail "$label: missing explicit GATE DEGRADED notice"
+    echo "PASS: $label — BASELINE host build + explicit GATE DEGRADED skip when confined lane unavailable"
+    return
+  fi
+
+  [[ -f $case_dir/confined-args ]] || fail "$label: confined runner was not invoked"
+  [[ ! -s $case_dir/confined-local-names ]] || fail "$label: Git-local variables reached confined runner"
+  grep -qx -- '--image' "$case_dir/confined-args" || fail "$label: missing --image flag"
+  grep -qx -- '--gradle-home' "$case_dir/confined-args" || fail "$label: missing --gradle-home flag"
+  if (( runner_status == 0 )); then
+    [[ $status == 0 ]] || fail "$label: successful confined lane aborted commit"
+    [[ $(git -C "$case_dir/repo" rev-parse HEAD^) == "$(cat "$case_dir/original-head")" ]] || fail "$label: commit did not advance HEAD"
+    echo "PASS: $label — BASELINE host build + CONFINED container lane succeeded with sanitized Git env"
+  else
+    [[ $status == 1 ]] || fail "$label: failed confined lane did not abort commit"
+    grep -q 'ERROR: CONFINED kernel lane failed. Commit aborted.' "$case_dir/commit.log" || fail "$label: missing confined lane failure diagnostic"
+    [[ $(git -C "$case_dir/repo" rev-parse HEAD) == "$(cat "$case_dir/original-head")" ]] || fail "$label: failed confined lane advanced HEAD"
+    echo "PASS: $label — failed CONFINED container lane aborted commit cleanly"
+  fi
+}
+
 run_case portal-success included 0 allow
 run_case build-verification-failure included 23 allow
 run_case excluded-portal excluded 0 allow
 run_case staged-audit included 0 reject
 run_case alternate-index-audit included 0 alternate-reject
-echo 'PASS: Git hook environment regression (5 disposable real-Git cases)'
+cap_eff=$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null || true)
+if [[ -n "$cap_eff" ]] && (( (16#$cap_eff & (1 << 40)) == 0 )); then
+  run_confined_case enforcer-confined-unavailable unavailable 0
+  if [[ -S /var/run/docker.sock && "$(id -u)" -ne 0 ]] && [[ "$(cat /proc/self/uid_map 2>/dev/null || true)" =~ ^[[:space:]]*0[[:space:]]+0[[:space:]]+4294967295[[:space:]]*$ ]]; then
+    run_confined_case enforcer-confined-docker-pass docker 0
+    run_confined_case enforcer-confined-docker-fail docker 1
+  fi
+fi
+echo 'PASS: Git hook environment regression'

@@ -1,0 +1,96 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package execinfomanager
+
+import (
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/nativeunwind"
+	sdtypes "go.opentelemetry.io/ebpf-profiler/nativeunwind/stackdeltatypes"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+)
+
+type loaderStatusProvider struct{ calls int }
+
+func (p *loaderStatusProvider) GetIntervalStructuresForFile(_ *pfelf.Reference, data *sdtypes.IntervalData) error {
+	p.calls++
+	data.Deltas = []sdtypes.StackDelta{{Address: 0x1000}}
+	return nil
+}
+func (*loaderStatusProvider) GetAndResetStatistics() nativeunwind.Statistics {
+	return nativeunwind.Statistics{}
+}
+
+type loaderStatusMaps struct{ pmebpf.EbpfHandler }
+
+func (loaderStatusMaps) UpdateUnwindInfo(uint16, sdtypes.UnwindInfo) error { return nil }
+func (loaderStatusMaps) UpdateExeIDToStackDeltas(host.FileID, []pmebpf.StackDeltaEBPF) (uint16, error) {
+	return 7, nil
+}
+func (loaderStatusMaps) UpdateStackDeltaPages(host.FileID, []uint16, uint16, uint64) error {
+	return nil
+}
+
+func TestLoaderStatusCachedWithoutChangingOrdinaryAdd(t *testing.T) {
+	provider := &loaderStatusProvider{}
+	mgr, err := NewExecutableInfoManager(provider, loaderStatusMaps{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	state := mgr.state.WLock()
+	state.interpreterLoaders = []interpreter.Loader{
+		func(interpreter.EbpfHandler, *interpreter.LoaderInfo) (interpreter.Data, error) {
+			calls++
+			return nil, syscall.EPERM
+		},
+		func(interpreter.EbpfHandler, *interpreter.LoaderInfo) (interpreter.Data, error) {
+			calls++
+			return nil, syscall.EACCES
+		},
+	}
+	mgr.state.WUnlock(&state)
+	ref := pfelf.NewReference("/libjvm.so", nil)
+	id := host.FileID(123)
+	info, err := mgr.AddOrIncRef(id, ref)
+	if err != nil || info.Data != nil {
+		t.Fatalf("ordinary add changed: data=%v err=%v", info.Data, err)
+	}
+	info, err = mgr.AddOrIncRef(id, ref)
+	if err != nil || info.Data != nil || calls != 2 || provider.calls != 1 {
+		t.Fatalf("cache hit changed: calls=%d provider=%d err=%v", calls, provider.calls, err)
+	}
+	err = mgr.LoaderError(id)
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("missing cached causes: %v", err)
+	}
+	if err := mgr.DecRef(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.DecRef(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.DecRef(id); err == nil {
+		t.Fatal("status check changed refcount")
+	}
+	if err := mgr.LoaderError(host.FileID(456)); err == nil {
+		t.Fatal("missing entry accepted")
+	}
+	state = mgr.state.WLock()
+	state.interpreterLoaders = []interpreter.Loader{
+		func(interpreter.EbpfHandler, *interpreter.LoaderInfo) (interpreter.Data, error) { return nil, nil },
+	}
+	mgr.state.WUnlock(&state)
+	if _, err := mgr.AddOrIncRef(host.FileID(456), ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.LoaderError(host.FileID(456)); err != nil {
+		t.Fatalf("successful cached loader rejected: %v", err)
+	}
+}

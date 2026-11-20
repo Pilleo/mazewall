@@ -42,7 +42,7 @@ class BpfLimitTest {
             LinuxNative.setEngine(MockNativeEngine(memory = mockMemory))
 
             val instructions = List(NativeConstants.BPF_MAXINSNS + 1) {
-                BpfInstruction.Ret(0, 0)
+                BpfInstruction.Ret(SeccompAction.ACT_KILL_THREAD)
             }
 
             NativeArena.ofConfined().use { arena ->
@@ -60,7 +60,7 @@ class BpfLimitTest {
     @Test
     fun `newSockFProg throws exception when instructions exceed limit`() {
         val instructions = List(NativeConstants.BPF_MAXINSNS + 1) {
-            BpfInstruction.Ret(0, 0)
+            BpfInstruction.Ret(SeccompAction.ACT_KILL_THREAD)
         }
 
         NativeArena.ofConfined().use { arena ->
@@ -75,7 +75,7 @@ class BpfLimitTest {
     @Test
     fun `newSockFProg accepts instructions at exactly the limit`() {
         val instructions = List(NativeConstants.BPF_MAXINSNS) {
-            BpfInstruction.Ret(0, 0)
+            BpfInstruction.Ret(SeccompAction.ACT_KILL_THREAD)
         }
 
         NativeArena.ofConfined().use { arena ->

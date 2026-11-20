@@ -37,7 +37,7 @@ class HotSpotProtocolTest {
 
     @Test
     fun `provider alias cannot hide a contradictory canonical patch pin`() {
-        val expected = "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"
+        val expected = "22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035"
         assertFailsWith<IllegalArgumentException> {
             protocol.controlEvent(
                 row(
@@ -105,6 +105,6 @@ class HotSpotProtocolTest {
         "jvm_sha256":"5e0fb6e83a5676090f28ff0b453e9199df06af1ff90d473c1b9837e41096114c",
         "provider":{"name":"otel-ebpf-profiler-via-gadget","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
         "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-        "patch_sha256":"b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"}}}
+        "patch_sha256":"22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035"}}}
     """.trimIndent().replace("\n", "")
 }

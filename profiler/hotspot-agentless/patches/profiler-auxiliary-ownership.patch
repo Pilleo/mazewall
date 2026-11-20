@@ -1,155 +1,42 @@
---- a/periodiccaller/periodiccaller.go
-+++ b/periodiccaller/periodiccaller.go
-@@ -17,1 +17,1 @@
--	go func() {
-+	if !GoOwned(ctx, func() {
-@@ -23,1 +23,2 @@
--				callback()
-+				if !allowOwnedCallback(ctx) { return }
-+				callback()
-@@ -28,1 +28,1 @@
--	}()
-+	}) { ticker.Stop() }
-@@ -45,1 +45,1 @@
--	go func() {
-+	if !GoOwned(ctx, func() {
-@@ -51,1 +52,2 @@
--				if ret := callback(false); !ret {
-+				if !allowOwnedCallback(ctx) { return }
-+				if ret := callback(false); !ret {
-@@ -55,1 +57,2 @@
--				if ret := callback(true); !ret {
-+				if !allowOwnedCallback(ctx) { return }
-+				if ret := callback(true); !ret {
-@@ -62,1 +62,1 @@
--	}()
-+	}) { ticker.Stop() }
-@@ -73,1 +73,1 @@
--	go func() {
-+	if !GoOwned(ctx, func() {
-@@ -79,1 +82,2 @@
--				callback()
-+				if !allowOwnedCallback(ctx) { return }
-+				callback()
-@@ -85,1 +85,1 @@
--	}()
-+	}) { ticker.Stop() }
---- a/tracer/tracer.go
-+++ b/tracer/tracer.go
-@@ -76,1 +76,2 @@
--type Tracer struct {
-+type Tracer struct {
-+	auxiliaryScope *periodiccaller.OwnedScope
-@@ -218,1 +219,9 @@
--func NewTracer(ctx context.Context, cfg *Config) (*Tracer, error) {
-+func NewTracer(ctx context.Context, cfg *Config) (result *Tracer, resultErr error) {
-+	auxCtx, auxiliary := newAuxiliaryContext(ctx, cfg)
-+	defer func() {
-+		if result == nil && auxiliary != nil {
-+			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-+			defer cancel()
-+			resultErr = errors.Join(resultErr, auxiliary.Stop(stopCtx))
-+		}
-+	}()
-@@ -235,1 +245,1 @@
--	ebpfHandler, err := pmebpf.LoadMaps(ctx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
-+	ebpfHandler, err := pmebpf.LoadMaps(auxCtx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
-@@ -243,1 +253,1 @@
--	processManager, err := pm.New(ctx, cfg.IncludeTracers, cfg.Intervals.MonitorInterval(),
-+	processManager, err := pm.New(auxCtx, cfg.IncludeTracers, cfg.Intervals.MonitorInterval(),
-@@ -258,1 +268,2 @@
--	tracer := &Tracer{
-+	tracer := &Tracer{
-+		auxiliaryScope: auxiliary,
-@@ -287,1 +298,9 @@
--func (t *Tracer) Close() {
-+func (t *Tracer) Close() {
-+	if t.auxiliaryScope != nil {
-+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-+		defer cancel()
-+		if err := t.StopAuxiliary(ctx); err != nil {
-+			t.auxiliaryScope.Fail(err)
-+			return
-+		}
-+	}
-@@ -1165,4 +1184,10 @@
- func (t *Tracer) StartMapMonitors(ctx context.Context, traceOutChan chan<- *libpf.EbpfTrace) error {
-+	definitionCtx := ctx
-+	ctx = t.auxiliaryContext(ctx)
- 	if err := t.kernelSymbolizer.StartMonitor(ctx); err != nil {
-+		if t.auxiliaryScope != nil {
-+			t.auxiliaryScope.Fail(err)
-+			return err
-+		}
- 		log.Warnf("Failed to start kallsyms monitor: %v", err)
- 	}
-@@ -1170,1 +1195,1 @@
--	traceEventMetricCollector := t.startTraceEventMonitor(ctx, traceOutChan)
-+	traceEventMetricCollector := t.startTraceEventMonitor(definitionCtx, traceOutChan)
-@@ -1180,1 +1205,4 @@
--				t.pidEvents <- pidTid
-+				select {
-+				case t.pidEvents <- pidTid:
-+				case <-ctx.Done(): return false
-+				}
---- a/tracer/events.go
-+++ b/tracer/events.go
-@@ -7,1 +7,2 @@
--	"context"
-+	"context"
+diff -uNr base/kallsyms/kallsyms.go target/kallsyms/kallsyms.go
+--- a/kallsyms/kallsyms.go	2026-11-08 12:46:05.652530044 +0100
++++ b/kallsyms/kallsyms.go	2026-11-08 21:31:30.848650269 +0100
+@@ -9,6 +9,7 @@
+ 	"bufio"
+ 	"bytes"
+ 	"context"
 +	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
-@@ -41,1 +41,2 @@
--	go t.processPIDEvents(ctx)
-+	ctx = t.auxiliaryContext(ctx)
-+	periodiccaller.GoOwned(ctx, func() { t.processPIDEvents(ctx) })
-@@ -98,3 +99,10 @@
--	if err != nil {
-+	if err != nil {
-+		if periodiccaller.ReportOwnedError(ctx, err) { return func() (uint64,uint64,uint64) { return 0,0,0 } }
--		log.Fatalf("Failed to setup perf reporting via %s: %v", perfEventMap, err)
--	}
-+		log.Fatalf("Failed to setup perf reporting via %s: %v", perfEventMap, err)
-+	}
-+	if scope := periodiccaller.OwnedScopeFrom(ctx); scope != nil {
-+		if err := scope.AddCloser(periodiccaller.OwnedCloser("auxiliary report perf close",eventReader.Close)); err != nil {
-+			scope.Fail(errors.Join(err,eventReader.Close()))
-+			return func() (uint64,uint64,uint64) { return 0,0,0 }
-+		}
-+	}
-@@ -103,1 +112,1 @@
--	go func() {
-+	periodiccaller.GoOwned(ctx, func() {
-@@ -110,2 +119,7 @@
- 				if err := eventReader.ReadInto(&data); err != nil {
-+					if periodiccaller.OwnedScopeFrom(ctx) != nil {
-+						periodiccaller.ReportOwnedReadError(ctx,"auxiliary report perf read",err)
-+						// Cancellation wakes the reader; native permission errors remain fatal.
-+						return
-+					}
- 					readErrorCount.Add(1)
-@@ -125,1 +139,1 @@
--	}()
-+	})
---- a/kallsyms/kallsyms.go
-+++ b/kallsyms/kallsyms.go
-@@ -9,1 +9,2 @@
--	"context"
-+	"context"
-+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
-@@ -594,1 +595,1 @@
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -591,17 +592,18 @@
+ 			}
+ 		case <-ctx.Done():
+ 			// Terminate also the kobject poller thread
 -			_ = kobjectClient.Close()
 +			if periodiccaller.OwnedScopeFrom(ctx) == nil { _ = kobjectClient.Close() }
-@@ -601,1 +602,1 @@
+ 			return
+ 		}
+ 	}
+ }
+ 
+ // pollKobjectClient listens for kernel kobject events to reload kallsyms when needed.
 -func (s *Symbolizer) pollKobjectClient(_ context.Context, kobjectClient *kobject.Client) {
 +func (s *Symbolizer) pollKobjectClient(ctx context.Context, kobjectClient *kobject.Client) {
-@@ -604,2 +605,3 @@
+ 	for {
+ 		event, err := kobjectClient.Receive()
  		if err != nil {
 +			periodiccaller.ReportOwnedReadError(ctx,"auxiliary kobject read",err)
  			return
-@@ -622,1 +624,1 @@
+ 		}
+ 		if event.Subsystem == "module" {
+@@ -619,10 +621,18 @@
+ func (s *Symbolizer) StartMonitor(ctx context.Context) error {
+ 	kobjectClient, err := kobject.New()
+ 	if err != nil {
 -		return fmt.Errorf("failed to create kobject netlink socket: %v", err)
 +		return fmt.Errorf("failed to create kobject netlink socket: %w", err)
-@@ -624,2 +626,10 @@
+ 	}
 -	go s.reloadWorker(ctx, kobjectClient)
 -	go s.pollKobjectClient(ctx, kobjectClient)
 +	if scope := periodiccaller.OwnedScopeFrom(ctx); scope != nil {
@@ -162,25 +49,132 @@
 +	}
 +	periodiccaller.GoOwned(ctx, func() { s.reloadWorker(ctx, kobjectClient) })
 +	periodiccaller.GoOwned(ctx, func() { s.pollKobjectClient(ctx, kobjectClient) })
---- a/processmanager/ebpf/asyncupdate.go
-+++ b/processmanager/ebpf/asyncupdate.go
-@@ -7,1 +7,2 @@
--	"context"
-+	"context"
+ 	return nil
+ }
+ 
+diff -uNr base/periodiccaller/periodiccaller.go target/periodiccaller/periodiccaller.go
+--- a/periodiccaller/periodiccaller.go	2026-11-08 12:46:05.949563767 +0100
++++ b/periodiccaller/periodiccaller.go	2026-11-08 21:31:30.843820871 +0100
+@@ -14,18 +14,23 @@
+ // Start starts a timer that calls <callback> every <interval> until the <ctx> is canceled.
+ func Start(ctx context.Context, interval time.Duration, callback func()) func() {
+ 	ticker := time.NewTicker(interval)
+-	go func() {
++	if !GoOwned(ctx, func() {
+ 		defer ticker.Stop()
+ 
+ 		for {
+ 			select {
+ 			case <-ticker.C:
++				if !allowOwnedCallback(ctx) {
++					return
++				}
+ 				callback()
+ 			case <-ctx.Done():
+ 				return
+ 			}
+ 		}
+-	}()
++	}) {
++		ticker.Stop()
++	}
+ 
+ 	return ticker.Stop
+ }
+@@ -42,16 +47,22 @@
+ func StartWithManualTrigger(ctx context.Context, interval time.Duration,
+ 	trigger chan bool, callback CallbackFunc) func() {
+ 	ticker := time.NewTicker(interval)
+-	go func() {
++	if !GoOwned(ctx, func() {
+ 		defer ticker.Stop()
+ 
+ 		for {
+ 			select {
+ 			case <-ticker.C:
++				if !allowOwnedCallback(ctx) {
++					return
++				}
+ 				if ret := callback(false); !ret {
+ 					return
+ 				}
+ 			case <-trigger:
++				if !allowOwnedCallback(ctx) {
++					return
++				}
+ 				if ret := callback(true); !ret {
+ 					return
+ 				}
+@@ -59,7 +70,9 @@
+ 				return
+ 			}
+ 		}
+-	}()
++	}) {
++		ticker.Stop()
++	}
+ 
+ 	return ticker.Stop
+ }
+@@ -70,19 +83,24 @@
+ func StartWithJitter(ctx context.Context, baseDuration time.Duration, jitter float64,
+ 	callback func()) func() {
+ 	ticker := time.NewTicker(libpf.AddJitter(baseDuration, jitter))
+-	go func() {
++	if !GoOwned(ctx, func() {
+ 		defer ticker.Stop()
+ 
+ 		for {
+ 			select {
+ 			case <-ticker.C:
++				if !allowOwnedCallback(ctx) {
++					return
++				}
+ 				callback()
+ 			case <-ctx.Done():
+ 				return
+ 			}
+ 			ticker.Reset(libpf.AddJitter(baseDuration, jitter))
+ 		}
+-	}()
++	}) {
++		ticker.Stop()
++	}
+ 
+ 	return ticker.Stop
+ }
+diff -uNr base/processmanager/ebpf/asyncupdate.go target/processmanager/ebpf/asyncupdate.go
+--- a/processmanager/ebpf/asyncupdate.go	2026-11-08 12:46:05.980528122 +0100
++++ b/processmanager/ebpf/asyncupdate.go	2026-11-08 21:31:30.849216771 +0100
+@@ -5,8 +5,10 @@
+ 
+ import (
+ 	"context"
 +	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
-@@ -9,1 +10,2 @@
--	"unsafe"
-+	"unsafe"
+ 	"errors"
+ 	"unsafe"
 +	"sync"
-@@ -56,1 +57,1 @@
+ 
+ 	cebpf "github.com/cilium/ebpf"
+ 	"go.opentelemetry.io/ebpf-profiler/internal/log"
+@@ -53,7 +55,7 @@
+ 	for range numWorkers {
+ 		queue := make(chan asyncMapInMapUpdate, workerQueueCapacity)
+ 		worker := &asyncUpdateWorker{ctx: ctx, queue: queue}
 -		go worker.serve()
 +		periodiccaller.GoOwned(ctx, worker.serve)
-@@ -71,1 +72,3 @@
--	workerIdx := uint64(fileID) % uint64(len(p.workers))
-+	workerIdx := uint64(fileID) % uint64(len(p.workers))
+ 		pool.workers = append(pool.workers, worker)
+ 	}
+ 	return pool
+@@ -69,16 +71,24 @@
+ 	outer *cebpf.Map, fileID host.FileID, inner *cebpf.Map,
+ ) {
+ 	workerIdx := uint64(fileID) % uint64(len(p.workers))
 +	p.workers[workerIdx].admission.Lock()
 +	defer p.workers[workerIdx].admission.Unlock()
-@@ -75,8 +76,14 @@
+ 	if err := p.workers[workerIdx].ctx.Err(); err != nil {
+ 		// This spams integration tests
+ 		log.Debugf("Skipping handling of %v: %v", fileID, err)
 +		closeRejectedInner(p.workers[workerIdx].ctx, inner)
  		return
  	}
@@ -196,22 +190,540 @@
 +		closeRejectedInner(p.workers[workerIdx].ctx, inner)
 +	}
  }
-@@ -92,1 +103,2 @@
--type asyncUpdateWorker struct {
-+type asyncUpdateWorker struct {
+ 
+ // asyncMapInMapUpdate is an asynchronous update request for a map-in-map BPF map.
+@@ -90,6 +100,7 @@
+ 
+ // asyncUpdateWorker represents a worker in a newAsyncMapUpdaterPool.
+ type asyncUpdateWorker struct {
 +	admission sync.Mutex
-@@ -108,1 +117,2 @@
+ 	ctx   context.Context
+ 	queue chan asyncMapInMapUpdate
+ }
+@@ -105,6 +116,7 @@
+ 		case update = <-w.queue:
+ 		}
+ 
 +		if w.ctx.Err() != nil { closeRejectedInner(w.ctx,update.Inner); break WorkerLoop }
--		var err error
-+		var err error
-@@ -119,1 +129,1 @@
+ 		var err error
+ 		if update.Inner == nil {
+ 			err = update.Outer.Delete(unsafe.Pointer(&update.FileID))
+@@ -116,15 +128,17 @@
+ 		}
+ 
+ 		if err != nil {
 -			log.Warnf("Outer map update failure: %v", err)
 +			if !periodiccaller.ReportOwnedError(w.ctx, err) { log.Warnf("Outer map update failure: %v", err) }
-@@ -123,1 +138,3 @@
+ 		}
+ 	}
+ 
 -	// Shutting down: drain remaining queue capacity & close the inner maps.
 +	// Shutting down: seal admissions before releasing queued owned inner maps.
 +	w.admission.Lock()
 +	defer w.admission.Unlock()
-@@ -127,1 +137,1 @@
+ 	for {
+ 		select {
+ 		case update := <-w.queue:
 -			_ = update.Inner.Close()
 +			closeRejectedInner(w.ctx, update.Inner)
+ 		default:
+ 			return
+ 		}
+diff -uNr base/tracer/events.go target/tracer/events.go
+--- a/tracer/events.go	2026-11-08 21:31:30.737572478 +0100
++++ b/tracer/events.go	2026-11-08 21:31:30.847465455 +0100
+@@ -7,6 +7,7 @@
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+ 	"os"
+ 	"sync/atomic"
+ 	"time"
+@@ -39,7 +40,8 @@
+ 
+ // StartPIDEventProcessor spawns a goroutine to process PID events.
+ func (t *Tracer) StartPIDEventProcessor(ctx context.Context) {
+-	go t.processPIDEvents(ctx)
++	ctx = t.auxiliaryContext(ctx)
++	periodiccaller.GoOwned(ctx, func() { t.processPIDEvents(ctx) })
+ }
+ 
+ // Process the PID events that are incoming in the Tracer channel.
+@@ -95,13 +97,38 @@
+ func startPerfEventMonitor(ctx context.Context, perfEventMap *ebpf.Map,
+-	triggerFunc func([]byte), perCPUBufferSize int,
++	triggerFunc func([]byte), perCPUBufferSize int, producer *reportProducerSource,
+ ) func() (lost, noData, readError uint64) {
++	var control *reportReaderControl
++	var accounting *reportReaderAccounting
++	if producer != nil {
++		control = producer.reserveReportReader()
++		if control == nil {
++			err := errors.New("report reader already reserved")
++			if !periodiccaller.ReportOwnedError(ctx, err) { log.Fatalf("%v", err) }
++			return func() (uint64, uint64, uint64) { return 0, 0, 0 }
++		}
++		accounting = control.accounting
++	}
+ 	eventReader, err := perf.NewReader(perfEventMap, perCPUBufferSize)
+ 	if err != nil {
++		if control != nil { control.rejectStart() }
++		if periodiccaller.ReportOwnedError(ctx, err) {
++			return func() (uint64, uint64, uint64) { return 0, 0, 0 }
++		}
+ 		log.Fatalf("Failed to setup perf reporting via %s: %v", perfEventMap, err)
+ 	}
++	if control != nil { control.bind(eventReader) }
++	if scope := periodiccaller.OwnedScopeFrom(ctx); scope != nil {
++		if err := scope.AddCloser(periodiccaller.OwnedCloser("auxiliary report perf close", eventReader.Close)); err != nil {
++			if control != nil { control.rejectStart() }
++			scope.Fail(errors.Join(err, eventReader.Close()))
++			return func() (uint64, uint64, uint64) { return 0, 0, 0 }
++		}
++	}
+ 
+ 	var lostEventsCount, readErrorCount, noDataCount atomic.Uint64
+-	go func() {
++	if !periodiccaller.GoOwned(ctx, func() {
++		reason := reportReaderReadError
++		if control != nil { control.loopStart(); defer func() { control.loopReturn(reason) }() }
+ 		var data perf.Record
+ 		for {
+ 			select {
+@@ -109,6 +136,14 @@
++				if ctx.Err() == context.DeadlineExceeded { reason = reportReaderDeadline } else { reason = reportReaderCanceled }
+ 				return
+ 			default:
+-				if err := eventReader.ReadInto(&data); err != nil {
++				if err := readReportRecord(accounting, eventReader.ReadInto, &data); err != nil {
++					if accounting != nil && !(ctx.Err() != nil && (err == perf.ErrClosed || err == os.ErrDeadlineExceeded || err == context.Canceled || err == context.DeadlineExceeded)) { accounting.noteUnexpectedRead(err) }
++					if periodiccaller.OwnedScopeFrom(ctx) != nil {
++						if ctx.Err() == context.DeadlineExceeded { reason = reportReaderDeadline } else if ctx.Err() != nil { reason = reportReaderCanceled } else if err == perf.ErrClosed { reason = reportReaderClosed } else if err == os.ErrDeadlineExceeded { reason = reportReaderDeadline }
++						periodiccaller.ReportOwnedReadError(ctx, "auxiliary report perf read", err)
++						// Cancellation wakes the reader; native permission errors remain fatal.
++						return
++					}
+ 					readErrorCount.Add(1)
+ 					continue
+ 				}
+@@ -115,15 +150,16 @@
+ 				if data.LostSamples != 0 {
++					if accounting != nil { accounting.recordLoss(data.LostSamples) }
+ 					lostEventsCount.Add(data.LostSamples)
+ 					continue
+ 				}
++				kind := dispatchReportRecord(accounting, triggerFunc, data.RawSample)
+-				if len(data.RawSample) == 0 {
++				if kind == reportRecordEmpty {
+ 					noDataCount.Add(1)
+ 					continue
+ 				}
+-				triggerFunc(data.RawSample)
+ 			}
+ 		}
+-	}()
++	}) { if control != nil { control.rejectStart() } }
+ 
+ 	return func() (lost, noData, readError uint64) {
+ 		lost = lostEventsCount.Swap(0)
+@@ -212,8 +248,14 @@
+ 					return
+ 				}
+ 				if err = readErr; err != nil {
+-					if errors.Is(err, perf.ErrFlushed) && t.traceReaderCounters.drain.requested.Load() { flushBoundary = true; break }
+-					if t.traceReaderCounters.drain.requested.Load() && !errors.Is(err, os.ErrDeadlineExceeded) { t.traceReaderCounters.drain.setError(err); return }
++					if errors.Is(err, perf.ErrFlushed) && t.traceReaderCounters.drain.requested.Load() {
++						flushBoundary = true
++						break
++					}
++					if t.traceReaderCounters.drain.requested.Load() && !errors.Is(err, os.ErrDeadlineExceeded) {
++						t.traceReaderCounters.drain.setError(err)
++						return
++					}
+ 					if !errors.Is(err, os.ErrDeadlineExceeded) {
+ 						readErrorCount.Add(1)
+ 					}
+@@ -266,7 +308,10 @@
+ 					// TODO: trigger a graceful shutdown
+ 					return
+ 				default:
+-					if t.traceReaderCounters.drain.requested.Load() { t.traceReaderCounters.drain.setError(err); return }
++					if t.traceReaderCounters.drain.requested.Load() {
++						t.traceReaderCounters.drain.setError(err)
++						return
++					}
+ 					log.Warnf("unexpected error handling trace: %v", err)
+ 					continue
+ 				}
+@@ -326,7 +371,10 @@
+ 			}
+ 			oldKTime = minKTime
+ 			if flushBoundary {
+-				if !sendTrace(ctx, traceOutChan, nil) { t.traceReaderCounters.drain.setError(ctx.Err()); return }
++				if !sendTrace(ctx, traceOutChan, nil) {
++					t.traceReaderCounters.drain.setError(ctx.Err())
++					return
++				}
+ 				t.traceReaderCounters.drain.flushed.Store(true)
+ 				close(traceOutChan)
+ 				return
+@@ -355,7 +403,7 @@
+ 		log.Fatalf("Map report_events is not available")
+ 	}
+ 
+-	getPerfErrorCounts := startPerfEventMonitor(ctx, eventMap, t.triggerReportEvent, os.Getpagesize())
++	getPerfErrorCounts := startPerfEventMonitor(ctx, eventMap, t.triggerReportEvent, os.Getpagesize(), t.reportProducer)
+ 	return func() []metrics.Metric {
+ 		lost, noData, readError := getPerfErrorCounts()
+ 
+diff -uNr base/tracer/tracer.go target/tracer/tracer.go
+--- a/tracer/tracer.go	2026-11-08 21:31:30.719363086 +0100
++++ b/tracer/tracer.go	2026-11-08 21:31:30.849932000 +0100
+@@ -74,9 +74,16 @@
+ // Tracer provides an interface for loading and initializing the eBPF components as
+ // well as for monitoring the output maps for new traces and count updates.
+ type Tracer struct {
+-	definitionSource    *traceDefinitionSource
+-	definitionOwner     *definitionOwner
+-	traceReaderCounters traceReaderCounters
++	definitionSource     *traceDefinitionSource
++	definitionOwner      *definitionOwner
++	auxiliaryScope       *periodiccaller.OwnedScope
++	auxiliaryLocal       auxiliaryLocalCache
++	scopedClose          tracerCloseState
++	pidMailbox           *pidMailbox
++	pidPollMu            sync.Mutex
++	pidEventsMapOverride pidEventsMapper
++	pidMapInfoOverride   pidMapInfoFunc
++	traceReaderCounters  traceReaderCounters
+ 	// ebpfMaps holds the currently loaded eBPF maps.
+ 	ebpfMaps map[string]*cebpf.Map
+ 	// ebpfProgs holds the currently loaded eBPF programs.
+@@ -131,9 +138,9 @@
+ 
+ type Config struct {
+ 	TraceDefinitionLifetime libpf.TraceDefinitionLifetime
+-	HotSpotEpochTarget libpf.HotSpotEpochTarget
+-	OnHotSpotFatal func(error)
+-	HotSpotObservedPID libpf.PID
++	HotSpotEpochTarget      libpf.HotSpotEpochTarget
++	OnHotSpotFatal          func(error)
++	HotSpotObservedPID      libpf.PID
+ 	// ExecutableReporter allows to configure a ExecutableReporter to hook seen executables.
+ 	// NOTE: This is used by external implementations embedding opentelemtry-ebpf-profiler.
+ 	ExecutableReporter reporter.ExecutableReporter
+@@ -219,7 +226,15 @@
+ }
+ 
+ // NewTracer loads eBPF code and map definitions from the ELF module at the configured path.
+-func NewTracer(ctx context.Context, cfg *Config) (*Tracer, error) {
++func NewTracer(ctx context.Context, cfg *Config) (result *Tracer, resultErr error) {
++	auxCtx, auxiliary := newAuxiliaryContext(ctx, cfg)
++	defer func() {
++		if result == nil && auxiliary != nil {
++			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++			defer cancel()
++			resultErr = errors.Join(resultErr, auxiliary.Stop(stopCtx))
++		}
++	}()
+ 	if cfg.TraceDefinitionLifetime != nil {
+ 		if _, ok := cfg.TraceDefinitionLifetime.(libpf.TraceDefinitionRetainer); !ok {
+ 			return nil, fmt.Errorf("trace definition lifetime lacks retainer capability")
+@@ -255,7 +270,13 @@
+ 	definitionSource, err := acquireTraceDefinitionSource(definitionOwner, ebpfMaps)
+ 	if err != nil {
+ 		if definitionOwner != nil {
+-			err = errors.Join(err, definitionOwner.Close())
++			if auxiliary != nil {
++				auxiliary.Fail(err)
++			}
++			bootstrapCleanupHandled = true
++			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++			err = errors.Join(err, definitionOwner.closeAfterScope(stopCtx, auxiliary))
++			cancel()
+ 		}
+ 		for _, m := range ebpfMaps {
+ 			err = errors.Join(err, m.Close())
+@@ -265,7 +286,29 @@
+ 		}
+ 		return nil, err
+ 	}
+-	ebpfHandler, err := pmebpf.LoadMaps(ctx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
++	defer func() {
++		if result == nil && definitionOwner != nil && !bootstrapCleanupHandled {
++			if auxiliary != nil {
++				auxiliary.Fail(resultErr)
++			}
++			bootstrapCleanupHandled = true
++			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++			resultErr = errors.Join(resultErr, definitionOwner.closeAfterScope(stopCtx, auxiliary))
++			cancel()
++		}
++	}()
++	if definitionOwner != nil && auxiliary != nil {
++		if err := auxiliary.BindLifetime(definitionOwner.HeldLifetime()); err != nil {
++			for _, m := range ebpfMaps {
++				err = errors.Join(err, m.Close())
++			}
++			for _, p := range ebpfProgs {
++				err = errors.Join(err, p.Close())
++			}
++			return nil, err
++		}
++	}
++	ebpfHandler, err := pmebpf.LoadMaps(auxCtx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to load eBPF maps: %w", err)
+ 	}
+@@ -273,7 +316,7 @@
+ 	hasBatchOperations := ebpfHandler.SupportsGenericBatchOperations()
+ 	hasBatchLookupAndDelete := ebpfHandler.SupportsGenericBatchLookupAndDelete()
+ 
+-	processManager, err := pm.New(ctx, cfg.IncludeTracers, cfg.Intervals.MonitorInterval(),
++	processManager, err := pm.New(auxCtx, cfg.IncludeTracers, cfg.Intervals.MonitorInterval(),
+ 		cfg.Intervals.ExecutableUnloadDelay(), ebpfHandler, cfg.TraceReporter, cfg.ExecutableReporter,
+ 		elfunwindinfo.NewStackDeltaProvider(),
+ 		cfg.FilterErrorFrames, cfg.IncludeEnvVars)
+@@ -297,6 +340,7 @@
+ 	tracer := &Tracer{
+ 		definitionSource:       definitionSource,
+ 		definitionOwner:        definitionOwner,
++		auxiliaryScope:         auxiliary,
+ 		kernelSymbolizer:       kernelSymbolizer,
+ 		processManager:         processManager,
+ 		triggerPIDProcessing:   make(chan bool, 1),
+@@ -312,6 +356,7 @@
+ 		probabilisticInterval:  cfg.ProbabilisticInterval,
+ 		probabilisticThreshold: cfg.ProbabilisticThreshold,
+ 	}
++	tracer.preparePIDMailbox(cfg)
+ 
+ 	// Use an optimized version if available
+ 	if hasBatchLookupAndDelete {
+@@ -326,20 +371,41 @@
+ // Close provides functionality for Tracer to perform cleanup tasks.
+ // NOTE: Close may be called multiple times in succession.
+ func (t *Tracer) Close() {
++	if s := t.definitionSource; s != nil {
++		s.fail(errTraceDefinitionSourceClosed)
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	defer cancel()
++	if t.auxiliaryScope != nil {
++		if err := t.closeScopedTracer(ctx); err != nil {
++			t.auxiliaryScope.Fail(err)
++		}
++		return
++	} else if t.definitionOwner != nil {
++		t.publishAuxiliaryLocal(t.definitionOwner.closeWithContext(ctx))
++	}
++	_ = t.closePhysicalTail()
++}
++
++func (t *Tracer) closePhysicalTail() error {
++	t.freezeTracerDiagnosticBeforeTeardown()
++	var closeErr error
+ 	events := t.perfEntrypoints.WLock()
+ 	terminatePerfEvents(*events)
+ 	*events = nil
+ 	t.perfEntrypoints.WUnlock(&events)
+ 
+ 	// Avoid resource leakage by closing all kernel hooks.
+ 	for hookPoint, hook := range t.hooks {
+ 		if err := hook.Close(); err != nil {
+ 			log.Errorf("Failed to close '%s/%s': %v", hookPoint.group, hookPoint.name, err)
++			closeErr = errors.Join(closeErr, err)
+ 		}
+ 		delete(t.hooks, hookPoint)
+ 	}
+ 
+ 	t.processManager.Close()
++	return closeErr
+ }
+ 
+ func (t *Tracer) GetProbeEntryEbpfProgram() *cebpf.Program {
+@@ -969,90 +1035,42 @@
+ // monitorPIDEventsMapSingle iterates over the eBPF map pid_events, collects PIDs
+ // and writes them to the keys slice.
+ func (t *Tracer) monitorPIDEventsMapSingle(keys *[]libpf.PIDTID) {
+-	eventsMap := t.ebpfMaps["pid_events"]
+-	var key, nextKey uint64
+-	var value bool
+-	keyFound := true
+-	deleteBatch := make(libpf.Set[uint64])
+-
+-	// Key 0 retrieves the very first element in the hash map as
+-	// it is guaranteed not to exist in pid_events.
+-	key = 0
+-	if err := eventsMap.NextKey(unsafe.Pointer(&key), unsafe.Pointer(&nextKey)); err != nil {
+-		if errors.Is(err, cebpf.ErrKeyNotExist) {
+-			return
+-		}
+-		log.Fatalf("Failed to read from pid_events map: %v", err)
+-	}
+-
+-	for keyFound {
+-		key = nextKey
+-
+-		if err := eventsMap.Lookup(unsafe.Pointer(&key), unsafe.Pointer(&value)); err != nil {
+-			log.Fatalf("Failed to lookup '%v' in pid_events: %v", key, err)
+-		}
+-
+-		// Lookup the next map entry before deleting the current one.
+-		if err := eventsMap.NextKey(unsafe.Pointer(&key), unsafe.Pointer(&nextKey)); err != nil {
+-			if !errors.Is(err, cebpf.ErrKeyNotExist) {
+-				log.Fatalf("Failed to read from pid_events map: %v", err)
+-			}
+-			keyFound = false
+-		}
+-
+-		if !t.hasBatchOperations {
+-			// Now that we have the next key, we can delete the current one.
+-			if err := eventsMap.Delete(unsafe.Pointer(&key)); err != nil {
+-				log.Fatalf("Failed to delete '%v' from pid_events: %v", key, err)
+-			}
+-		} else {
+-			// Store to-be-deleted keys in a map so we can delete them all with a single
+-			// bpf syscall.
+-			deleteBatch[key] = libpf.Void{}
+-		}
+-
+-		// If we process keys inline with iteration (e.g. by sending them to t.pidEvents at this
+-		// exact point), we may block sending to the channel, delay the iteration and may introduce
+-		// race conditions (related to deletion). For that reason, keys are first collected and,
+-		// after the iteration has finished, sent to the channel.
+-		*keys = append(*keys, libpf.PIDTID(key))
+-	}
+-
+-	keysToDelete := len(deleteBatch)
+-	if keysToDelete != 0 {
+-		keys := libpf.MapKeysToSlice(deleteBatch)
+-		if _, err := eventsMap.BatchDelete(keys, nil); err != nil {
+-			log.Fatalf("Failed to batch delete %d entries from pid_events map: %v",
+-				keysToDelete, err)
+-		}
++	err := t.pollPIDEventsSingle(keys)
++	switch classifyPIDPoll(err) {
++	case pidPollContinue:
++		if *keys == nil { *keys = make([]libpf.PIDTID, 0) }
++		return
++	case pidPollStop:
++		t.abortHeldPIDEvents(keys)
++		*keys = nil
++		return
++	default:
++		log.Fatalf("%v", err)
+ 	}
+ }
+ 
+ // monitorPIDEventsMapBatch iterates over the eBPF map pid_events in batches,
+ // collects PIDs and writes them to the keys slice.
+ func (t *Tracer) monitorPIDEventsMapBatch(keys *[]libpf.PIDTID) {
+-	eventsMap := t.ebpfMaps["pid_events"]
+-
+-	removed := make([]uint64, 128)
+-	values := make([]bool, len(removed))
+-
+-	cursor := cebpf.MapBatchCursor{}
+-
+-	for {
+-		n, err := eventsMap.BatchLookupAndDelete(&cursor, removed, values, nil)
+-
+-		// There can be results even if there's an error.
+-		for i := range n {
+-			*keys = append(*keys, libpf.PIDTID(removed[i]))
+-		}
+-
+-		if errors.Is(err, cebpf.ErrKeyNotExist) {
+-			break
+-		}
+-
+-		if err != nil {
+-			log.Fatalf("Failed to batch lookup and delete entries from pid_events map: %v", err)
+-		}
++	err := t.pollPIDEventsBatch(keys)
++	if classifyPIDPoll(err) == pidPollFallback {
++		if t.pidNormalWorkClosed() {
++			t.abortHeldPIDEvents(keys)
++			*keys = nil
++			return
++		}
++		err = t.pollPIDEventsSingle(keys)
++	}
++	switch classifyPIDPoll(err) {
++	case pidPollContinue:
++		if *keys == nil { *keys = make([]libpf.PIDTID, 0) }
++		return
++	case pidPollStop:
++		t.abortHeldPIDEvents(keys)
++		*keys = nil
++		return
++	default:
++		log.Fatalf("%v", err)
+ 	}
+ }
+ 
+@@ -1155,7 +1173,7 @@
+ 	procMeta := t.processManager.MetaForPID(pid)
+ 	trace := t.tracePool.Get().(*libpf.EbpfTrace)
+ 	*trace = libpf.EbpfTrace{
+-		HotSpotIdentity: identity,
++		HotSpotIdentity:  identity,
+ 		Comm:             goString(ptr.Comm[:]),
+ 		ExecutablePath:   procMeta.Executable,
+ 		ContainerID:      procMeta.ContainerID,
+@@ -1208,26 +1226,42 @@
+ // StartMapMonitors starts goroutines for collecting metrics and monitoring eBPF
+ // maps for tracepoints, new traces, trace count updates and unknown PCs.
+ func (t *Tracer) StartMapMonitors(ctx context.Context, traceOutChan chan<- *libpf.EbpfTrace) error {
++	definitionCtx := ctx
++	ctx = t.auxiliaryContext(ctx)
+ 	if err := t.kernelSymbolizer.StartMonitor(ctx); err != nil {
++		if t.definitionSource != nil {
++			t.definitionSource.fail(err)
++		}
++		if t.auxiliaryScope != nil {
++			t.auxiliaryScope.Fail(err)
++			return err
++		}
++		if t.definitionSource != nil {
++			return err
++		}
+ 		log.Warnf("Failed to start kallsyms monitor: %v", err)
+ 	}
+ 	eventMetricCollector := t.startEventMonitor(ctx)
+-	traceEventMetricCollector := t.startTraceEventMonitor(ctx, traceOutChan)
++	if s := t.definitionSource; s != nil {
++		if err := s.lifetime.Validate(); err != nil {
++			s.fail(err)
++			return err
++		}
++	}
++	traceEventMetricCollector, err := t.startTraceEventMonitor(definitionCtx, traceOutChan)
++	if err != nil {
++		if t.auxiliaryScope != nil {
++			t.auxiliaryScope.Fail(err)
++		}
++		return err
++	}
+ 
+ 	pidEvents := make([]libpf.PIDTID, 0)
+ 	periodiccaller.StartWithManualTrigger(ctx, t.intervals.MonitorInterval(),
+ 		t.triggerPIDProcessing, func(_ bool) bool {
++			if t.pidNormalWorkClosed() { return false }
+ 			t.enableEvent(support.EventTypeGenericPID)
+-			t.monitorPIDEventsMapMethod(&pidEvents)
+-
+-			for _, pidTid := range pidEvents {
+-				log.Debugf("=> %v", pidTid)
+-				t.pidEvents <- pidTid
+-			}
+-
+-			// Keep the underlying array alive to avoid GC pressure
+-			pidEvents = pidEvents[:0]
+-			return true
++			return t.pollAndEnqueuePIDEvents(ctx, &pidEvents)
+ 		})
+ 
+ 	// translateIDs is a translation table for eBPF IDs into Metric IDs.

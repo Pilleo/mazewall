@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"io.mazewall/experiments/hotspot-agentless/internal/accounting"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 )
 
@@ -45,20 +46,32 @@ type pendingEvent struct {
 	bytes int
 }
 type Enricher struct {
-	ctx            context.Context
-	opts           EnrichmentOptions
-	lookup         StackLookup
-	sink           model.Sink
-	clock          BootClock
-	onFatal        context.CancelFunc
-	onError        func(error)
-	jobs           chan pendingEvent
-	wg             sync.WaitGroup
-	mu             sync.Mutex
-	closed         bool
-	err            error
-	pending, bytes int
-	stats          model.Stats
+	ctx             context.Context
+	opts            EnrichmentOptions
+	lookup          StackLookup
+	sink            model.Sink
+	clock           BootClock
+	onFatal         context.CancelFunc
+	onError         func(error)
+	jobs            chan pendingEvent
+	wg              sync.WaitGroup
+	mu              sync.Mutex
+	closed          bool
+	err             error
+	pending, bytes  int
+	stats           model.Stats
+	counts          accounting.Counts
+	queued, skipped uint64
+	overflow        bool
+	frozen          bool
+}
+
+func (e *Enricher) increment(value *uint64) {
+	if *value == ^uint64(0) {
+		e.overflow = true
+		return
+	}
+	*value++
 }
 
 func NewEnricher(ctx context.Context, opts EnrichmentOptions, lookup StackLookup, sink model.Sink, clock BootClock, onFatal context.CancelFunc) (*Enricher, error) {
@@ -95,8 +108,10 @@ func (e *Enricher) Submit(event model.Event) error {
 	if e.err != nil {
 		return e.err
 	}
+	e.increment(&e.counts.Attempted)
 	e.stats.Received++
 	if err := e.write(model.Record{Kind: "event", SessionID: event.SessionID, EventID: event.EventID, Event: (*wire.Event)(&event)}); err != nil {
+		e.increment(&e.counts.ReserveFailed)
 		return err
 	}
 	reason := ""
@@ -106,11 +121,15 @@ func (e *Enricher) Submit(event model.Event) error {
 		reason = "pending_byte_limit"
 	}
 	if reason != "" {
+		e.increment(&e.counts.Submitted)
+		e.increment(&e.skipped)
 		e.stats.Skipped++
 		evidence := model.Unavailable(reason, nil)
 		evidence.Attribution = "skipped"
 		return e.write(model.Record{Kind: "enrichment", SessionID: event.SessionID, EventID: event.EventID, Evidence: &evidence})
 	}
+	e.increment(&e.counts.Submitted)
+	e.increment(&e.queued)
 	e.pending++
 	e.bytes += len(encoded)
 	if e.pending > e.stats.MaxPending {
@@ -137,6 +156,12 @@ func (e *Enricher) write(record model.Record) error {
 			}
 		}
 		return err
+	}
+	switch record.Kind {
+	case "event":
+		e.increment(&e.counts.Received)
+	case "enrichment":
+		e.increment(&e.counts.Terminals)
 	}
 	return nil
 }
@@ -205,14 +230,13 @@ func (e *Enricher) worker() {
 		} else {
 			e.stats.Unavailable++
 		}
+		firstFatal := fatalEnrichmentError(err) && e.err == nil
+		if firstFatal {
+			e.err = err
+		}
 		writeErr := e.write(model.Record{Kind: "enrichment", SessionID: job.event.SessionID, EventID: job.event.EventID, Evidence: &evidence})
-		if fatalEnrichmentError(err) {
-			if e.err == nil {
-				e.err = err
-				if e.onFatal != nil {
-					e.onFatal()
-				}
-			}
+		if firstFatal && e.onFatal != nil {
+			e.onFatal()
 		}
 		recoverMissing := writeErr == nil && e.err == nil && e.ctx.Err() == nil && (evidence.Reason == "definition_unavailable" || evidence.Reason == "deadline_exceeded")
 		e.mu.Unlock()
@@ -259,14 +283,15 @@ func (e *Enricher) recover(event model.Event) {
 	if err != nil {
 		e.stats.RecoveryErrors++
 	}
-	_ = e.write(model.Record{Kind: "recovery", SessionID: event.SessionID, EventID: event.EventID, Recovery: &action})
 	// A concurrent LRU iteration abort or expiry is an explicit unsuccessful
 	// attempt. Native permission and unexpected recovery failures stay fatal.
-	if fatal && e.err == nil {
+	firstFatal := fatal && e.err == nil
+	if firstFatal {
 		e.err = err
-		if e.onFatal != nil {
-			e.onFatal()
-		}
+	}
+	_ = e.write(model.Record{Kind: "recovery", SessionID: event.SessionID, EventID: event.EventID, Recovery: &action})
+	if firstFatal && e.onFatal != nil {
+		e.onFatal()
 	}
 }
 
@@ -280,6 +305,19 @@ func (e *Enricher) Finish() error {
 	e.wg.Wait()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.err == nil && !e.frozen {
+		e.counts.Known, e.counts.Quiesced, e.counts.Joined = true, true, true
+		e.frozen = true
+	}
 	return e.err
+}
+
+func (e *Enricher) accounting() (accounting.Counts, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.frozen || e.overflow || e.queued > e.counts.Submitted || e.skipped != e.counts.Submitted-e.queued {
+		return accounting.Counts{}, fmt.Errorf("enrichment accounting unavailable or overflowed")
+	}
+	return e.counts, nil
 }
 func (e *Enricher) Stats() model.Stats { e.mu.Lock(); defer e.mu.Unlock(); return e.stats }

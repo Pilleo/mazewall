@@ -1,6 +1,8 @@
 --- a/processmanager/processinfo.go
 +++ b/processmanager/processinfo.go
-@@ -751,34 +751,5 @@
+@@ -749,36 +749,7 @@
+ }
+ 
  func (pm *ProcessManager) ProcessedUntil(traceCaptureKTime times.KTime) {
 -	var err error
 -	defer func() {
@@ -33,22 +35,30 @@
 -		delete(pm.interpreters, pid)
 -		delete(pm.exitEvents, pid)
 -		log.Debugf("PID %v exit latency %v ms", pid, (nowKTime-pidExitKTime)/1e6)
+-	}
+-}
 +	if err := pm.ProcessedUntilChecked(traceCaptureKTime); err != nil {
 +		log.Error(err)
- 	}
- }
++	}
++}
 --- a/tracer/events.go
 +++ b/tracer/events.go
-@@ -296,2 +296,5 @@
+@@ -312,10 +312,16 @@
+ 				if minKTime > 0 && minKTime <= oldKTime {
+ 					// If minKTime is smaller than oldKTime, use it and reset it
+ 					// to avoid a repeat during next iteration.
 -					t.processManager.ProcessedUntil(times.KTime(minKTime))
 +					if err := t.processManager.ProcessedUntilChecked(times.KTime(minKTime)); err != nil {
 +						t.traceReaderCounters.drain.setError(err)
 +						return
 +					}
  					minKTime = 0
-@@ -299,1 +302,4 @@
+ 				} else {
 -					t.processManager.ProcessedUntil(times.KTime(oldKTime))
 +					if err := t.processManager.ProcessedUntilChecked(times.KTime(oldKTime)); err != nil {
 +						t.traceReaderCounters.drain.setError(err)
 +						return
 +					}
+ 				}
+ 			}
+ 			oldKTime = minKTime

@@ -48,6 +48,7 @@ class ProfilePresentationTest {
         when (val outcome = attack.outcome) {
             is ScenarioOutcome.Completed -> error("The unprofiled path was read: ${outcome.detail}")
             is ScenarioOutcome.Denied -> println("RESULT: ${attack.render()}")
+            is ScenarioOutcome.PermissionRefused -> error("Profile mode still requires authenticated denial")
             is ScenarioOutcome.InfrastructureFailure -> {
                 val evidence = io.mazewall.enforcer.diagnostics.ContainmentViolationDetector.diagnose(outcome.cause)?.evidence
                 assertEquals(io.mazewall.enforcer.api.ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, evidence)

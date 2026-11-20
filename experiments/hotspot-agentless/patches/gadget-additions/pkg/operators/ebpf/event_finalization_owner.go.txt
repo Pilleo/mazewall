@@ -57,13 +57,18 @@ func eventStopPhase(stage eventStopStage) string {
 }
 
 type eventStopOwner struct {
-	backend     eventStopBackend
-	done        chan struct{}
-	once        sync.Once
-	mu          sync.Mutex
-	stage       eventStopStage
-	observation operators.EventFinalizationObservation
-	err         error
+	backend           eventStopBackend
+	done              chan struct{}
+	once              sync.Once
+	mu                sync.Mutex
+	stage             eventStopStage
+	observation       operators.EventFinalizationObservation
+	err               error
+	admission         *eventFinalizationAdmission
+	definitionRoot    *definitionReadoutRoot
+	definitionWindow  definitionReadoutWindow
+	definitionContext context.Context
+	definitionLeased  bool
 }
 
 func newEventStopOwner(b eventStopBackend) *eventStopOwner {
@@ -147,7 +152,10 @@ func (o *eventStopOwner) execute(ctx context.Context) {
 	step(eventResourcesRetired, o.backend.Retire)
 }
 func (o *eventStopOwner) stop(ctx context.Context) (operators.EventFinalizationObservation, error) {
-	o.once.Do(func() { go o.execute(ctx) })
+	return o.stopWithExecution(ctx, ctx)
+}
+func (o *eventStopOwner) stopWithExecution(ctx, executionCtx context.Context) (operators.EventFinalizationObservation, error) {
+	o.once.Do(func() { go o.execute(executionCtx) })
 	select {
 	case <-o.done:
 		return o.result()
@@ -170,7 +178,18 @@ func (o *eventStopOwner) stop(ctx context.Context) (operators.EventFinalizationO
 func (o *eventStopOwner) result() (operators.EventFinalizationObservation, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.expireDefinitionLease()
 	return o.copySnapshot(), o.err
+}
+
+// Caller holds o.mu; a timed-out borrowed readout cannot certify retirement.
+func (o *eventStopOwner) expireDefinitionLease() {
+	if o.definitionLeased && o.definitionContext != nil && o.definitionContext.Err() != nil && o.err == nil {
+		o.err = o.definitionContext.Err()
+		o.stage = eventStopFailed
+		o.observation.Phase = eventStopPhase(o.stage)
+		o.observation.Error = o.err.Error()
+	}
 }
 func (o *eventStopOwner) copySnapshot() operators.EventFinalizationObservation {
 	s := o.observation
@@ -188,5 +207,6 @@ func (o *eventStopOwner) copySnapshot() operators.EventFinalizationObservation {
 func (o *eventStopOwner) snapshot() operators.EventFinalizationObservation {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.expireDefinitionLease()
 	return o.copySnapshot()
 }

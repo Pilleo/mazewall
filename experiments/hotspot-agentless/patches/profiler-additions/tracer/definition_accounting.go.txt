@@ -1,0 +1,605 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+	"sync/atomic"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+const traceDefinitionCounterMap = "trace_definition_counts"
+
+var errReportProducerMissing = errors.New("report producer evidence missing")
+var errReportProducerInvalid = errors.New("report producer evidence contradictory")
+
+// validateReportProducerRows checks detached schema-2 values only. A nil error
+// is a local arithmetic result, not an owner receipt or native qualification.
+func validateReportProducerRows(expected, actual reportProducerBinding, rows []reportProducerSample) error {
+	c := expected.Config
+	if expected.Session == "" || expected.PossibleCPUs <= 0 || c.Schema != 2 || c.Enabled != 1 || c.PID == 0 || c.Birth == 0 || c.Generation == 0 || c.Reserved != 0 {
+		return errReportProducerInvalid
+	}
+	if actual.Session == "" || actual.PossibleCPUs <= 0 || actual.Config == (reportProducerConfig{}) { return errReportProducerMissing }
+	for _, m := range actual.Maps {
+		if m.ID == 0 || m.Type == 0 || m.KeySize == 0 || m.ValueSize == 0 || m.MaxEntries == 0 { return errReportProducerMissing }
+	}
+	if actual != expected { return errReportProducerInvalid }
+	for i, m := range expected.Maps {
+		if m.ID == 0 || m.Type == 0 || m.KeySize == 0 || m.ValueSize == 0 || m.MaxEntries == 0 { return errReportProducerInvalid }
+		for j := 0; j < i; j++ { if expected.Maps[j].ID == m.ID { return errReportProducerInvalid } }
+	}
+	shape := func(m reportProducerMapFacts, typ cebpf.MapType, key, value, entries uint32) bool {
+		return m.Type == uint32(typ) && m.KeySize == key && m.ValueSize == value && (entries == 0 || m.MaxEntries == entries)
+	}
+	if !shape(expected.Maps[0], cebpf.PerCPUArray, 4, 832, 1) || !shape(expected.Maps[1], cebpf.Array, 4, 32, 1) ||
+		!shape(expected.Maps[2], cebpf.PerfEventArray, 4, 4, 0) || !shape(expected.Maps[3], cebpf.Hash, 8, 1, 65536) ||
+		!shape(expected.Maps[4], cebpf.LRUHash, 4, 8, 65536) || !shape(expected.Maps[5], cebpf.Hash, 4, 1, 2) {
+		return errReportProducerInvalid
+	}
+	if len(rows) != expected.PossibleCPUs { return errReportProducerMissing }
+	var totals [103]uint64
+	sum := func(values ...uint64) (uint64, bool) {
+		var total uint64
+		for _, v := range values {
+			if v > math.MaxUint64-total { return 0, false }
+			total += v
+		}
+		return total, true
+	}
+	equalSum := func(want uint64, values ...uint64) bool { got, ok := sum(values...); return ok && got == want }
+	pidFields := func(p reportPIDCounts) [19]uint64 {
+		return [19]uint64{p.Entered, p.Returned, p.Active, p.Terminal[0], p.Terminal[1], p.Terminal[2], p.Terminal[3], p.TokenAttempted, p.TokenSucceeded, p.TokenFailed, p.ResetBypass, p.PIDAttempted, p.PIDInserted, p.PIDCoalesced, p.PIDFailed, p.ResetAttempted, p.ResetSucceeded, p.ResetNotFound, p.ResetFailed}
+	}
+	for cpu, sample := range rows {
+		if sample.CPU != cpu { return errReportProducerMissing }
+		r := sample.Counts
+		if r.Errors != 0 { return errReportProducerInvalid }
+		index := 0
+		for _, p := range r.PID {
+			if p.Active != 0 || !equalSum(p.Entered, p.Returned, p.Active) || !equalSum(p.Returned, p.Terminal[:]...) ||
+				!equalSum(p.TokenAttempted, p.TokenSucceeded, p.TokenFailed) || p.Terminal[1] != p.TokenFailed ||
+				!equalSum(p.PIDAttempted, p.TokenSucceeded, p.ResetBypass) || !equalSum(p.PIDAttempted, p.PIDInserted, p.PIDCoalesced, p.PIDFailed) || p.Terminal[2] != p.PIDFailed ||
+				!equalSum(p.Terminal[3], p.PIDInserted, p.PIDCoalesced) ||
+				p.ResetFailed != 0 || !equalSum(p.ResetAttempted, p.ResetSucceeded, p.ResetNotFound, p.ResetFailed) || p.ResetAttempted > p.ResetBypass || p.ResetAttempted > p.Terminal[3] {
+				return errReportProducerInvalid
+			}
+			for _, v := range pidFields(p) {
+				if v > math.MaxUint64-totals[index] { return errReportProducerInvalid }; totals[index] += v; index++
+			}
+		}
+		global, match, other, unconfigured := pidFields(r.PID[0]), pidFields(r.PID[1]), pidFields(r.PID[2]), pidFields(r.PID[3])
+		for i := range global {
+			if unconfigured[i] != 0 || !equalSum(global[i], match[i], other[i], unconfigured[i]) { return errReportProducerInvalid }
+		}
+		for domain, t := range r.Trigger {
+			if t.Active != 0 || t.LatchFailed != 0 || !equalSum(t.Entered, t.Returned, t.Active) || !equalSum(t.Returned, t.LatchAccepted, t.LatchInhibited, t.LatchFailed) ||
+				t.OutputAttempted != t.LatchAccepted || !equalSum(t.OutputAttempted, t.OutputSubmitted, t.OutputFailed) { return errReportProducerInvalid }
+			values := [9]uint64{t.Entered, t.Returned, t.Active, t.LatchAccepted, t.LatchInhibited, t.LatchFailed, t.OutputAttempted, t.OutputSubmitted, t.OutputFailed}
+			for _, v := range values {
+				if domain == 2 && v != 0 { return errReportProducerInvalid }
+				if v > math.MaxUint64-totals[index] { return errReportProducerInvalid }; totals[index] += v; index++
+			}
+		}
+	}
+	return nil
+}
+
+var errTraceDefinitionSourceClosed = errors.New("trace definition source closed before readout")
+var traceDefinitionGeneration atomic.Uint64
+
+type traceDefinitionSource struct {
+	mu            sync.Mutex
+	owner         *definitionOwner
+	lifetime      libpf.TraceDefinitionLifetime
+	origCounter   *cebpf.Map
+	origPerf      *cebpf.Map
+	origConfig    *cebpf.Map
+	counter, perf *cebpf.Map
+	config        *cebpf.Map
+	configID      uint32
+	nativeConfig  traceDefinitionConfig
+	binding       libpf.TraceDefinitionBinding
+	err           error
+	final         libpf.TraceDefinitionObservation
+	ops           traceDefinitionMapOps
+}
+
+func (s *traceDefinitionSource) fail(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = errors.Join(s.err, err)
+}
+
+func validateTraceDefinitionBinding(expected, actual libpf.TraceDefinitionBinding) error {
+	if expected.Source != libpf.TraceDefinitionPerfOutputV1 || expected.Session == "" || expected.HostTGID == 0 || expected.Birth == 0 || expected.CounterMapID == 0 || expected.PerfMapID == 0 || expected.CounterMapID == expected.PerfMapID || expected.PossibleCPUs <= 0 || expected.Generation == 0 || expected != actual {
+		return fmt.Errorf("invalid or changed trace definition binding")
+	}
+	return nil
+}
+
+func traceDefinitionMapIDs(counter, perf *cebpf.Map, cpus int, infoFn func(*cebpf.Map) (traceDefinitionMapInfo, error), checkAdmit func() error) (uint32, uint32, error) {
+	if counter == nil || perf == nil || cpus <= 0 {
+		return 0, 0, fmt.Errorf("trace definition original maps/topology unavailable")
+	}
+	if infoFn == nil {
+		infoFn = traceDefinitionInfo
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return 0, 0, err
+		}
+	}
+	counts, err := infoFn(counter)
+	if err != nil {
+		return 0, 0, err
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return 0, 0, err
+		}
+	}
+	events, err := infoFn(perf)
+	if err != nil {
+		return 0, 0, err
+	}
+	if counts.Type != uint32(cebpf.PerCPUArray) || counts.KeySize != 4 || counts.ValueSize != 40 || counts.MaxEntries != 1 || events.Type != uint32(cebpf.PerfEventArray) || events.KeySize != 4 || events.ValueSize != 4 || uint64(events.MaxEntries) != uint64(cpus) {
+		return 0, 0, fmt.Errorf("trace definition original map layout mismatch")
+	}
+	if counts.ID == events.ID {
+		return 0, 0, fmt.Errorf("trace definition original map IDs unavailable")
+	}
+	return counts.ID, events.ID, nil
+}
+
+func newTraceDefinitionSource(lifetime libpf.TraceDefinitionLifetime, counter, perf *cebpf.Map, cpus int) (*traceDefinitionSource, error) {
+	if lifetime == nil {
+		return nil, nil
+	}
+	if err := lifetime.Validate(); err != nil {
+		return nil, fmt.Errorf("trace definition target: %w", err)
+	}
+	// Linux cpu_possible_mask is static after boot; warm Cilium before any guard.
+	possible, err := cebpf.PossibleCPU()
+	if err != nil {
+		return nil, fmt.Errorf("acquire definition possible CPUs: %w", err)
+	}
+	if err := validateTraceDefinitionCardinality(cpus, possible); err != nil {
+		return nil, err
+	}
+	counterID, perfID, err := traceDefinitionMapIDs(counter, perf, cpus, traceDefinitionInfo, nil)
+	if err != nil {
+		return nil, err
+	}
+	var generation uint64
+	for {
+		previous := traceDefinitionGeneration.Load()
+		if previous == math.MaxUint64 {
+			return nil, fmt.Errorf("trace definition generation exhausted")
+		}
+		if traceDefinitionGeneration.CompareAndSwap(previous, previous+1) {
+			generation = previous + 1
+			break
+		}
+	}
+	binding := libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: lifetime.Session(), HostTGID: lifetime.HostTGID(), Birth: lifetime.Birth(), CounterMapID: counterID, PerfMapID: perfID, PossibleCPUs: cpus, Generation: generation}
+	if err := validateTraceDefinitionBinding(binding, binding); err != nil {
+		return nil, err
+	}
+	if err := lifetime.Validate(); err != nil {
+		return nil, fmt.Errorf("trace definition acquired target: %w", err)
+	}
+	return &traceDefinitionSource{lifetime: lifetime, counter: counter, perf: perf, binding: binding}, nil
+}
+
+func acquireTraceDefinitionSource(owner *definitionOwner, maps map[string]*cebpf.Map) (*traceDefinitionSource, error) {
+	if owner == nil {
+		return nil, nil
+	}
+	lifetime := owner.HeldLifetime()
+	if lifetime == nil {
+		return nil, nil
+	}
+	if err := owner.readoutAdmissionError(); err != nil {
+		return nil, err
+	}
+
+	counterMap := owner.CountsMap()
+	perfMap := owner.PerfMap()
+	configMap := owner.ConfigMap()
+	if counterMap == nil || perfMap == nil || configMap == nil {
+		return nil, fmt.Errorf("trace definition owner missing required cloned maps")
+	}
+
+	ctx := owner.Context()
+	checkAdmit := func() error {
+		if ctx != nil && ctx.Err() != nil {
+			return fmt.Errorf("trace definition source construction context expired: %w", ctx.Err())
+		}
+		if err := owner.readoutAdmissionError(); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	var source *traceDefinitionSource
+	err := owner.WithCoveredReadout(func() error {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		if err := support.CheckTraceDefinitionABI(); err != nil {
+			return err
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		if err := lifetime.Validate(); err != nil {
+			return fmt.Errorf("trace definition target: %w", err)
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		possible, err := cebpf.PossibleCPU()
+		if err != nil {
+			return fmt.Errorf("acquire definition possible CPUs: %w", err)
+		}
+		if err := validateTraceDefinitionCardinality(possible, possible); err != nil {
+			return err
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		infoFn := traceDefinitionInfo
+		if owner != nil && owner.ops.info != nil {
+			infoFn = owner.ops.info
+		}
+		counterID, perfID, err := traceDefinitionMapIDs(counterMap, perfMap, possible, infoFn, checkAdmit)
+		if err != nil {
+			return err
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		session := lifetime.Session()
+		if session == "" {
+			return fmt.Errorf("trace definition lifetime session incomplete")
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		tgid := lifetime.HostTGID()
+		if tgid == 0 {
+			return fmt.Errorf("trace definition lifetime host TGID incomplete")
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		birth := lifetime.Birth()
+		if birth == 0 {
+			return fmt.Errorf("trace definition lifetime birth incomplete")
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		var generation uint64
+		for {
+			previous := traceDefinitionGeneration.Load()
+			if previous == math.MaxUint64 {
+				return fmt.Errorf("trace definition generation exhausted")
+			}
+			if traceDefinitionGeneration.CompareAndSwap(previous, previous+1) {
+				generation = previous + 1
+				break
+			}
+		}
+		binding := libpf.TraceDefinitionBinding{
+			Source:        libpf.TraceDefinitionPerfOutputV1,
+			Session:       session,
+			HostTGID:      tgid,
+			Birth:         birth,
+			CounterMapID:  counterID,
+			PerfMapID:     perfID,
+			PossibleCPUs:  possible,
+			Generation:    generation,
+		}
+		if err := validateTraceDefinitionBinding(binding, binding); err != nil {
+			return err
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		ops := defaultTraceDefinitionMapOps()
+		if owner != nil && owner.ops.info != nil {
+			ops = owner.ops
+		}
+		tempSource := &traceDefinitionSource{
+			owner:       owner,
+			lifetime:    lifetime,
+			origCounter: maps[traceDefinitionCounterMap],
+			origPerf:    maps["trace_events"],
+			origConfig:  maps[traceDefinitionConfigMap],
+			counter:     counterMap,
+			perf:        perfMap,
+			binding:     binding,
+			ops:         ops,
+		}
+		if err := configureTraceDefinitionSource(tempSource, configMap, checkAdmit); err != nil {
+			return err
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		if err := lifetime.Validate(); err != nil {
+			return fmt.Errorf("trace definition acquired target: %w", err)
+		}
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		source = tempSource
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return source, nil
+}
+
+type traceDefinitionTotals struct{ Undelivered, EmissionLoss uint64 }
+
+func validateTraceDefinitionCardinality(expected, actual int) error {
+	if expected <= 0 || actual != expected {
+		return fmt.Errorf("definition possible CPU cardinality unavailable or mismatched")
+	}
+	return nil
+}
+
+func sumTraceDefinitionCounts(values ...uint64) (uint64, error) {
+	var total uint64
+	for _, n := range values {
+		if n > math.MaxUint64-total {
+			return 0, fmt.Errorf("trace definition count overflow")
+		}
+		total += n
+	}
+	return total, nil
+}
+
+func reconcileTraceDefinitions(binding libpf.TraceDefinitionBinding, rows []libpf.TraceDefinitionCPUCounts, reader libpf.TraceDefinitionReaderCounts) (traceDefinitionTotals, error) {
+	var zero traceDefinitionTotals
+	if err := validateTraceDefinitionBinding(binding, binding); err != nil {
+		return zero, err
+	}
+	if err := validateTraceDefinitionCardinality(binding.PossibleCPUs, len(rows)); err != nil {
+		return zero, err
+	}
+	if reader.Overflow {
+		return zero, fmt.Errorf("trace definition row cardinality/reader overflow")
+	}
+	var total libpf.TraceDefinitionCPUCounts
+	for _, row := range rows {
+		classified, err := sumTraceDefinitionCounts(row.Submitted, row.OutputFailed, row.RejectedSize)
+		if err != nil {
+			return zero, err
+		}
+		if row.Overflow != 0 || row.Attempted != classified {
+			return zero, fmt.Errorf("trace definition per-CPU conservation failed")
+		}
+		for _, pair := range []struct {
+			dst *uint64
+			n   uint64
+		}{{&total.Attempted, row.Attempted}, {&total.Submitted, row.Submitted}, {&total.OutputFailed, row.OutputFailed}, {&total.RejectedSize, row.RejectedSize}} {
+			value, err := sumTraceDefinitionCounts(*pair.dst, pair.n)
+			if err != nil {
+				return zero, err
+			}
+			*pair.dst = value
+		}
+	}
+	classified, err := sumTraceDefinitionCounts(total.Submitted, total.OutputFailed, total.RejectedSize)
+	if err != nil {
+		return zero, err
+	}
+	if total.Attempted != classified {
+		return zero, fmt.Errorf("trace definition aggregate conservation failed")
+	}
+	consumed, err := sumTraceDefinitionCounts(reader.HandedOff, reader.RejectedRecord, reader.HandoffAborted)
+	if err != nil {
+		return zero, err
+	}
+	if consumed != reader.Received || reader.Received > total.Submitted {
+		return zero, fmt.Errorf("trace definition reader conservation failed")
+	}
+	undelivered := total.Submitted - reader.Received
+	loss, err := sumTraceDefinitionCounts(total.OutputFailed, total.RejectedSize, undelivered)
+	if err != nil {
+		return zero, err
+	}
+	return traceDefinitionTotals{Undelivered: undelivered, EmissionLoss: loss}, nil
+}
+
+func (t *Tracer) traceDefinitionReaderObservation() libpf.TraceDefinitionReaderCounts {
+	c := &t.traceReaderCounters
+	return libpf.TraceDefinitionReaderCounts{Received: c.definitionReceived.total.Load(), HandedOff: c.definitionHandedOff.total.Load(), RejectedRecord: c.definitionRejectedRecord.total.Load(), HandoffAborted: c.definitionHandoffAborted.total.Load(), LostSamples: c.lost.total.Load(), Overflow: c.definitionReceived.overflow.Load() || c.definitionHandedOff.overflow.Load() || c.definitionRejectedRecord.overflow.Load() || c.definitionHandoffAborted.overflow.Load() || c.lost.overflow.Load()}
+}
+
+// checkBinding runs under the source guard; never call process validation here.
+func (s *traceDefinitionSource) checkBinding(maps map[string]*cebpf.Map, checkAdmit func() error) error {
+	if s.origCounter != nil && maps[traceDefinitionCounterMap] != s.origCounter {
+		return fmt.Errorf("trace definition original counter map replaced")
+	}
+	if s.origPerf != nil && maps["trace_events"] != s.origPerf {
+		return fmt.Errorf("trace definition original perf map replaced")
+	}
+	if s.origConfig != nil && maps[traceDefinitionConfigMap] != s.origConfig {
+		return fmt.Errorf("trace definition original config map replaced")
+	}
+	if s.config == nil {
+		return fmt.Errorf("trace definition original config map unconfigured")
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	infoFn := s.ops.info
+	if infoFn == nil {
+		infoFn = traceDefinitionInfo
+	}
+	counterID, perfID, err := traceDefinitionMapIDs(s.counter, s.perf, s.binding.PossibleCPUs, infoFn, checkAdmit)
+	if err != nil {
+		return err
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	configInfo, err := infoFn(s.config)
+	if err != nil {
+		return err
+	}
+	if configInfo.ID != s.configID || configInfo.Type != uint32(cebpf.Array) || configInfo.KeySize != 4 || configInfo.ValueSize != 24 || configInfo.MaxEntries != 1 {
+		return fmt.Errorf("trace definition original config changed")
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	lookupFn := s.ops.lookup
+	if lookupFn == nil {
+		lookupFn = func(m *cebpf.Map, k, v any) error { return m.Lookup(k, v) }
+	}
+	var config traceDefinitionConfig
+	if err := lookupFn(s.config, uint32(0), &config); err != nil {
+		return fmt.Errorf("trace definition final config read: %w", err)
+	}
+	if config != s.nativeConfig {
+		return fmt.Errorf("trace definition target configuration changed")
+	}
+	actual := libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: s.binding.Session, HostTGID: config.PID, Birth: config.Birth, CounterMapID: counterID, PerfMapID: perfID, PossibleCPUs: s.binding.PossibleCPUs, Generation: config.Generation}
+	return validateTraceDefinitionBinding(s.binding, actual)
+}
+
+// TraceDefinitionBinding reports independently acquired original-map identity.
+func (t *Tracer) TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error) {
+	s := t.definitionSource
+	if s == nil {
+		return libpf.TraceDefinitionBinding{}, fmt.Errorf("trace definition accounting not configured")
+	}
+	owner := t.definitionOwner
+	if owner == nil && s.owner != nil {
+		owner = s.owner
+	}
+
+	runCheck := func(checkAdmit func() error) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.err != nil {
+			return s.err
+		}
+		err := s.checkBinding(t.ebpfMaps, checkAdmit)
+		if err != nil {
+			s.err = err
+		}
+		return err
+	}
+
+	if owner != nil {
+		err := owner.WithCoveredReadout(func() error {
+			checkAdmit := func() error {
+				if err := owner.readoutAdmissionError(); err != nil {
+					return err
+				}
+				if owner.ctx != nil && owner.ctx.Err() != nil {
+					return owner.ctx.Err()
+				}
+				return nil
+			}
+			return runCheck(checkAdmit)
+		})
+		if err != nil {
+			return libpf.TraceDefinitionBinding{}, err
+		}
+	} else {
+		if err := runCheck(nil); err != nil {
+			return libpf.TraceDefinitionBinding{}, err
+		}
+	}
+	return s.binding, nil
+}
+
+// TraceDefinitionFinal must be invoked inside the external native readout action.
+// That caller validates the process outside authority; this method never reenters it.
+func (t *Tracer) TraceDefinitionFinal(ctx context.Context) (observation libpf.TraceDefinitionObservation, err error) {
+	s := t.definitionSource
+	if s == nil {
+		return observation, fmt.Errorf("trace definition accounting not configured")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return observation, s.err
+	}
+	defer func() {
+		if err != nil {
+			s.err = err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return observation, err
+	}
+	if err := s.checkBinding(t.ebpfMaps, nil); err != nil {
+		return observation, err
+	}
+	c := &t.traceReaderCounters
+	if !c.ready.Load() || c.drain == nil || !c.drain.sourcesRetired.Load() || !c.drain.flushed.Load() {
+		return observation, fmt.Errorf("trace definition source/reader not drained")
+	}
+	select {
+	case <-c.done:
+	default:
+		return observation, fmt.Errorf("trace definition reader not joined")
+	}
+	if err := c.drain.result(); err != nil {
+		return observation, err
+	}
+	if s.final.Outcome == 0 {
+		rows := make([]libpf.TraceDefinitionCPUCounts, s.binding.PossibleCPUs)
+		if err := s.counter.Lookup(uint32(0), &rows); err != nil {
+			return observation, fmt.Errorf("trace definition final map read: %w", err)
+		}
+		reader := t.traceDefinitionReaderObservation()
+		totals, err := reconcileTraceDefinitions(s.binding, rows, reader)
+		if err != nil {
+			return observation, err
+		}
+		if err := s.checkBinding(t.ebpfMaps, nil); err != nil {
+			return observation, err
+		}
+		if err := ctx.Err(); err != nil {
+			return observation, err
+		}
+		outcome := libpf.TraceDefinitionNotExercised
+		for _, row := range rows {
+			if row.Attempted != 0 {
+				outcome = libpf.TraceDefinitionFinal
+				break
+			}
+		}
+		s.final = libpf.TraceDefinitionObservation{Binding: s.binding, Rows: rows, Reader: reader, Outcome: outcome, Undelivered: totals.Undelivered, EmissionLoss: totals.EmissionLoss}
+	}
+	if err := ctx.Err(); err != nil {
+		return observation, err
+	}
+	observation = s.final
+	observation.Rows = append([]libpf.TraceDefinitionCPUCounts(nil), s.final.Rows...)
+	return observation, nil
+}

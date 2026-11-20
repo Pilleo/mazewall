@@ -36,5 +36,22 @@ C0 requires external dependency resolution and public API compilation before can
 - Fresh consumer `clean :java-api:run :java-api:verifyCallableAmbiguity :kotlin-api:run resolveIntegrationBaselines --write-locks` passed: nine tasks executed, both consumer compilers reran, and resolved graphs were locked.
 - `./gradlew build` passed after registering the new issue in the backlog index: 265 tasks, 41 executed, 224 up-to-date. The initial attempt correctly rejected the missing index entry; it was corrected without changing the validation gate.
 
+## Repository review addendum — 2026-11-04 (ARCH-01)
+
+[Finding and acceptance](../reviews/2026-11-04-repository-review-findings.md#arch-01).
+The October publication/`api(project(":platform"))` correction remains necessary:
+the packaged Java fixture and public policy signatures require `Syscall`,
+`SeccompAction`, `Arch` and `SandboxedPath`; the public HotSpot target requires `Pid`.
+`docs/public-api.md:5–42` still promises hidden platform types/nontransitive compile
+exposure. This is a support-contract inconsistency, not a reason to undo the fix.
+
+Choose a bounded supported value-type inventory and enforce it in the existing
+surface guard and API/migration guidance. Keep native engines/protocols outside
+that inventory. A facade migration requires explicit compatibility approval.
+Qualify independent packaged Java/Kotlin consumers and unchanged compiled consumers
+against the selected candidate. Historical October receipts remain scoped to their
+inputs; no current consumer run or support-policy decision was made by this review.
+The separate ARCH-02 owner consumes this classification for Portal ABI guards.
+
 ---
 <!-- id: issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con  file: issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con.md -->

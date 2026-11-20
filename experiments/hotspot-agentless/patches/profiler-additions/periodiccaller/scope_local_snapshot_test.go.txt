@@ -1,0 +1,365 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func TestCachedKindsLocalScopeCopy(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		select {
+		case <-s.done:
+		default:
+			if err := s.Stop(ctx); err != nil { t.Errorf("cleanup stop: %v", err) }
+		}
+		select {
+		case <-s.done:
+		case <-ctx.Done(): t.Error("scope cleanup did not finish")
+		}
+	})
+	var nilScope *OwnedScope
+	nilValue, nilOK := nilScope.CachedKindsLocal()
+	emptyValue, emptyOK := (&OwnedScope{}).CachedKindsLocal()
+	before, beforeOK := s.CachedKindsLocal()
+	lifetime := &countedStopLifetime{session: "scope-kind-cache"}
+	bindErr := s.BindLifetime(lifetime)
+	callbackCount := 0
+	callbackOK := false
+	var kindErr, completeErr, finalizerErr error
+	if bindErr == nil {
+		finalizerErr = s.AddFinalizer(func() error {
+			return s.WithStopReadoutStep(func() error {
+				_, err := s.StopReadoutBinding()
+				return err
+			})
+		})
+		callbackOK = s.ExecuteCallback(func() { callbackCount++ })
+		var op *OwnedOperation
+		op, kindErr = s.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+		if kindErr == nil { completeErr = op.Complete() }
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	stopErr := s.Stop(ctx)
+	finished := false
+	select {
+	case <-s.done: finished = true
+	case <-ctx.Done():
+	}
+	cancel()
+	if !finished { t.Fatal("scope did not finish") }
+	if bindErr != nil || finalizerErr != nil || kindErr != nil || completeErr != nil || stopErr != nil {
+		t.Fatalf("bind=%v finalizer=%v kind=%v complete=%v stop=%v", bindErr, finalizerErr, kindErr, completeErr, stopErr)
+	}
+	if nilOK || emptyOK || beforeOK || nilValue != (KindsLocalSnapshot{}) || emptyValue != (KindsLocalSnapshot{}) || before != (KindsLocalSnapshot{}) {
+		t.Fatal("unavailable cache returned a value")
+	}
+	if !callbackOK || callbackCount != 1 || lifetime.releases.Load() != 1 {
+		t.Fatalf("callback=%v count=%d releases=%d", callbackOK, callbackCount, lifetime.releases.Load())
+	}
+	validate, session := lifetime.validateCalls.Load(), lifetime.sessionCalls.Load()
+	tgid, birth := lifetime.tgidCalls.Load(), lifetime.birthCalls.Load()
+	got, ok := s.CachedKindsLocal()
+	slot := int(libpf.AuxiliarySourcePeriodicMetrics) - 2
+	if !ok || got.State != libpf.LocalCopied || !got.Kinds[slot].Present || got.Kinds[slot].Counts.Admitted != 1 || got.Kinds[slot].Counts.Completed != 1 {
+		t.Fatalf("frozen kinds: %+v, %v", got, ok)
+	}
+	want := got
+	got.State = libpf.LocalPanic
+	got.Kinds[slot].Binding.Session = "mutated"
+	got.Kinds[slot].Counts.Admitted++
+	again, ok := s.CachedKindsLocal()
+	if !ok || again != want { t.Fatal("cached kinds changed after caller mutation") }
+	if lifetime.validateCalls.Load() != validate || lifetime.sessionCalls.Load() != session || lifetime.tgidCalls.Load() != tgid || lifetime.birthCalls.Load() != birth || callbackCount != 1 {
+		t.Fatal("cached getters invoked live callbacks")
+	}
+}
+
+func TestCachedScopeLocalActualAndImmutable(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	lifetime := &testLifetime{session: "scope-cache", tgid: 100, birth: 200}
+	s.mu.Lock()
+	s.lifetime = lifetime
+	s.expectedBinding = libpf.AuxiliaryBinding{
+		Source:     libpf.AuxiliarySourcePeriodicCaller,
+		Session:    lifetime.session,
+		HostTGID:   lifetime.tgid,
+		Birth:      lifetime.birth,
+		Generation: s.generation,
+	}
+	s.mu.Unlock()
+	if _, ok := s.CachedScopeLocal(); ok {
+		t.Fatal("snapshot available before freeze")
+	}
+	var nilScope *OwnedScope
+	if _, ok := nilScope.CachedScopeLocal(); ok {
+		t.Fatal("nil scope has snapshot")
+	}
+	// Conservative design: freezeSnapshot uses retained facts only, never calls getters or observes mutated lifetime.tgid.
+	lifetime.tgid = 101
+	s.freezeSnapshot()
+	got, ok := s.CachedScopeLocal()
+	if !ok || got.State != libpf.LocalCopied || got.Observation.Binding != (libpf.AuxiliaryBinding{}) || !got.ErrorPresent {
+		t.Fatalf("expected zero actual binding and error present: %+v, %v", got, ok)
+	}
+	want := got
+	got.Observation.Binding.HostTGID = 999
+	s.mu.Lock()
+	s.snapshot.Binding.HostTGID = 998
+	s.err = nil
+	s.mu.Unlock()
+	s.freezeSnapshot()
+	again, ok := s.CachedScopeLocal()
+	if !ok || again != want {
+		t.Fatalf("retained value changed: %+v, want %+v", again, want)
+	}
+	_ = s.Stop(context.Background())
+	again, ok = s.CachedScopeLocal()
+	if !ok || again != want {
+		t.Fatalf("stop changed retained value: %+v, want %+v", again, want)
+	}
+}
+
+func TestCachedScopeLocalExpiredStopAndUnlockedGetter(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	lt := &testLifetime{session: "expired", tgid: 1, birth: 2}
+	s.mu.Lock()
+	s.lifetime = lt
+	s.expectedBinding = libpf.AuxiliaryBinding{
+		Source:     libpf.AuxiliarySourcePeriodicCaller,
+		Session:    lt.session,
+		HostTGID:   lt.tgid,
+		Birth:      lt.birth,
+		Generation: s.generation,
+	}
+	s.mu.Unlock()
+	entered, release := make(chan struct{}), make(chan struct{})
+	if !s.Go(func() { close(entered); <-release }) {
+		t.Fatal("worker not admitted")
+	}
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = s.Stop(ctx)
+	got, ok := s.CachedScopeLocal()
+	if !ok || got.State != libpf.LocalCopied || got.Observation.Binding != (libpf.AuxiliaryBinding{}) || !got.ErrorPresent || !got.Observation.HeldWork {
+		close(release)
+		t.Fatalf("expired snapshot: %+v, %v", got, ok)
+	}
+	s.mu.Lock()
+	result := make(chan ScopeLocalSnapshot, 1)
+	go func() { value, _ := s.CachedScopeLocal(); result <- value }()
+	select {
+	case value := <-result:
+		if value != got {
+			s.mu.Unlock()
+			close(release)
+			t.Fatal("getter returned different value")
+		}
+	case <-time.After(time.Second):
+		s.mu.Unlock()
+		close(release)
+		t.Fatal("getter waited for owner mutex")
+	}
+	s.mu.Unlock()
+	close(release)
+	_ = s.Stop(context.Background())
+	again, ok := s.CachedScopeLocal()
+	if !ok || again != got {
+		t.Fatal("repeated stop changed frozen snapshot")
+	}
+}
+
+func TestCachedScopeLocalConcurrentPublication(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	lt := &testLifetime{session: "concurrent", tgid: 42, birth: 43}
+	s.mu.Lock()
+	s.lifetime = lt
+	s.expectedBinding = libpf.AuxiliaryBinding{
+		Source:     libpf.AuxiliarySourcePeriodicCaller,
+		Session:    lt.session,
+		HostTGID:   lt.tgid,
+		Birth:      lt.birth,
+		Generation: s.generation,
+	}
+	s.mu.Unlock()
+	start, done := make(chan struct{}), make(chan struct{})
+	bad := make(chan ScopeLocalSnapshot, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for {
+				if value, ok := s.CachedScopeLocal(); ok {
+					if value.State != libpf.LocalCopied || value.Observation.Binding.Session != "concurrent" || value.Observation.Binding.HostTGID != 42 || value.Observation.Binding.Birth != 43 || value.Observation.Binding.Generation == 0 || value.ErrorPresent {
+						bad <- value
+					}
+					return
+				}
+				select {
+				case <-done:
+					if _, ok := s.CachedScopeLocal(); !ok {
+						bad <- ScopeLocalSnapshot{}
+						return
+					}
+				default:
+				}
+			}
+		}()
+	}
+	close(start)
+	s.freezeSnapshot()
+	close(done)
+	wg.Wait()
+	select {
+	case value := <-bad:
+		t.Fatalf("partially published snapshot: %+v", value)
+	default:
+	}
+	if _, ok := s.CachedScopeLocal(); !ok {
+		t.Fatal("freeze did not publish")
+	}
+	_ = s.Stop(context.Background())
+}
+
+type testCountingLifetime struct {
+	session string
+	tgid    uint32
+	birth   uint64
+	mu      sync.Mutex
+	calls   []string
+	onVal   func()
+}
+
+func (l *testCountingLifetime) note(c string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, c)
+}
+
+func (l *testCountingLifetime) recorded() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.calls...)
+}
+
+func (l *testCountingLifetime) Validate() error {
+	l.note("validate")
+	if l.onVal != nil {
+		l.onVal()
+	}
+	return nil
+}
+
+func (l *testCountingLifetime) Session() string  { l.note("session"); return l.session }
+func (l *testCountingLifetime) HostTGID() uint32 { l.note("tgid"); return l.tgid }
+func (l *testCountingLifetime) Birth() uint64    { l.note("birth"); return l.birth }
+
+func TestAuxiliaryBindingAndBindLifetimeRejectedAfterStop(t *testing.T) {
+	// F1 regression: stopped/retired scope must reject public BindLifetime and AuxiliaryBinding
+	// before ANY external callback is made.
+	s := NewOwnedScope(context.Background(), nil)
+	initLifetime := &testCountingLifetime{session: "init", tgid: 10, birth: 20}
+	if err := s.BindLifetime(initLifetime); err == nil {
+		t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+	}
+	if calls := initLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("expected zero calls on initial unvalidated BindLifetime, got: %v", calls)
+	}
+
+	stopErr := s.Stop(context.Background())
+	if stopErr == nil || !strings.Contains(stopErr.Error(), "auxiliary readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", stopErr)
+	}
+
+	// 1. Calling BindLifetime after Stop returns must return error with ZERO calls to new lifetime
+	rejectedLifetime := &testCountingLifetime{session: "rejected", tgid: 30, birth: 40}
+	if err := s.BindLifetime(rejectedLifetime); err == nil {
+		t.Fatal("expected BindLifetime to fail on stopped scope")
+	}
+	if calls := rejectedLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("BindLifetime made calls on stopped scope: %v", calls)
+	}
+
+	// 2. Calling AuxiliaryBinding after Stop returns must return error with ZERO calls to lifetime
+	if _, err := s.AuxiliaryBinding(); err == nil {
+		t.Fatal("expected AuxiliaryBinding to fail on stopped scope")
+	}
+	if calls := initLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("AuxiliaryBinding made calls on stopped scope: %v", calls)
+	}
+
+	// 3. Re-check on expired scope
+	s2 := NewOwnedScope(context.Background(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = s2.Stop(ctx)
+
+	expiredLifetime := &testCountingLifetime{session: "expired", tgid: 50, birth: 60}
+	if err := s2.BindLifetime(expiredLifetime); err == nil {
+		t.Fatal("expected BindLifetime to fail on expired scope")
+	}
+	if calls := expiredLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("BindLifetime made calls on expired scope: %v", calls)
+	}
+
+	if _, err := s2.AuxiliaryBinding(); err == nil {
+		t.Fatal("expected AuxiliaryBinding to fail on expired scope")
+	}
+	if calls := expiredLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("AuxiliaryBinding made calls on expired scope: %v", calls)
+	}
+}
+
+func TestFreezeSnapshotNoQueriesAfterStopReturnOnExpiry(t *testing.T) {
+	// R1/R5 regression: unvalidated initial BindLifetime is rejected with zero calls.
+	s := NewOwnedScope(context.Background(), nil)
+	countingLifetime := &testCountingLifetime{
+		session: "unvalidated",
+		tgid:    77,
+		birth:   88,
+	}
+	if err := s.BindLifetime(countingLifetime); err == nil {
+		t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+	}
+	if calls := countingLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("expected zero calls on initial unvalidated BindLifetime, got: %v", calls)
+	}
+
+	// Freeze/expire a scope with explicitly missing identity and verify frozen error/unknown
+	// plus immutable returned copy.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stopErr := s.Stop(ctx)
+	if stopErr == nil {
+		t.Fatal("expected stop error on cancelled context")
+	}
+
+	// Assert that NO identity queries (Session, TGID, Birth) were ever called!
+	if calls := countingLifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("forbidden query started during freeze/stop: %v", calls)
+	}
+
+	// Snapshot must record error/expiry, no valid binding
+	snap, ok := s.CachedScopeLocal()
+	if !ok || !snap.ErrorPresent || snap.Observation.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("unexpected snapshot after expiry: %+v, ok=%v", snap, ok)
+	}
+
+	// Immutability check: repeat read yields identical copy
+	snap2, ok2 := s.CachedScopeLocal()
+	if !ok2 || snap2 != snap {
+		t.Fatalf("snapshot mutated after expiry: %+v != %+v", snap2, snap)
+	}
+}

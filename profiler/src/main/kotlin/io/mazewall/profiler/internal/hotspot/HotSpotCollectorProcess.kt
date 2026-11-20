@@ -23,11 +23,12 @@ internal class HotSpotCollectorProcess private constructor(
             launcher: ProcessLauncher = RealProcessLauncher,
             timing: HotSpotCollectorTiming = HotSpotCollectorTiming(),
             limits: HotSpotReplayLimits = HotSpotReplayLimits(),
+            expectation: HotSpotCaptureExpectation = HotSpotCaptureExpectation.Strict,
         ): HotSpotCollectorProcess {
             require(argv.isNotEmpty())
-            val interpreter = HotSpotSessionInterpreter(expectedPid, expectedStartTicks, limits, timing)
+            val interpreter = HotSpotSessionInterpreter(expectedPid, expectedStartTicks, limits, timing, expectation)
             val driver = HotSpotSessionDriver(interpreter)
-            val workers = HotSpotCollectorWorkers(launcher, limits, driver)
+            val workers = HotSpotCollectorWorkers(launcher, limits, driver, expectation.schema)
             driver.bind(workers, argv)
             val owner = HotSpotCollectorProcess(interpreter, driver, workers, timing)
             driver.event(HotSpotSessionEvent.Start)

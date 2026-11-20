@@ -184,7 +184,7 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
 }
 
 jacoco {
-    toolVersion = "0.8.14"
+    toolVersion = libs.versions.jacoco.get()
 }
 
 tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {

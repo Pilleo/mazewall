@@ -1,0 +1,824 @@
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/cilium/ebpf/btf"
+	"github.com/mdlayher/kobject"
+	"go.opentelemetry.io/ebpf-profiler/kallsyms"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"golang.org/x/sys/unix"
+)
+
+// Component model only: this does not issue native qualification or observations.
+type kwStartTestLifetime struct{}
+func (kwStartTestLifetime) Session() string { return "test" }
+func (kwStartTestLifetime) HostTGID() uint32 { return 1 }
+func (kwStartTestLifetime) Birth() uint64 { return 1 }
+func (kwStartTestLifetime) Validate() error { return nil }
+func (l kwStartTestLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) { return l, func() error { return nil }, nil }
+func kwTestScopeGeneration(t *testing.T, scope *periodiccaller.OwnedScope) uint64 { t.Helper(); binding, err := scope.AuxiliaryBinding(); if err != nil { t.Fatal(err) }; return binding.Generation }
+
+type kwStartTestMonitor struct { start func(context.Context, kallsyms.OwnedKobjectReceiver) error }
+func (m *kwStartTestMonitor) StartOwnedMonitor(ctx context.Context, r kallsyms.OwnedKobjectReceiver) error { return m.start(ctx, r) }
+func (m *kwStartTestMonitor) FlushOwnedMonitor(context.Context) error { return errors.ErrUnsupported }
+type kwStartNativePhysicalModel struct { *kwNativeEpoch; calls kwEpochReadoutCalls; opened bool }
+func (n *kwStartNativePhysicalModel) Open(b kobjectSocketBinding) error { err := n.openWithCalls(b, n.calls); n.opened = atomic.LoadUint64(n.objects.gate.word)&kwControlClosed == 0; return err }
+type kwStartTestNative struct { open func(kobjectSocketBinding) error; retired bool; retireErr error }
+func (n *kwStartTestNative) Open(b kobjectSocketBinding) error { return n.open(b) }
+func (n *kwStartTestNative) CloseAdmission() error { return nil }
+func (n *kwStartTestNative) Settle(context.Context) error { return errors.ErrUnsupported }
+func (n *kwStartTestNative) Fence(context.Context) error { return errors.ErrUnsupported }
+func (n *kwStartTestNative) Readout() (kobjectNativeReadout, error) { return kobjectNativeReadout{}, errors.ErrUnsupported }
+func (n *kwStartTestNative) Retire() error { n.retired = true; return n.retireErr }
+type kwStartTestSocket struct { binding kobjectSocketBinding; bindingErr error; joined bool; retired bool }
+func (s *kwStartTestSocket) Binding() (kobjectSocketBinding, error) { return s.binding, s.bindingErr }
+func (s *kwStartTestSocket) Join() error { s.joined = true; return nil }
+func (s *kwStartTestSocket) Cut(context.Context) error { return nil }
+func (s *kwStartTestSocket) Receive() (*kobject.Event, error) { return nil, errors.ErrUnsupported }
+func (s *kwStartTestSocket) Acknowledge(error) error { return nil }
+func (s *kwStartTestSocket) DrainTo(context.Context, uint64) error { return nil }
+func (s *kwStartTestSocket) Retire() error { s.retired = true; return nil }
+
+func TestKobjectWitnessStartUnsupportedModel(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return errors.ErrUnsupported }}
+	monitor := &kwStartTestMonitor{start: func(ctx context.Context, r kallsyms.OwnedKobjectReceiver) error { if periodiccaller.OwnedScopeFrom(ctx) != scope || r != socket || ctx.Value(r) == nil { t.Error("missing actual scope or activation envelope") }; return nil }}
+	w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(context.Background()); !errors.Is(err, errors.ErrUnsupported) { t.Fatal("lost unsupported Open", err) }; <-w.startJobDone; if socket.joined || !native.retired || !socket.retired { t.Fatal("bad rejecting cleanup") }; if err := w.start(context.Background()); !errors.Is(err, errors.ErrUnsupported) { t.Fatal("retried consumed claim", err) }
+}
+
+func TestKobjectWitnessConstructorScopeGeneration(t *testing.T) {
+	a := periodiccaller.NewOwnedScope(context.Background(), nil); b := periodiccaller.NewOwnedScope(context.Background(), nil); if err := a.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; if err := b.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer a.Stop(context.Background()); defer b.Stop(context.Background()); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, b)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("Open on mismatched scope"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("monitor on mismatched scope"); return nil }}; if w, err := newKobjectWitness(a, native, socket, monitor); err == nil || w != nil || native.retired || socket.retired || socket.joined { t.Fatal("transferred mismatched generation", err) }
+}
+
+func TestKobjectWitnessStartNativeNegativePhysicalModel(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); objects, _, binding := kwColdEpochFixture(t); binding.generation = kwTestScopeGeneration(t, scope); objects.layout.generation = binding.generation; native, err := newKobjectNativeEpoch(context.Background(), scope.Context(), objects, binding); if err != nil { t.Fatal(err) }; calls := kwReadoutModelCalls(objects); calls.mapElem = func(_ uintptr, _ *kwMapElemAttr, _ []byte, out []byte) syscall.Errno { binary.NativeEndian.PutUint64(out, binding.cookie); binary.NativeEndian.PutUint64(out[8:], uint64(binding.portID)); binary.NativeEndian.PutUint64(out[16:], binding.generation); binary.NativeEndian.PutUint64(out[24:], objects.layout.listenMask); binary.NativeEndian.PutUint64(out[32:], kwBindingABIVersion); return 0 }; socket := &kwStartTestSocket{binding: binding}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; physical := &kwStartNativePhysicalModel{kwNativeEpoch: native, calls: calls}; w, err := newKobjectWitness(scope, physical, socket, monitor); if err != nil { t.Fatal(err) }
+	if err := w.start(context.Background()); !errors.Is(err, errors.ErrUnsupported) || socket.joined { t.Fatal("accepted unqualified native Open", err) }; <-w.startJobDone; select { case <-w.activate: t.Fatal("activated unqualified source"); default: }; if physical.opened { t.Fatal("opened unqualified gate") }
+}
+
+func TestKobjectWitnessStartSharedFailureModel(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; cleanupErr := errors.New("retire failure"); native := &kwStartTestNative{retireErr: cleanupErr, open: func(kobjectSocketBinding) error { t.Error("Open after monitor failure"); return nil }}; monitorErr := errors.New("monitor failure")
+	monitor := &kwStartTestMonitor{start: func(ctx context.Context, r kallsyms.OwnedKobjectReceiver) error { h := ctx.Value(r).(struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }); h.Mu.Lock(); *h.Err = monitorErr; h.Mu.Unlock(); return nil }}
+	if w, err := newKobjectWitness(nil, native, socket, monitor); err == nil || w != nil || native.retired || socket.retired { t.Fatal("invalid constructor consumed owners") }; socket.bindingErr = errors.New("binding failure"); if w, err := newKobjectWitness(scope, native, socket, monitor); err == nil || w != nil || native.retired || socket.retired { t.Fatal("binding failure consumed owners") }; socket.bindingErr = nil
+	w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(context.Background()); !errors.Is(err, monitorErr) { t.Fatal("lost shared failure", err) }; <-w.startJobDone; if !errors.Is(w.startErr, cleanupErr) || w.native != native || w.socket != socket || w.state != kwQuarantined { t.Fatal("lost cleanup error or retained owner") }; select { case <-w.activate: t.Fatal("activated after failure"); default: }
+}
+
+func TestKobjectWitnessStartPendingModel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	entered, release := make(chan struct{}), make(chan struct{}); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}
+	w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; ctx, cancel := context.WithCancel(context.Background()); defer cancel(); done := make(chan error, 1); go func() { done <- w.start(ctx) }(); <-entered; released := false; defer func() { if !released { cancel(); close(release); <-w.startJobDone } }(); synctest.Wait(); cancel(); if err := <-done; !errors.Is(err, context.Canceled) || native.retired || socket.retired { t.Fatal("released pending startup", err) }; close(release); released = true; <-w.startJobDone; if socket.joined || !native.retired || !socket.retired { t.Fatal("late Open activated") }
+	})
+}
+
+func TestKobjectWitnessStartIndependentScopeModel(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return nil }}; var worker context.Context; monitor := &kwStartTestMonitor{start: func(ctx context.Context, _ kallsyms.OwnedKobjectReceiver) error { worker = ctx; return nil }}
+	w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; startup, cancel := context.WithCancel(context.Background()); if err := w.start(startup); err != nil { cancel(); t.Fatal(err) }; <-w.startJobDone; cancel(); if !socket.joined || worker.Err() != nil || periodiccaller.OwnedScopeFrom(worker) != scope { t.Fatal("startup cancellation changed worker scope") }; select { case <-w.activate: default: t.Fatal("model activation missing") }
+}
+
+func TestKobjectWitnessStartDeadlineAndStopModel(t *testing.T) {
+	for _, stop := range []bool{false, true} { synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+		entered, release := make(chan struct{}), make(chan struct{}); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); done := make(chan error, 1); go func() { done <- w.start(ctx) }(); <-entered; released := false; defer func() { if !released { cancel(); close(release); <-w.startJobDone } }(); cause := error(context.DeadlineExceeded); if stop { cause = errors.New("stop intent"); w.requestStartupRejection(cause) } else { time.Sleep(time.Second) }; if err := <-done; !errors.Is(err, cause) || native.retired || socket.retired { t.Fatal("lost pending claim", err) }; close(release); released = true; <-w.startJobDone; if socket.joined || !native.retired || !socket.retired { t.Fatal("late success activated") }
+	}) }
+}
+
+func TestKobjectWitnessStartScopeAdmissionFailureModel(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("native Open after scope stop"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("monitor after scope stop"); return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; scope.Fail(syscall.EACCES); defer scope.Stop(context.Background()); if err := w.start(context.Background()); !errors.Is(err, syscall.EACCES) || native.retired || socket.retired { t.Fatal("scope admission lost cause or owner", err) }
+}
+
+func TestKobjectWitnessStartAdmittedLeaseLaunchRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; w.mu.Lock(); w.started = true; w.startCtx = context.Background(); w.mu.Unlock(); op, err := scope.AdmitCallback(); if err != nil { t.Fatal(err) }; cause := syscall.EACCES; scope.Fail(cause); launched := false
+		if err := w.launchStartup(op, func() { launched = true }); !errors.Is(err, cause) || !errors.Is(w.startErr, cause) || launched || socket.joined || native.retired || socket.retired { t.Fatal("rejected job launched, lost cause, or released owner", err) }; select { case <-w.startJobDone: default: t.Fatal("rejected job not terminal") }; ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); if err := scope.Stop(ctx); errors.Is(err, context.DeadlineExceeded) { t.Fatal("admitted lease leaked", err) }; obs, _ := scope.Observation(); if obs.Counts.InFlight != 0 || obs.Counts.Admitted != 1 || obs.Counts.Aborted != 1 { t.Fatal("incorrect lease terminal accounting", obs.Counts) }
+	})
+}
+
+type kwFinishSilentDeadline struct { context.Context; at time.Time }
+func (c kwFinishSilentDeadline) Deadline() (time.Time, bool) { return c.at, true }
+
+func TestKobjectWitnessFinishClaimReservation(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }
+	if claim, err := w.reserveFinish(nil); err == nil || claim != nil || w.finishClaim != nil { t.Fatal("nil consumed claim") }; deadline := time.Now().Add(time.Hour); first, cancel := context.WithDeadline(context.Background(), deadline); defer cancel(); claim, err := w.reserveFinish(first); if err != nil || claim.phase != kwFinishPending || claim.ctx != first || claim.scope != scope || !claim.hasDeadline || !claim.deadline.Equal(deadline) { t.Fatal("lost first claim", err) }; again, err := w.reserveFinish(context.Background()); if err != nil || again != claim || again.ctx != first || !again.deadline.Equal(deadline) { t.Fatal("renewed claim", err) }; if claim.readout.cut != kwReturnPending || claim.readout.fence != kwReturnPending || claim.readout.workerFlush != kwReturnPending || native.retired || socket.retired { t.Fatal("invented completion") }; if err := w.start(context.Background()); err == nil { t.Fatal("start after stop intent") }; select { case <-w.reject: default: t.Fatal("startup rejection not published") }
+	w.rejectFinishClaim(context.Canceled); w.rejectFinishClaim(syscall.EACCES); if claim.phase != kwFinishRejected || !errors.Is(claim.cause, context.Canceled) || !errors.Is(claim.cause, syscall.EACCES) { t.Fatal("lost rejection cause", claim.cause) }; select { case <-claim.decision: default: t.Fatal("rejection not published") }
+}
+
+func TestKobjectWitnessFinishClaimExpired(t *testing.T) {
+	for _, cancelScope := range []bool{false, true} { scope, cancel := context.WithCancel(context.Background()); owned := periodiccaller.NewOwnedScope(scope, nil); if err := owned.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, owned)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(owned, native, socket, monitor); if err != nil { t.Fatal(err) }; var first context.Context = kwFinishSilentDeadline{context.Background(), time.Unix(1, 0)}; cause := error(context.DeadlineExceeded); if cancelScope { cancel(); first = context.Background(); cause = context.Canceled }; claim, err := w.reserveFinish(first); if claim == nil || claim.phase != kwFinishRejected || !errors.Is(err, cause) { t.Fatal("accepted expired claim", err) }; next, _ := w.reserveFinish(context.Background()); if next != claim || !errors.Is(claim.cause, cause) || native.retired || socket.retired { t.Fatal("renewed expired claim") }; cancel(); _ = owned.Stop(context.Background()) }
+}
+
+func TestKobjectWitnessFinishClaimSilentScopeDeadline(t *testing.T) {
+	parent := kwFinishSilentDeadline{context.Background(), time.Unix(1, 0)}; scope := periodiccaller.NewOwnedScope(parent, nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; first := context.Background(); claim, err := w.reserveFinish(first); if claim == nil || claim.phase != kwFinishRejected || !errors.Is(err, context.DeadlineExceeded) || native.retired || socket.retired || socket.joined { t.Fatal("silent scope expiry accepted", err) }; next, err := w.reserveFinish(context.Background()); if next != claim || !errors.Is(err, context.DeadlineExceeded) { t.Fatal("scope expiry renewed", err) }
+}
+
+func TestKobjectWitnessFinishClaimPendingStartup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; done := make(chan error, 1); go func() { done <- w.start(context.Background()) }(); <-entered; released := false; defer func() { if !released { close(release); <-w.startJobDone } }(); claim, err := w.reserveFinish(context.Background()); if err != nil || claim.phase != kwFinishPending { t.Fatal("failed to reserve", err) }; synctest.Wait(); if err := <-done; err == nil || native.retired || socket.retired || socket.joined { t.Fatal("released pending startup", err) }; select { case <-w.startJobDone: t.Fatal("startup returned before callback"); default: }; close(release); released = true; <-w.startJobDone; if socket.joined { t.Fatal("late Open joined") }
+	})
+}
+
+func TestKobjectWitnessFinishClaimAfterModelActivation(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(context.Background()); err != nil { t.Fatal(err) }; <-w.startJobDone; claim, err := w.reserveFinish(context.Background()); if err != nil || claim.phase != kwFinishPending || w.state != kwClosing { t.Fatal("model stop not reserved", err) }; select { case <-w.reject: t.Fatal("rejected after activation"); default: }; select { case <-w.activate: default: t.Fatal("model was not activated") }
+}
+
+// Sequence controls use unqualified component facts, never a certificate.
+type kwSequenceModel struct { events []string; fail string; opErr error; block string; entered, release chan struct{}; reads int; change bool; nativeErr int64; factsErr error }
+func (m *kwSequenceModel) call(name string) error { m.events = append(m.events, name+":start"); if m.block == name { close(m.entered); <-m.release }; m.events = append(m.events, name+":return"); if m.fail == name { if m.opErr != nil { return m.opErr }; return syscall.EACCES }; return nil }
+type kwSequenceNative struct { m *kwSequenceModel; binding kobjectSocketBinding }
+func (n *kwSequenceNative) Open(kobjectSocketBinding) error { return nil }
+func (n *kwSequenceNative) CloseAdmission() error { return n.m.call("close") }
+func (n *kwSequenceNative) Settle(context.Context) error { return n.m.call("settle") }
+func (n *kwSequenceNative) Fence(context.Context) error { return n.m.call("fence") }
+func (n *kwSequenceNative) Readout() (kobjectNativeReadout, error) { n.m.reads++; name := "read1"; if n.m.reads == 2 { name = "read2" }; err := n.m.call(name); var r kobjectNativeReadout; r.binding = n.binding; if err == nil { r.barrier = kwReturnSucceeded } else { r.barrier = kwReturnFailed }; r.firstError = n.m.nativeErr; r.recipient.queued = 7; if n.m.change && n.m.reads == 2 { r.recipient.queued++ }; r.guards[0][0].err = errors.Join(errors.ErrUnsupported, syscall.EPERM, syscall.EACCES); return r, err }
+func (n *kwSequenceNative) Retire() error { _ = n.m.call("retire-native"); return errors.New("unexpected retire") }
+type kwSequenceSocket struct { m *kwSequenceModel; binding kobjectSocketBinding }
+func (s *kwSequenceSocket) Binding() (kobjectSocketBinding, error) { return s.binding, nil }
+func (s *kwSequenceSocket) Join() error { return nil }
+func (s *kwSequenceSocket) Cut(context.Context) error { return s.m.call("cut") }
+func (s *kwSequenceSocket) Receive() (*kobject.Event, error) { return nil, errors.ErrUnsupported }
+func (s *kwSequenceSocket) Acknowledge(error) error { return nil }
+func (s *kwSequenceSocket) DrainTo(_ context.Context, q uint64) error { if q != 7 { return errors.New("wrong drain count") }; return s.m.call("drain") }
+func (s *kwSequenceSocket) Retire() error { _ = s.m.call("retire-socket"); return errors.New("unexpected retire") }
+func (s *kwSequenceSocket) readerFacts() (kwReaderFacts, error) { return kwReaderFacts{}, errors.Join(s.m.call("facts"), s.m.factsErr) }
+type kwSequenceMonitor struct { m *kwSequenceModel }
+type kwSequenceNoFacts struct { kobjectSocket }
+func (m *kwSequenceMonitor) StartOwnedMonitor(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }
+func (m *kwSequenceMonitor) FlushOwnedMonitor(context.Context) error { return m.m.call("flush") }
+
+func kwSequenceFixture(t *testing.T, m *kwSequenceModel, first context.Context) (*kobjectWitness, *kwFinishClaim, *periodiccaller.OwnedScope) {
+	t.Helper(); scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; scopeBinding, err := scope.AuxiliaryBinding(); if err != nil { t.Fatal(err) }; b := kobjectSocketBinding{cookie: 1, portID: 2, generation: scopeBinding.Generation}; w, err := newKobjectWitness(scope, &kwSequenceNative{m, b}, &kwSequenceSocket{m, b}, &kwSequenceMonitor{m}); if err != nil { t.Fatal(err) }; if err := w.start(context.Background()); err != nil { t.Fatal(err) }; <-w.startJobDone; claim, err := w.reserveFinish(first); if err != nil { t.Fatal(err) }; return w, claim, scope
+}
+
+func TestKobjectWitnessFinishSequenceInvalidModel(t *testing.T) {
+	m := &kwSequenceModel{}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); if _, err := w.runFinishSequence(nil); err == nil { t.Fatal("nil claim accepted") }; if _, err := w.runFinishSequence(&kwFinishClaim{}); err == nil { t.Fatal("wrong claim accepted") }; if len(m.events) != 0 { t.Fatal("invalid claim performed effects") }; w.rejectFinishClaim(syscall.EACCES); if _, err := w.runFinishSequence(claim); !errors.Is(err, syscall.EACCES) || len(m.events) != 0 { t.Fatal("rejected claim performed effects", err) }
+	m2 := &kwSequenceModel{}; scope2 := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope2.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope2.Stop(context.Background()); b2 := kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope2)}; socket := &kwSequenceNoFacts{&kwSequenceSocket{m2, b2}}; w2, err := newKobjectWitness(scope2, &kwSequenceNative{m2, b2}, socket, &kwSequenceMonitor{m2}); if err != nil { t.Fatal(err) }; if err := w2.start(context.Background()); err != nil { t.Fatal(err) }; <-w2.startJobDone; claim2, err := w2.reserveFinish(context.Background()); if err != nil { t.Fatal(err) }; if _, err := w2.runFinishSequence(claim2); !errors.Is(err, errors.ErrUnsupported) || !strings.Contains(err.Error(), "reader facts unavailable") { t.Fatal("missing reader facts accepted", err) }
+}
+
+func TestKobjectWitnessFinishSequenceModel(t *testing.T) {
+	for _, kind := range []string{"normal", "changed", "cut"} { t.Run(kind, func(t *testing.T) { m := &kwSequenceModel{change: kind == "changed", factsErr: errors.New("reader failure")}; if kind == "cut" { m.fail = "cut" }; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); result, err := w.runFinishSequence(claim); if kind == "cut" { if !errors.Is(err, syscall.EACCES) || !reflect.DeepEqual(m.events, []string{"cut:start", "cut:return"}) || result.cut != kwReturnFailed { t.Fatal("cut failure continued", err, m.events) }; return }; want := []string{"cut:start", "cut:return", "close:start", "close:return", "settle:start", "settle:return", "fence:start", "fence:return", "read1:start", "read1:return", "drain:start", "drain:return", "flush:start", "flush:return", "read2:start", "read2:return", "facts:start", "facts:return"}; if !reflect.DeepEqual(m.events, want) || !errors.Is(err, errors.ErrUnsupported) || !errors.Is(err, syscall.EPERM) || !errors.Is(err, m.factsErr) { t.Fatal("lost physical order or causes", err, m.events) }; if kind == "changed" && result.native.recipient.queued != 8 { t.Fatal("lost terminal image") } }) }
+}
+
+func TestKobjectWitnessFinishSequenceLateReturnModel(t *testing.T) {
+	for _, stage := range []string{"cut", "drain", "flush", "read1", "read2"} { synctest.Test(t, func(t *testing.T) { m := &kwSequenceModel{block: stage, entered: make(chan struct{}), release: make(chan struct{})}; first, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); w, claim, scope := kwSequenceFixture(t, m, first); defer scope.Stop(context.Background()); done := make(chan error, 1); returned := make(chan struct{}); go func() { defer close(returned); _, err := w.runFinishSequence(claim); done <- err }(); <-m.entered; released := false; defer func() { if !released { cancel(); close(m.release) }; <-returned }(); time.Sleep(time.Second); synctest.Wait(); select { case <-done: t.Fatal("returned before actual callback"); default: }; close(m.release); released = true; if err := <-done; !errors.Is(err, context.DeadlineExceeded) { t.Fatal("lost first deadline", err) }; if m.events[len(m.events)-1] != stage+":return" { t.Fatal("effect after expiry", m.events) } }) }
+}
+
+func TestKobjectWitnessFinishSequenceFaultsModel(t *testing.T) {
+	for _, stage := range []string{"close", "settle", "fence", "read1", "drain", "flush", "read2", "facts"} { t.Run(stage, func(t *testing.T) { cause := errors.New("actual " + stage); m := &kwSequenceModel{fail: stage, opErr: cause, factsErr: errors.New("reader detail")}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); result, err := w.runFinishSequence(claim); if !errors.Is(err, cause) || !errors.Is(err, errors.ErrUnsupported) || result.cut != kwReturnSucceeded || m.events[len(m.events)-1] != stage+":return" { t.Fatal("fault lost or later effect ran", stage, err, m.events) }; if stage == "read1" || stage == "drain" || stage == "flush" || stage == "read2" || stage == "facts" { if result.fence != kwReturnSucceeded || result.native.recipient.queued != 7 || !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) { t.Fatal("prior facts or guard causes lost", stage, err) } }; if stage == "facts" && !errors.Is(err, m.factsErr) { t.Fatal("reader detail lost", err) } }) }
+}
+
+func TestKobjectWitnessFinishStoredJobErrorAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { first, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); m := &kwSequenceModel{nativeErr: -int64(syscall.EIO)}; w, claim, scope := kwSequenceFixture(t, m, first); defer scope.Stop(context.Background()); op, err := scope.AdmitCallback(); if err != nil { t.Fatal(err) }; w.mu.Lock(); claim.jobState = kwFinishJobRunning; w.mu.Unlock(); if err := w.launchFinish(claim, op); err != nil { t.Fatal(err) }; <-claim.jobDone; if errors.Is(claim.progressErr, syscall.EIO) || !errors.Is(claim.jobErr, syscall.EIO) { t.Fatal("EIO was not exclusive to returned job") }; time.Sleep(time.Second); result, err := w.finish(first); if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.EIO) || result.native.recipient.queued != 7 || result.cut != kwReturnSucceeded { t.Fatal("lost returned job error or facts", err) }; _, err = w.finish(context.Background()); if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.EIO) { t.Fatal("lost cached job error", err) } })
+}
+
+func TestKobjectWitnessFinishUnknownStates(t *testing.T) {
+	for _, kind := range []string{"phase", "job", "channel"} { m := &kwSequenceModel{}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); w.mu.Lock(); switch kind { case "phase": claim.phase = kwFinishClaimPhase(255); case "job": claim.jobState = kwFinishJobState(255); close(claim.jobDone); case "channel": claim.jobState = kwFinishJobRunning; claim.jobDone = nil }; w.mu.Unlock(); if _, err := w.finish(context.Background()); err == nil || len(m.events) != 0 { t.Fatal("unknown state accepted or queried", err) }; _ = scope.Stop(context.Background()) }
+}
+
+func TestKobjectWitnessFinishSequenceChangedCountsModel(t *testing.T) {
+	m := &kwSequenceModel{change: true}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); _, err := w.runFinishSequence(claim); if err == nil || !strings.Contains(err.Error(), "native counts changed between readouts") { t.Fatal("changed queued count not rejected", err) }
+}
+
+func TestKobjectWitnessFinishSequenceRetainsCausesModel(t *testing.T) {
+	readerErr := errors.New("reader failure"); m := &kwSequenceModel{factsErr: readerErr}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); _, err := w.runFinishSequence(claim); if !errors.Is(err, syscall.EACCES) || !errors.Is(err, syscall.EPERM) || !errors.Is(err, readerErr) || !errors.Is(err, errors.ErrUnsupported) { t.Fatal("lost physical errors", err) }
+}
+
+func TestKobjectWitnessFinishWrapperPendingModel(t *testing.T) {
+	for _, stage := range []string{"cut", "drain", "flush", "read1"} { synctest.Test(t, func(t *testing.T) {
+		m := &kwSequenceModel{block: stage, entered: make(chan struct{}), release: make(chan struct{})}; first, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); w, claim, scope := kwSequenceFixture(t, m, first); defer scope.Stop(context.Background()); done := make(chan error, 1); go func() { _, err := w.finish(first); done <- err }(); <-m.entered; released := false; defer func() { if !released { cancel(); close(m.release); <-claim.jobDone } }(); time.Sleep(time.Second); synctest.Wait(); if err := <-done; !errors.Is(err, context.DeadlineExceeded) { t.Fatal("lost first deadline", err) }; select { case <-claim.jobDone: t.Fatal("job returned before callback"); default: }; close(m.release); released = true; <-claim.jobDone; before := len(m.events); if _, err := w.finish(context.Background()); !errors.Is(err, context.DeadlineExceeded) || len(m.events) != before || m.events[before-1] != stage+":return" { t.Fatal("renewed rejected finish or ran later effect", err, m.events) }
+	}) }
+}
+
+func TestKobjectWitnessFinishWrapperProgressModel(t *testing.T) {
+	for _, stage := range []string{"drain", "flush"} { synctest.Test(t, func(t *testing.T) {
+		m := &kwSequenceModel{block: stage, entered: make(chan struct{}), release: make(chan struct{})}; first, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); w, claim, scope := kwSequenceFixture(t, m, first); defer scope.Stop(context.Background()); type outcome struct { readout kobjectWitnessReadout; err error }; done := make(chan outcome, 1); go func() { r, err := w.finish(first); done <- outcome{r, err} }(); <-m.entered; released := false; defer func() { if !released { cancel(); close(m.release) }; <-claim.jobDone }(); time.Sleep(time.Second); synctest.Wait(); got := <-done; if !errors.Is(got.err, context.DeadlineExceeded) || got.readout.cut != kwReturnSucceeded || got.readout.fence != kwReturnSucceeded || got.readout.native.recipient.queued != 7 || got.readout.workerFlush != kwReturnPending { t.Fatal("missing returned progress", got.err, got.readout) }; select { case <-claim.jobDone: t.Fatal("job returned before callback"); default: }; before := len(m.events); if _, err := w.finish(context.Background()); !errors.Is(err, context.DeadlineExceeded) || len(m.events) != before { t.Fatal("renewed rejected claim", err) }; close(m.release); released = true; <-claim.jobDone; if _, err := w.finish(context.Background()); err == nil || m.events[len(m.events)-1] != stage+":return" { t.Fatal("late success resumed sequence", err, m.events) }
+	}) }
+}
+
+func TestKobjectWitnessFinishWrapperStartupPendingModel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; startDone := make(chan error, 1); go func() { startDone <- w.start(context.Background()) }(); <-entered; released := false; defer func() { if !released { close(release); <-w.startJobDone } }(); first, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); result := make(chan error, 1); go func() { _, err := w.finish(first); result <- err }(); synctest.Wait(); time.Sleep(time.Second); if err := <-result; err == nil || native.retired || socket.retired || socket.joined { t.Fatal("finish overlapped startup", err) }; close(release); released = true; <-w.startJobDone; <-startDone; if socket.joined { t.Fatal("late startup joined") }
+	})
+}
+
+func TestKobjectWitnessFinishWrapperLeaseLaunchRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { m := &kwSequenceModel{}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); op, err := scope.AdmitCallback(); if err != nil { t.Fatal(err) }; w.mu.Lock(); claim.jobState = kwFinishJobRunning; w.mu.Unlock(); scope.Fail(syscall.EACCES); if err := w.launchFinish(claim, op); !errors.Is(err, syscall.EACCES) || len(m.events) != 0 { t.Fatal("rejected launch lost cause or ran sequence", err) }; select { case <-claim.jobDone: t.Fatal("unlaunched job reported return"); default: }; ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); if err := scope.Stop(ctx); errors.Is(err, context.DeadlineExceeded) { t.Fatal("finish lease leaked", err) }; obs, _ := scope.Observation(); if obs.Counts.InFlight != 0 || obs.Counts.Aborted != 1 { t.Fatal("finish lease was not aborted", obs.Counts) } })
+}
+
+// These component-model controls do not establish physical retirement authority.
+func TestKobjectWitnessQuiescePendingFinish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := &kwSequenceModel{block: "cut", entered: make(chan struct{}), release: make(chan struct{})}; first, cancel := context.WithCancel(context.Background()); defer cancel(); w, claim, scope := kwSequenceFixture(t, m, first); defer scope.Stop(context.Background()); finishDone, finishReturned := make(chan error, 1), make(chan struct{}); go func() { defer close(finishReturned); _, err := w.finish(first); finishDone <- err }(); <-m.entered; released := false; done, returned := make(chan error, 1), make(chan struct{}); go func() { defer close(returned); done <- w.quiesceComponent() }(); defer func() { if !released { cancel(); close(m.release) }; <-claim.jobDone; <-finishReturned; <-returned }(); synctest.Wait(); if err := <-finishDone; err == nil { t.Fatal("pending finish not rejected") }; select { case <-done: t.Fatal("quiesced before actual callback"); default: }; if _, err := w.finish(context.Background()); err == nil { t.Fatal("new finish admitted") }; close(m.release); released = true; if err := <-done; err != nil { t.Fatal(err) }; if m.events[len(m.events)-1] != "cut:return" { t.Fatal("late sequence or retirement effect", m.events) }
+	})
+}
+
+func TestKobjectWitnessQuiescePendingStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; startDone, startReturned := make(chan error, 1), make(chan struct{}); go func() { defer close(startReturned); startDone <- w.start(context.Background()) }(); <-entered; released := false; done, returned := make(chan error, 1), make(chan struct{}); go func() { defer close(returned); done <- w.quiesceComponent() }(); defer func() { if !released { close(release) }; <-w.startJobDone; <-startReturned; <-returned }(); synctest.Wait(); if err := <-startDone; err == nil || native.retired || socket.retired { t.Fatal("start borrow released early", err) }; select { case <-done: t.Fatal("quiesced before startup returned"); default: }; if err := w.start(context.Background()); err == nil { t.Fatal("new startup admitted") }; close(release); released = true; if err := <-done; err != nil || socket.joined { t.Fatal("late startup or quiesce failure", err) }
+	})
+}
+
+func TestKobjectWitnessQuiesceLaunchClassification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { m := &kwSequenceModel{}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); if err := w.enterComponentCall(); err != nil { t.Fatal(err) }; released := false; done, returned := make(chan error, 1), make(chan struct{}); go func() { defer close(returned); done <- w.quiesceComponent() }(); defer func() { if !released { w.leaveComponentCall() }; <-returned }(); synctest.Wait(); select { case <-done: t.Fatal("skipped unclassified invocation"); default: }; w.mu.Lock(); claim.jobState = kwFinishJobNotLaunched; w.mu.Unlock(); w.leaveComponentCall(); released = true; if err := <-done; err != nil { t.Fatal(err) } })
+}
+
+func TestKobjectWitnessQuiesceUnknownJob(t *testing.T) {
+	m := &kwSequenceModel{}; w, claim, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); w.mu.Lock(); claim.jobState = kwFinishJobState(255); w.mu.Unlock(); if err := w.quiesceComponent(); err == nil || w.componentState != kwComponentQuiescenceUnknown || len(m.events) != 0 { t.Fatal("unknown job was treated as quiescent", err) }; if err := w.quiesceComponent(); err == nil { t.Fatal("unknown result was not retained") }
+}
+
+func kwReaderQuiescenceFixture(t *testing.T, calls kwSocketCalls) (*kobjectWitness, *kwSocketReader, *periodiccaller.OwnedScope) {
+	t.Helper(); scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; transport, err := acquireKobjectSocketWithCalls(context.Background(), kwTestScopeGeneration(t, scope), calls); if err != nil { t.Fatal(err) }; reader, err := newKobjectSocketReader(context.Background(), scope.Context(), transport); if err != nil { t.Fatal(err) }; if err := reader.Join(); err != nil { t.Fatal(err) }; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected native Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, reader, monitor); if err != nil { t.Fatal(err) }; return w, reader, scope
+}
+
+func TestKobjectWitnessReaderQuiescePendingAck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { var log []string; calls := kwTestCalls(&log); payload := []byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); creds := unix.UnixCredentials(&unix.Ucred{}); reads := 0; calls.recvmsg = func(_ int, raw, oob []byte, _ int) (int, int, int, unix.Sockaddr, error) { reads++; copy(raw, payload); copy(oob, creds); return len(payload), len(creds), 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 1}, nil }; w, reader, scope := kwReaderQuiescenceFixture(t, calls); defer scope.Stop(context.Background()); if _, err := reader.Receive(); err != nil { t.Fatal(err) }; done, returned := make(chan error, 1), make(chan struct{}); go func() { defer close(returned); done <- w.quiesceReaderBorrowers() }(); acknowledged := false; defer func() { if !acknowledged { _ = reader.Acknowledge(nil) }; <-returned }(); synctest.Wait(); select { case <-done: t.Fatal("pending acknowledgement treated as returned"); default: }; if _, err := reader.Receive(); err == nil { t.Fatal("barred reader reentered") }; if err := reader.Acknowledge(nil); err != nil { t.Fatal(err) }; acknowledged = true; if err := <-done; err != nil { t.Fatal(err) }; if _, err := reader.Receive(); err == nil || reads != 1 { t.Fatal("reader touched FD after bar", err) }; for _, event := range log { if event == "close" { t.Fatal("reader wait closed socket") } } })
+}
+
+func TestKobjectWitnessReaderQuiescePendingEffects(t *testing.T) {
+	for _, stage := range []string{"receive", "cut"} { synctest.Test(t, func(t *testing.T) { var log []string; calls := kwTestCalls(&log); entered, release := make(chan struct{}), make(chan struct{}); if stage == "receive" { calls.recvmsg = func(int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error) { close(entered); <-release; return -1, 0, 0, nil, unix.EAGAIN } } else { original := calls.setsockoptInt; calls.setsockoptInt = func(fd, level, opt, value int) error { if level == unix.SOL_NETLINK && opt == unix.NETLINK_DROP_MEMBERSHIP { close(entered); <-release }; return original(fd, level, opt, value) } }; w, reader, scope := kwReaderQuiescenceFixture(t, calls); defer scope.Stop(context.Background()); effectDone, effectReturned := make(chan error, 1), make(chan struct{}); go func() { defer close(effectReturned); if stage == "receive" { _, err := reader.Receive(); effectDone <- err } else { effectDone <- reader.Cut(context.Background()) } }(); <-entered; done, returned := make(chan error, 1), make(chan struct{}); go func() { defer close(returned); done <- w.quiesceReaderBorrowers() }(); released := false; defer func() { if !released { close(release) }; <-effectReturned; <-returned }(); synctest.Wait(); select { case <-done: t.Fatal("cancellation counted as actual return"); default: }; close(release); released = true; <-effectDone; if err := <-done; err != nil && !errors.Is(err, context.Canceled) { t.Fatal(err) }; for _, event := range log { if event == "close" { t.Fatal("reader wait closed socket") } } }) }
+}
+
+func TestKobjectWitnessReaderQuiesceUnknownImplementation(t *testing.T) {
+	m := &kwSequenceModel{}; w, _, scope := kwSequenceFixture(t, m, context.Background()); defer scope.Stop(context.Background()); if err := w.quiesceReaderBorrowers(); !errors.Is(err, errors.ErrUnsupported) || len(m.events) != 0 { t.Fatal("unproven reader treated as idle", err) }
+}
+
+func TestKobjectWitnessReaderQuiesceBarsFreshJoin(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); var log []string; calls := kwTestCalls(&log); original := calls.setsockoptInt; joins := 0; calls.setsockoptInt = func(fd, level, opt, value int) error { if level == unix.SOL_NETLINK && opt == unix.NETLINK_ADD_MEMBERSHIP { joins++ }; return original(fd, level, opt, value) }; transport, err := acquireKobjectSocketWithCalls(context.Background(), kwTestScopeGeneration(t, scope), calls); if err != nil { t.Fatal(err) }; reader, err := newKobjectSocketReader(context.Background(), scope.Context(), transport); if err != nil { t.Fatal(err) }; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { t.Fatal("unexpected Open"); return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, reader, monitor); if err != nil { t.Fatal(err) }; if err := w.quiesceReaderBorrowers(); err != nil { t.Fatal(err) }; if err := reader.Join(); err == nil || joins != 0 { t.Fatal("barred fresh reader joined", err) }
+}
+
+func kwPhysicalRetireFixture(t *testing.T) (*kobjectWitness, *kwNativeEpoch, *kwNativeObjects, *kwAttachTestEffects, *kwSocketReader, *[]string, *periodiccaller.OwnedScope) {
+	t.Helper(); scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; gen := kwTestScopeGeneration(t, scope); var log []string; calls := kwTestCalls(&log); transport, err := acquireKobjectSocketWithCalls(context.Background(), gen, calls); if err != nil { t.Fatal(err) }; reader, err := newKobjectSocketReader(context.Background(), scope.Context(), transport); if err != nil { t.Fatal(err) }; binding, err := reader.Binding(); if err != nil { t.Fatal(err) }; objects, effects, _ := kwColdEpochFixture(t); objects.layout.generation = gen; native, err := newKobjectNativeEpoch(context.Background(), scope.Context(), objects, binding); if err != nil { t.Fatal(err) }; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}; w, err := newKobjectWitness(scope, native, reader, monitor); if err != nil { t.Fatal(err) }; return w, native, objects, effects, reader, &log, scope
+}
+
+func TestKobjectWitnessPhysicalRetireCold(t *testing.T) {
+	for _, closeErr := range []error{nil, syscall.EIO} { t.Run(fmt.Sprint(closeErr), func(t *testing.T) { w, _, objects, effects, reader, log, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); effects.objects.closeError = closeErr; lease, err := scope.AdmitCallback(); if err != nil { t.Fatal(err) }; completed := false; defer func() { if !completed { _ = lease.Complete() } }(); outcome, err := w.retirePhysical(); if outcome != kwPhysicalReleased || !errors.Is(err, closeErr) && closeErr != nil || objects.gate != nil || !reader.transport.closed { t.Fatal("cold physical retirement", outcome, err) }; closed := len(effects.objects.closed); if closed == 0 { t.Fatal("native objects not closed") }; if again, repeatErr := w.retirePhysical(); again != outcome || !errors.Is(repeatErr, closeErr) && closeErr != nil || len(effects.objects.closed) != closed { t.Fatal("retirement retried", repeatErr) }; socketCloses := 0; for _, event := range *log { if event == "close" { socketCloses++ } }; if socketCloses != 1 { t.Fatal("socket close count", socketCloses) }; _ = lease.Complete(); completed = true }) }
+}
+
+func TestKobjectWitnessPhysicalRetireRetains(t *testing.T) {
+	for _, kind := range []string{"hot", "unknown", "busy", "unmap"} { t.Run(kind, func(t *testing.T) { w, native, objects, effects, reader, log, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); switch kind { case "hot": if err := objects.gate.open(); err != nil { t.Fatal(err) }; if _, err := objects.gate.closeAdmission(); err != nil { t.Fatal(err) }; case "unknown": atomic.StoreUint64(objects.gate.word, 0); if err := objects.gate.open(); err == nil { t.Fatal("expected failed CAS") }; case "busy": native.mu.Lock(); native.operation = kwEpochReadoutOperation; native.mu.Unlock(); case "unmap": objects.gate.munmap = func([]byte) error { return syscall.EACCES } }; outcome, err := w.retirePhysical(); if outcome != kwPhysicalRetained || err == nil || reader.transport.closed || objects.gate == nil { t.Fatal("released unproven graph", kind, outcome, err) }; if kind != "unmap" && len(effects.objects.closed) != 0 { t.Fatal("closed native graph", kind) }; before := len(effects.objects.closed); if again, _ := w.retirePhysical(); again != kwPhysicalRetained || len(effects.objects.closed) != before { t.Fatal("retried native cleanup") }; for _, event := range *log { if event == "close" { t.Fatal("closed socket before native release") } } }) }
+}
+
+func TestKobjectWitnessPhysicalRetireConcurrent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { w, _, objects, effects, reader, log, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); first := objects.acquiredProbes[len(objects.acquiredProbes)-1]; original := first.closeFD; entered, release := make(chan struct{}), make(chan struct{}); first.closeFD = func(fd int) error { close(entered); <-release; return original(fd) }; type outcome struct { state kwPhysicalRetirement; err error }; done1, done2 := make(chan outcome, 1), make(chan outcome, 1); returned1, returned2 := make(chan struct{}), make(chan struct{}); go func() { defer close(returned1); s, e := w.retirePhysical(); done1 <- outcome{s, e} }(); <-entered; released := false; go func() { defer close(returned2); s, e := w.retirePhysical(); done2 <- outcome{s, e} }(); defer func() { if !released { close(release) }; <-returned1; <-returned2 }(); synctest.Wait(); select { case <-done2: t.Fatal("concurrent cleanup returned before actual close"); default: }; if reader.transport.closed { t.Fatal("socket closed before native return") }; close(release); released = true; a, b := <-done1, <-done2; if a.state != kwPhysicalReleased || b.state != a.state || len(effects.objects.closed) == 0 || !reader.transport.closed { t.Fatal("concurrent cleanup failed", a, b) }; socketCloses := 0; for _, event := range *log { if event == "close" { socketCloses++ } }; if socketCloses != 1 { t.Fatal("socket close retried", socketCloses) } })
+}
+
+func TestKobjectWitnessPhysicalSocketCloseErrorCached(t *testing.T) {
+	w, _, _, _, reader, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); closes := 0; reader.transport.mu.Lock(); reader.transport.closeFD = func(int) error { closes++; return syscall.EACCES }; reader.transport.mu.Unlock(); state, err := w.retirePhysical(); if state != kwPhysicalReleased || !errors.Is(err, syscall.EACCES) || !errors.Is(w.physicalSocketErr, syscall.EACCES) || closes != 1 { t.Fatal("lost socket close outcome", state, err) }; again, err := w.retirePhysical(); if again != state || !errors.Is(err, syscall.EACCES) || closes != 1 { t.Fatal("socket close retried", err) }
+}
+
+type kwFactoryDynamicDeadline struct { context.Context; at time.Time }
+func (c *kwFactoryDynamicDeadline) Deadline() (time.Time, bool) { return c.at, true }
+
+func kwFactoryClaimFixture(t *testing.T, scope *periodiccaller.OwnedScope, constructor context.Context) *preparedKobjectWitness {
+	t.Helper(); p, err := prepareKobjectWitnessWithSpec(constructor, scope, kwMinimalPreparationSpec(t)); if err != nil { t.Fatal(err) }; return p
+}
+
+func TestKobjectFactoryPinAbortOnce(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	p := kwFactoryClaimFixture(t, scope, context.Background()); monitor := &kwStartTestMonitor{}; c, err := p.reserveFactoryStart(context.Background(), scope.Context(), monitor); if err != nil { t.Fatal(err) }
+	op, admitErr := scope.AdmitCallback(); if err := p.adoptFactoryPin(c, op, admitErr); err != nil { t.Fatal(err) }
+	scope.Fail(syscall.EACCES); registrationErr := errors.New("registration failed")
+	if err := p.abortFactoryPin(c, registrationErr); !errors.Is(err, syscall.EACCES) || !errors.Is(err, registrationErr) { t.Fatalf("lost failure: %v", err) }
+	select { case <-c.pinDone: default: t.Fatal("terminal return not published") }; if c.pinPhase != kwFactoryPinTerminalized || !errors.Is(c.cause, syscall.EACCES) || !errors.Is(p.err, syscall.EACCES) { t.Fatal("terminal result not retained") }
+	before := scope.Failure(); if err := p.abortFactoryPin(c, registrationErr); !errors.Is(err, syscall.EACCES) || !errors.Is(err, registrationErr) { t.Fatalf("lost cached failure: %v", err) }; if scope.Failure() != before { t.Fatal("duplicate abort reached scope") }
+}
+
+func TestKobjectFactoryPinAbortRetainsPriorFailure(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	p := kwFactoryClaimFixture(t, scope, context.Background()); c, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+	op, admitErr := scope.AdmitCallback(); if err := p.adoptFactoryPin(c, op, admitErr); err != nil { t.Fatal(err) }
+	nativeErr, laterErr := errors.New("unique acquisition failure"), errors.New("later registration failure")
+	p.mu.Lock(); p.rejectFactoryClaimLocked(c, nativeErr); p.mu.Unlock()
+	if err := p.abortFactoryPin(c, nil); !errors.Is(err, nativeErr) { t.Fatalf("lost prior failure: %v", err) }
+	scope.Fail(syscall.EACCES); if err := p.abortFactoryPin(c, laterErr); !errors.Is(err, nativeErr) || !errors.Is(err, laterErr) || !errors.Is(err, syscall.EACCES) { t.Fatalf("lost cached or later failure: %v", err) }
+}
+
+func TestKobjectFactoryPinMalformedTerminalizing(t *testing.T) {
+	for _, missingPin := range []bool{true, false} { t.Run(fmt.Sprint(missingPin), func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+		p := kwFactoryClaimFixture(t, scope, context.Background()); c, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+		op, admitErr := scope.AdmitCallback(); if err := p.adoptFactoryPin(c, op, admitErr); err != nil { t.Fatal(err) }
+		p.mu.Lock(); originalDone := c.pinDone; badDone := make(chan struct{}); c.pinPhase = kwFactoryPinTerminalizing; c.pinDone = badDone; if missingPin { c.pin = nil } else { close(badDone) }; p.mu.Unlock()
+		malformed, before := errors.New("malformed"), scope.Failure(); result := make(chan error, 1); go func() { result <- p.abortFactoryPin(c, malformed) }()
+		var got error; timedOut := false
+		select { case got = <-result: case <-time.After(time.Second): timedOut = true; p.mu.Lock(); c.pin = op; c.pinDone = originalDone; c.pinPhase = kwFactoryPinCallerOwned; p.mu.Unlock(); if missingPin { close(badDone) }; got = <-result }
+		p.mu.Lock(); phase, retained := c.pinPhase, c.cause; if phase != kwFactoryPinTerminalized { c.pin = op; c.pinDone = originalDone; c.pinPhase = kwFactoryPinCallerOwned }; p.mu.Unlock(); unchanged := scope.Failure() == before
+		if phase != kwFactoryPinTerminalized { _ = p.abortFactoryPin(c, errors.New("test cleanup")) }
+		if timedOut || !errors.Is(got, malformed) || !errors.Is(retained, malformed) || phase != kwFactoryPinTerminalizing || !unchanged { t.Fatalf("malformed terminalizing state did not fail closed: %v", got) }
+	}) }
+}
+
+func TestKobjectFactoryPinTransferRefusesCallerAbort(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	p := kwFactoryClaimFixture(t, scope, context.Background()); c, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+	op, admitErr := scope.AdmitCallback(); if err := p.adoptFactoryPin(c, op, admitErr); err != nil { t.Fatal(err) }
+	// Test teardown stands in for the future cleanup owner; this is not a source final.
+	owned := true; defer func() { if owned { _ = op.Abort() } }()
+	if err := p.transferFactoryPin(c); err != nil { t.Fatal(err) }; before := scope.Failure()
+	if err := p.abortFactoryPin(c, errors.New("late failure")); err == nil { t.Fatal("caller abort accepted after transfer") }
+	if c.pinPhase != kwFactoryPinCleanupOwned || scope.Failure() != before { t.Fatal("transferred pin was terminalized") }
+	select { case <-c.pinDone: t.Fatal("transferred pin reported terminal"); default: }
+	if err := op.Abort(); err != nil { t.Fatalf("cleanup owner could not terminalize live pin: %v", err) }; owned = false
+}
+
+func TestKobjectFactoryEnrollmentRejectsNonemptyGraph(t *testing.T) {
+	for _, kind := range []string{"transport", "reader", "objects", "epoch", "component"} { t.Run(kind, func(t *testing.T) {
+		w, epoch, objects, effects, reader, log, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); defer w.retirePhysical(); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+		p.mu.Lock(); switch kind { case "transport": p.transport = reader.transport; case "reader": p.reader = reader; case "objects": p.objects = objects; case "epoch": p.epoch = epoch; case "component": p.component = w }; p.mu.Unlock(); beforeLog, beforeClosed := len(*log), len(effects.objects.closed); admissions, launches := 0, 0
+		err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, job func()) bool { launches++; return s.Go(job) }, func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { admissions++; return s.AdmitCallback() }); var carrier *kobjectFactoryError
+		p.mu.Lock(); unchanged := c.enrollment == kwEnrollmentAbsent && c.cleanupDone == nil && c.pinPhase == kwFactoryPinAbsent && !p.factoryNoAcquiredGraphLocked(c); p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || admissions != 0 || launches != 0 || !unchanged || len(*log) != beforeLog || len(effects.objects.closed) != beforeClosed { t.Fatalf("nonempty graph accepted or touched: %v", err) }
+	}) }
+}
+
+func TestKobjectFactoryEnrollmentPublicationMismatchRetainsPin(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; var op *periodiccaller.OwnedOperation; var original chan struct{}; var terminal bool
+	defer func() { if op != nil && !terminal { p.mu.Lock(); if original != nil { c.publication = original }; p.mu.Unlock(); _ = p.abortFactoryPinExpected(c, errors.New("test owner cleanup"), op) } }()
+	admit := func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { var e error; op, e = s.AdmitCallback(); p.mu.Lock(); original = c.publication; c.publication = make(chan struct{}); p.mu.Unlock(); return op, e }; launches := 0
+	err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, job func()) bool { launches++; return s.Go(job) }, admit); var carrier *kobjectFactoryError; p.mu.Lock(); retained := c.pin == op && c.pinPhase == kwFactoryPinCallerOwned; done, pinDone := c.cleanupDone, c.pinDone; p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || !retained || launches != 0 { t.Fatalf("mismatched publication was completed: %v", err) }; select { case <-done: t.Fatal("mismatched cleanup completed"); default: }; select { case <-pinDone: t.Fatal("mismatched pin terminalized"); default: }
+	p.mu.Lock(); c.publication = original; p.mu.Unlock(); _ = p.abortFactoryPinExpected(c, errors.New("test owner cleanup"), op); terminal = true
+}
+
+func TestKobjectFactoryEnrollmentReplacedPinDoneNotCompleted(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; var op *periodiccaller.OwnedOperation; var original, replacement chan struct{}; terminal := false
+	defer func() { if op != nil && !terminal { p.mu.Lock(); if original != nil { c.pinDone = original }; p.mu.Unlock(); _ = op.Abort() } }()
+	admit := func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { var e error; op, e = s.AdmitCallback(); return op, e }
+	launch := func(s *periodiccaller.OwnedScope, job func()) bool { p.mu.Lock(); original = c.pinDone; replacement = make(chan struct{}); c.pinDone = replacement; p.mu.Unlock(); s.Fail(syscall.EACCES); return s.Go(job) }
+	err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), launch, admit); var carrier *kobjectFactoryError; p.mu.Lock(); retained := c.pin == op && c.pinPhase == kwFactoryPinCallerOwned && c.pinDone == replacement; done := c.cleanupDone; p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || op == nil || original == nil || replacement == nil || done == nil || !retained { t.Fatalf("replaced pin publication accepted: %v", err) }; select { case <-replacement: t.Fatal("replacement pin publication closed"); default: }; select { case <-original: t.Fatal("original pin publication closed"); default: }; select { case <-done: t.Fatal("unknown pin publication completed cleanup"); default: }
+	p.mu.Lock(); c.pinDone = original; p.mu.Unlock(); terminal = true; if err := op.Abort(); err != nil { t.Fatalf("actual pin already terminalized: %v", err) }
+}
+
+func TestKobjectFactoryEnrollmentAbortFailureNotCompleted(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; launches := 0
+	admit := func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { op, err := s.AdmitCallback(); if err != nil { return op, err }; if err := op.Abort(); err != nil { return op, err }; return op, nil }
+	err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, job func()) bool { launches++; return s.Go(job) }, admit); var carrier *kobjectFactoryError; p.mu.Lock(); terminalErr, done, pinDone, phase := c.pinTerminalErr, c.cleanupDone, c.pinDone, c.pinPhase; p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || terminalErr == nil || phase != kwFactoryPinTerminalUnknown || launches != 0 { t.Fatalf("failed actual Abort was accepted: %v", err) }; select { case <-done: t.Fatal("failed Abort published cleanup completion"); default: }; select { case <-pinDone: t.Fatal("failed Abort published pin terminal"); default: }
+}
+
+func TestKobjectFactoryUnadoptedAbortFailureRetained(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; var old, extra *periodiccaller.OwnedOperation; var terminal bool; defer func() { if old != nil && !terminal { _ = old.Abort() } }()
+	admit := func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { var e error; old, e = s.AdmitCallback(); if e != nil { return nil, e }; if e = p.adoptFactoryPin(c, old, nil); e != nil { return nil, e }; extra, e = s.AdmitCallback(); if e != nil { return extra, e }; if e = extra.Abort(); e != nil { return extra, e }; return extra, nil }; launches := 0
+	err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, job func()) bool { launches++; return s.Go(job) }, admit); var carrier *kobjectFactoryError; p.mu.Lock(); retained := c.pin == old && c.pinPhase == kwFactoryPinCallerOwned && c.unadoptedPin == extra; done := c.cleanupDone; p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || carrier.unadopted != extra || !retained || launches != 0 { t.Fatalf("unadopted failed terminal lost ownership: %v", err) }; select { case <-done: t.Fatal("unadopted failed terminal completed cleanup"); default: }; if err := old.Abort(); err != nil { t.Fatal(err) }; terminal = true
+}
+
+func TestKobjectFactoryEnrollmentLateGraphRetainsPin(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; socket, closes := kwRawCleanupSocket(t, nil); var terminal bool
+	defer func() { if !terminal { _ = socket.close(); p.mu.Lock(); if p.transport == socket { p.transport = nil }; op := c.pin; p.mu.Unlock(); if op != nil { _ = p.abortFactoryPinExpected(c, errors.New("test owner cleanup"), op) } } }()
+	err = p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, job func()) bool { p.mu.Lock(); p.transport = socket; p.mu.Unlock(); s.Fail(syscall.EACCES); return s.Go(job) }, (*periodiccaller.OwnedScope).AdmitCallback); var carrier *kobjectFactoryError; p.mu.Lock(); op, retained := c.pin, c.pinPhase == kwFactoryPinCallerOwned && p.transport == socket; done, pinDone := c.cleanupDone, c.pinDone; p.mu.Unlock(); if !errors.As(err, &carrier) || carrier.cleanup != p || !retained || *closes != 0 { t.Fatalf("late graph treated as empty: %v", err) }; select { case <-done: t.Fatal("late graph cleanup completed"); default: }; select { case <-pinDone: t.Fatal("late graph pin terminalized"); default: }
+	_ = socket.close(); p.mu.Lock(); p.transport = nil; p.mu.Unlock(); _ = p.abortFactoryPinExpected(c, errors.New("test owner cleanup"), op); terminal = true
+}
+
+func TestKobjectFactoryEnrollmentRejectsForeignPin(t *testing.T) {
+	for _, race := range []bool{false, true} { t.Run(fmt.Sprint(race), func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+		p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+		var old *periodiccaller.OwnedOperation; cleanup := func() { if old != nil { _ = old.Abort() } }; defer cleanup()
+		adoptOld := func() { var err error; old, err = scope.AdmitCallback(); if err != nil { t.Fatal(err) }; if err = p.adoptFactoryPin(c, old, nil); err != nil { t.Fatal(err) } }
+		if !race { adoptOld() }; calls := 0
+		admit := func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { calls++; if race { adoptOld(); return s.AdmitCallback() }; return nil, errors.New("unexpected admission") }
+		if err := p.enrollFactoryPinWithAdmission(c, first, scope.Context(), kwFactoryLaunch, admit); err == nil { t.Fatal("foreign pin accepted") }
+		if (!race && calls != 0) || (race && calls != 1) || c.pin != old || c.pinPhase != kwFactoryPinCallerOwned { t.Fatal("foreign pin was replaced or terminalized") }; if race { select { case <-c.cleanupDone: t.Fatal("foreign pin published cleanup completion"); default: } }
+		if err := old.Abort(); err != nil { t.Fatalf("foreign pin not live: %v", err) }; old = nil
+		if err := scope.Stop(context.Background()); err != nil && strings.Contains(err.Error(), "duplicate terminal") { t.Fatal(err) }
+	}) }
+}
+
+func kwRawCleanupSocket(t *testing.T, closeErr error) (*kwUnjoinedSocket, *int) {
+	t.Helper(); var log []string; calls := kwTestCalls(&log); closes := 0; calls.close = func(int) error { closes++; return closeErr }; socket, err := acquireKobjectSocketWithCalls(context.Background(), 3, calls); if err != nil { t.Fatal(err) }; return socket, &closes
+}
+
+func TestKobjectFactoryRawSocketCleanup(t *testing.T) {
+	for _, closeErr := range []error{nil, syscall.EIO} { t.Run(fmt.Sprint(closeErr), func(t *testing.T) {
+		socket, closes := kwRawCleanupSocket(t, closeErr); p := &preparedKobjectWitness{transport: socket}; state, err := p.retireRawFactoryOwners()
+		if state != kwPhysicalReleased || closeErr != nil && !errors.Is(err, closeErr) || !socket.closed || p.transport != nil || *closes != 1 { t.Fatalf("socket cleanup: %v %v", state, err) }
+		if state, _ = p.retireRawFactoryOwners(); state != kwPhysicalReleased || *closes != 1 { t.Fatal("socket close retried") }
+	}) }
+}
+
+func TestKobjectFactoryRawReaderCleanup(t *testing.T) {
+	socket, closes := kwRawCleanupSocket(t, nil); reader, err := newKobjectSocketReader(context.Background(), context.Background(), socket); if err != nil { t.Fatal(err) }; p := &preparedKobjectWitness{reader: reader, transport: socket}
+	if state, _ := p.retireRawFactoryOwners(); state != kwPhysicalRetained || *closes != 0 { t.Fatal("duplicate reader owner released") }; p.transport = nil
+	reader.mu.Lock(); reader.active = true; reader.mu.Unlock(); if state, _ := p.retireRawFactoryOwners(); state != kwPhysicalRetained || *closes != 0 { t.Fatal("busy reader released") }; reader.mu.Lock(); reader.active = false; reader.mu.Unlock()
+	if state, err := p.retireRawFactoryOwners(); state != kwPhysicalReleased || err != nil || *closes != 1 || p.reader != nil { t.Fatalf("reader cleanup: %v %v", state, err) }
+}
+
+func TestKobjectFactoryRawNativeCleanup(t *testing.T) {
+	for _, useEpoch := range []bool{false, true} { t.Run(fmt.Sprint(useEpoch), func(t *testing.T) {
+		objects, effects, binding := kwColdEpochFixture(t); p := &preparedKobjectWitness{}
+		if useEpoch { epoch, err := newKobjectNativeEpoch(context.Background(), context.Background(), objects, binding); if err != nil { t.Fatal(err) }; p.epoch = epoch } else { p.objects = objects; effects.objects.closeError = syscall.EIO }
+		state, err := p.retireRawFactoryOwners(); if state != kwPhysicalReleased || !useEpoch && !errors.Is(err, syscall.EIO) || p.objects != nil || p.epoch != nil || !kwRawNativeReleased(objects) { t.Fatalf("native cleanup: %v %v", state, err) }
+		closed := len(effects.objects.closed); if state, _ = p.retireRawFactoryOwners(); state != kwPhysicalReleased || len(effects.objects.closed) != closed { t.Fatal("native close retried") }
+	}) }
+}
+
+func TestKobjectFactoryRawNativeFailureRetainsSocket(t *testing.T) {
+	objects, _, _ := kwColdEpochFixture(t); socket, closes := kwRawCleanupSocket(t, nil); p := &preparedKobjectWitness{objects: objects, transport: socket}
+	gate := objects.gate; gate.mu.Lock(); unmap := gate.munmap; gate.munmap = func([]byte) error { return syscall.EIO }; gate.mu.Unlock()
+	state, err := p.retireRawFactoryOwners(); if state != kwPhysicalRetained || !errors.Is(err, syscall.EIO) || *closes != 0 || p.objects != objects || p.transport != socket { t.Errorf("native failure lost ownership: %v %v", state, err) }
+	gate.mu.Lock(); gate.munmap = unmap; gate.mu.Unlock(); _ = objects.retire(); _ = socket.close()
+}
+
+func TestKobjectFactoryRawCleanupReleasesEnrolledPin(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+	p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+	socket, closes := kwRawCleanupSocket(t, syscall.EIO); defer socket.close(); if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }
+	defer func() { _ = p.requestFactoryCleanup(c); <-c.cleanupDone }()
+	p.mu.Lock(); p.transport = socket; p.mu.Unlock(); if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; <-c.cleanupDone
+	p.mu.Lock(); phase, cleanupErr, left := c.pinPhase, c.cleanupErr, p.transport; p.mu.Unlock(); if phase != kwFactoryPinTerminalized || !errors.Is(cleanupErr, syscall.EIO) || left != nil || *closes != 1 { t.Fatalf("raw cleanup did not release pin: %v", cleanupErr) }
+}
+
+type kwFactoryWorldProbe struct { context.Context; owner *preparedKobjectWitness; at time.Time; hasDeadline bool; armed, held atomic.Bool; entered, release chan struct{}; once sync.Once }
+func (c *kwFactoryWorldProbe) inspect() { if c.armed.Load() { if c.owner.mu.TryLock() { c.owner.mu.Unlock() } else { c.held.Store(true) } } }
+func (c *kwFactoryWorldProbe) Deadline() (time.Time, bool) { c.inspect(); return c.at, c.hasDeadline }
+func (c *kwFactoryWorldProbe) Err() error { c.inspect(); if c.armed.Load() { c.once.Do(func() { close(c.entered); <-c.release }) }; return c.Context.Err() }
+
+func TestKobjectFactoryReserveWorldQueryUnlocked(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := &kwFactoryWorldProbe{Context: context.Background(), owner: p, entered: make(chan struct{}), release: make(chan struct{})}; first.armed.Store(true); var release sync.Once; defer release.Do(func() { close(first.release) }); result := make(chan error, 1)
+	go func() { _, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); result <- err }(); <-first.entered; if !p.mu.TryLock() { t.Error("reserve held prepared mutex during world query") } else { p.mu.Unlock() }; if err := p.Retire(); err != nil { t.Fatal(err) }; release.Do(func() { close(first.release) }); if err := <-result; err == nil || first.held.Load() || p.startClaim != nil { t.Fatalf("stale reserve accepted: %v", err) }
+}
+
+func TestKobjectFactoryEnrollmentWorldStopUnlocked(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := &kwFactoryWorldProbe{Context: context.Background(), owner: p, entered: make(chan struct{}), release: make(chan struct{})}; c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; first.armed.Store(true); var release sync.Once; defer release.Do(func() { close(first.release) }); result := make(chan error, 1); admissions, launches := 0, 0
+	go func() { result <- p.enrollFactoryPinWithAdmission(c, first, scope.Context(), func(s *periodiccaller.OwnedScope, fn func()) bool { launches++; return s.Go(fn) }, func(s *periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error) { admissions++; return s.AdmitCallback() }) }(); <-first.entered; if !p.mu.TryLock() { t.Error("enrollment held prepared mutex during world query") } else { p.mu.Unlock() }; if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; release.Do(func() { close(first.release) }); if err := <-result; err == nil || first.held.Load() || admissions != 0 || launches != 0 { t.Fatalf("stale enrollment advanced: %v", err) }; <-c.cleanupDone
+}
+
+func TestKobjectFactoryLaunchWorldDeadlineUnlocked(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := &kwFactoryWorldProbe{Context: context.Background(), owner: p, at: time.Now().Add(time.Second), hasDeadline: true, entered: make(chan struct{}), release: make(chan struct{})}; c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }; first.armed.Store(true); var release sync.Once; defer release.Do(func() { close(first.release) }); result := make(chan error, 1); launches := 0
+		go func() { result <- p.launchFactoryAcquisition(c, func(s *periodiccaller.OwnedScope, fn func()) bool { launches++; return s.Go(fn) }, func() error { t.Error("expired acquisition ran"); return nil }) }(); <-first.entered; if !p.mu.TryLock() { t.Error("launch held prepared mutex during world query") } else { p.mu.Unlock() }; <-time.After(time.Second); release.Do(func() { close(first.release) }); if err := <-result; !errors.Is(err, context.DeadlineExceeded) || first.held.Load() || launches != 0 { t.Fatalf("expired launch advanced: %v", err) }; <-c.cleanupDone; _ = scope.Stop(context.Background()); obs, _ := scope.Observation(); if obs.Counts.Admitted != 1 { t.Fatalf("expired launch admitted another operation: %d", obs.Counts.Admitted) }
+	})
+}
+
+type kwStopQueryGate struct { context.Context; at time.Time; entered, release chan struct{}; once sync.Once }
+func (c *kwStopQueryGate) Deadline() (time.Time, bool) { return c.at, true }
+func (c *kwStopQueryGate) Err() error { c.once.Do(func() { close(c.entered) }); <-c.release; return nil }
+
+func TestKobjectFactoryFinishDeadlineExpiresDuringQuery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); scope.Fail(syscall.EACCES)
+		first := &kwStopQueryGate{Context: context.Background(), at: time.Now().Add(time.Second), entered: make(chan struct{}), release: make(chan struct{})}; var once sync.Once; defer once.Do(func() { close(first.release) }); result := make(chan error, 1); go func() { _, err := p.Finish(first); result <- err }(); <-first.entered; <-time.After(time.Second); once.Do(func() { close(first.release) }); err := <-result
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.EACCES) { t.Fatalf("lost freeze-time clock or Scope error: %v", err) }; _, again := p.Finish(context.Background()); if again != err { t.Fatal("fresh caller renewed negative Stop") }
+	})
+}
+
+func TestKobjectFactoryStartSilentWorkerDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent := kwFinishSilentDeadline{Context: context.Background(), at: time.Now().Add(time.Second)}; scope := periodiccaller.NewOwnedScope(parent, nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) }); var log []string; raw := kwTestCalls(&log); socketCall := raw.socket; raw.socket = func(a, b, d int) (int, error) { close(entered); <-release; return socketCall(a, b, d) }; calls := &kwFactoryLowLevelCalls{socket: raw}; result := make(chan error, 1)
+		go func() { result <- p.startWithCalls(context.Background(), scope.Context(), &kwStartTestMonitor{}, calls, kwFactoryLaunch) }(); <-entered; err := <-result; var carrier *kobjectFactoryError; if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatalf("silent worker deadline lost: %v", err) }; p.mu.Lock(); c := p.startClaim; retained := c.pinPhase == kwFactoryPinCleanupOwned && c.acquisition == kwAcquisitionRunning; p.mu.Unlock(); if !retained { t.Fatal("worker deadline released a pending callback") }; once.Do(func() { close(release) }); <-c.acquisitionDone; <-c.cleanupDone
+	})
+}
+
+func TestKobjectFactoryStartStoredComponentError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancel := context.WithCancel(context.Background()); defer cancel(); scope := periodiccaller.NewOwnedScope(parent, nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; c, err := p.reserveFactoryStart(first, scope.Context(), monitor); if err != nil { t.Fatal(err) }
+		socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(first); err != nil { t.Fatal(err) }; <-w.startJobDone
+		p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; c.startEntryClaimed = true; c.startSetupDone = make(chan struct{}); close(c.startSetupDone); p.mu.Unlock(); defer func() { _ = native.Retire(); _ = socket.Retire() }(); cancel(); synctest.Wait(); w.mu.Lock(); stored := w.startErr; activated := w.activated; w.mu.Unlock(); if !activated || !errors.Is(stored, context.Canceled) { t.Fatalf("watcher did not record actual error: %v", stored) }
+		var carrier *kobjectFactoryError; err = p.startWithCalls(context.Background(), scope.Context(), monitor, &kwFactoryLowLevelCalls{}, kwFactoryLaunch); if !errors.Is(err, context.Canceled) || !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatalf("lost actual component error or owner: %v", err) }
+	})
+}
+
+func TestKobjectFactoryStartSilentExpired(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); var log []string; calls := &kwFactoryLowLevelCalls{socket: kwTestCalls(&log)}; first := kwFinishSilentDeadline{Context: context.Background(), at: time.Now().Add(-time.Second)}
+	if err := p.startWithCalls(first, scope.Context(), &kwStartTestMonitor{}, calls, kwFactoryLaunch); !errors.Is(err, context.DeadlineExceeded) || len(log) != 0 { t.Fatalf("expired start touched effects: %v %v", err, log) }
+}
+
+func TestKobjectFactoryStartGoRejected(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); var log []string; calls := &kwFactoryLowLevelCalls{socket: kwTestCalls(&log)}; launch := func(s *periodiccaller.OwnedScope, job func()) bool { s.Fail(syscall.EACCES); return s.Go(job) }
+	if err := p.startWithCalls(context.Background(), scope.Context(), &kwStartTestMonitor{}, calls, launch); !errors.Is(err, syscall.EACCES) { t.Fatalf("lost Go rejection: %v", err) }; c := p.startClaim; <-c.cleanupDone; if len(log) != 0 || c.launchPhase != kwLaunchRejected || c.acquisition != kwAcquisitionNotStarted { t.Fatal("rejected Go performed effects") }; select { case <-c.acquisitionDone: t.Fatal("unlaunched acquisition reported return"); default: }; if strings.Contains(scope.Failure().Error(), "duplicate terminal") { t.Fatal("acquisition aborted twice") }
+}
+
+func TestKobjectFactoryStartHeldSocketDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) }); var log []string; raw := kwTestCalls(&log); socketCall := raw.socket; raw.socket = func(a, b, d int) (int, error) { close(entered); <-release; return socketCall(a, b, d) }; calls := &kwFactoryLowLevelCalls{socket: raw}; first := kwFinishSilentDeadline{Context: context.Background(), at: time.Now().Add(time.Second)}; result := make(chan error, 1)
+		go func() { result <- p.startWithCalls(first, scope.Context(), &kwStartTestMonitor{}, calls, kwFactoryLaunch) }(); <-entered; if err := <-result; !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("deadline did not bound start: %v", err) }
+		p.mu.Lock(); c := p.startClaim; retained := c.pinPhase == kwFactoryPinCleanupOwned && c.acquisition == kwAcquisitionRunning; p.mu.Unlock(); if !retained { t.Fatal("pending socket lost owner pin") }; once.Do(func() { close(release) }); <-c.acquisitionDone; <-c.cleanupDone
+		if len(log) != 2 || log[0] != "socket" || log[1] != "close" { t.Fatalf("late socket advanced or leaked: %v", log) }
+	})
+}
+
+func TestKobjectFactoryStartOriginalContextsAndLateBTF(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first, cancel := context.WithCancel(context.Background()); defer cancel(); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) }); var log []string; btfCalls := 0
+		calls := &kwFactoryLowLevelCalls{socket: kwTestCalls(&log), kernelBTF: func() (*btf.Spec, error) { btfCalls++; close(entered); <-release; return nil, nil }}; monitor := &kwStartTestMonitor{}; one, two := make(chan error, 1), make(chan error, 1)
+		go func() { one <- p.startWithCalls(first, scope.Context(), monitor, calls, kwFactoryLaunch) }(); <-entered; go func() { two <- p.startWithCalls(context.Background(), scope.Context(), monitor, calls, kwFactoryLaunch) }(); synctest.Wait()
+		p.mu.Lock(); c, reader := p.startClaim, p.reader; p.mu.Unlock(); if reader == nil { t.Fatal("reader not adopted") }; reader.mu.Lock(); original, worker := reader.startup, reader.worker; reader.mu.Unlock(); if original != first || worker != scope.Context() || btfCalls != 1 { t.Fatal("factory lost original contexts or duplicated effect") }
+		cancel(); var carrier *kobjectFactoryError; if err := <-one; !errors.Is(err, context.Canceled) || !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatalf("first waiter: %v", err) }; if err := <-two; !errors.Is(err, context.Canceled) { t.Fatalf("repeat waiter: %v", err) }; p.mu.Lock(); retained := c.pinPhase == kwFactoryPinCleanupOwned && p.reader == reader && p.objects == nil; p.mu.Unlock(); if !retained { t.Fatal("pending BTF lost owner or advanced") }
+		once.Do(func() { close(release) }); <-c.acquisitionDone; <-c.cleanupDone; p.mu.Lock(); objects := p.objects; p.mu.Unlock(); if objects != nil || btfCalls != 1 { t.Fatal("late BTF advanced acquisition") }
+	})
+}
+
+func TestKobjectFactoryStartHandoffStopGap(t *testing.T) {
+	w, _, _, _, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first, cancel := context.WithCancel(context.Background()); defer cancel(); monitor := &kwStartTestMonitor{}; c, err := p.reserveFactoryStart(first, scope.Context(), monitor); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }
+	p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; c.startEntryClaimed = true; c.startSetupDone = make(chan struct{}); close(c.startSetupDone); p.mu.Unlock(); cancel(); calls := &kwFactoryLowLevelCalls{}
+	if err := p.startWithCalls(context.Background(), scope.Context(), monitor, calls, kwFactoryLaunch); !errors.Is(err, context.Canceled) { t.Fatalf("handoff did not reject original cancellation: %v", err) }; <-c.cleanupDone; w.mu.Lock(); rejected := w.decided && !w.activated; w.mu.Unlock(); if !rejected { t.Fatal("handoff startup decision not consumed") }
+}
+
+func TestKobjectFactoryStartCommittedDecisionWinsCancellation(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first, cancel := context.WithCancel(context.Background()); defer cancel(); monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; c, err := p.reserveFactoryStart(first, scope.Context(), monitor); if err != nil { t.Fatal(err) }
+	socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(first); err != nil { t.Fatal(err) }; <-w.startJobDone
+	p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; c.startEntryClaimed = true; c.startSetupDone = make(chan struct{}); close(c.startSetupDone); p.mu.Unlock(); defer func() { _ = native.Retire(); _ = socket.Retire() }(); cancel()
+	if err := p.startWithCalls(context.Background(), scope.Context(), monitor, &kwFactoryLowLevelCalls{}, kwFactoryLaunch); err != nil { t.Fatalf("committed startup was reclassified: %v", err) }
+}
+
+func TestKobjectFactoryFinishCachesSilentDeadlineAndScopeFailure(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); scope.Fail(syscall.EACCES); first := kwFinishSilentDeadline{Context: context.Background(), at: time.Now().Add(-time.Second)}
+	_, err := p.Finish(first); if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.EACCES) { t.Fatalf("lost first Stop or scope failure: %v", err) }; _, again := p.Finish(context.Background()); if again != err || !errors.Is(again, context.DeadlineExceeded) || !errors.Is(again, syscall.EACCES) { t.Fatalf("negative Stop changed: %v", again) }
+}
+
+func TestKobjectFactoryMalformedLifecycleRetained(t *testing.T) {
+	for _, kind := range []string{"stop", "phase", "scope", "spec"} { t.Run(kind, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background())
+		switch kind { case "stop": done := make(chan struct{}); close(done); p.startClaim = &kwFactoryStartClaim{phase: kwFactoryClaimPending, decision: make(chan struct{}), stopPhase: kwStopNegative, stopDone: done}; case "phase": p.phase = kwPreparationPhase(255); case "scope": p.scope = nil; case "spec": p.spec = nil }
+		var carrier *kobjectFactoryError; if _, err := p.Finish(context.Background()); !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatalf("malformed Finish accepted: %v", err) }; if err := p.Retire(); !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatalf("malformed Retire accepted: %v", err) }
+	}) }
+}
+
+func TestKobjectFactoryEmptyRetire(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background())
+	if _, err := p.Finish(nil); err == nil || p.startClaim != nil { t.Fatal("nil Finish consumed preparation") }; if err := p.Retire(); err != nil { t.Fatal(err) }; if p.phase != kwFactoryRetired || !p.stopRequested { t.Fatal("empty factory not retired") }
+	if _, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); err == nil { t.Fatal("retired factory restarted") }
+}
+
+func TestKobjectFactoryFinishPendingRetainsOwner(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) })
+		if err := p.launchFactoryAcquisition(c, kwFactoryLaunch, func() error { close(entered); <-release; return nil }); err != nil { t.Fatal(err) }; <-entered
+		scope.Fail(syscall.EACCES); first, cancel := context.WithCancel(context.Background()); cancel(); _, firstErr := p.Finish(first); _, repeatErr := p.Finish(context.Background()); if !errors.Is(firstErr, context.Canceled) || repeatErr != firstErr || c.stopFirst != first { t.Fatal("first negative Finish renewed", firstErr, repeatErr) }
+		var carrier *kobjectFactoryError; if err := p.Retire(); !errors.As(err, &carrier) || carrier.cleanup != p || !errors.Is(err, syscall.EACCES) { t.Fatalf("pending owner or cause lost: %v", err) }
+		once.Do(func() { close(release) }); <-c.acquisitionDone; <-c.cleanupDone
+	})
+}
+
+func TestKobjectFactoryRetireUnmapErrorCarrier(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); objects, _, _ := kwColdEpochFixture(t); gate := objects.gate; attempts := 0; gate.mu.Lock(); unmap := gate.munmap; gate.munmap = func([]byte) error { attempts++; return syscall.EIO }; gate.mu.Unlock(); p.mu.Lock(); p.objects = objects; p.mu.Unlock()
+		defer func() { gate.mu.Lock(); gate.munmap = unmap; gate.mu.Unlock(); _ = p.requestFactoryCleanup(c); <-c.cleanupDone }()
+		_ = p.Retire(); synctest.Wait(); p.mu.Lock(); retained := c.pinPhase == kwFactoryPinCleanupOwned && errors.Is(c.cleanupErr, syscall.EIO); p.mu.Unlock(); if !retained || attempts != 1 { t.Fatal("failed unmap was not retained") }; var carrier *kobjectFactoryError; if err := p.Retire(); !errors.As(err, &carrier) || carrier.cleanup != p || !errors.Is(err, syscall.EIO) { t.Fatalf("unmap owner or error lost: %v", err) }
+	})
+}
+
+func TestKobjectFactoryConcurrentFinishFirstContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); c, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once
+		socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { close(entered); <-release; return errors.ErrUnsupported }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}; w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }
+		start := make(chan error, 1); go func() { start <- w.start(context.Background()) }(); <-entered; p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; p.mu.Unlock()
+		firstResult, secondResult := make(chan error, 1), make(chan error, 1); first := context.Background(); go func() { _, err := p.Finish(first); firstResult <- err }(); synctest.Wait()
+		defer func() { once.Do(func() { close(release) }); _ = <-start; _ = <-firstResult; _ = <-secondResult; _ = native.Retire(); _ = socket.Retire() }()
+		go func() { _, err := p.Finish(context.Background()); secondResult <- err }(); synctest.Wait(); p.mu.Lock(); captured, count := c.stopFirst, c.finishCalls; p.mu.Unlock(); w.mu.Lock(); claim := w.finishClaim; w.mu.Unlock(); if captured != first || count != 2 || claim == nil || claim.ctx != first { t.Fatal("concurrent Finish renewed first Stop") }
+	})
+}
+
+func TestKobjectFactoryFinishFirstContext(t *testing.T) {
+	w, _, _, _, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); firstStart := context.Background(); c, err := p.reserveFactoryStart(firstStart, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, firstStart, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }
+	p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; p.mu.Unlock(); first, cancel := context.WithCancel(context.Background()); cancel(); _, firstErr := p.Finish(first); _, repeatErr := p.Finish(context.Background()); w.mu.Lock(); claim := w.finishClaim; w.mu.Unlock(); if claim == nil || claim.ctx != first || c.stopFirst != first || !errors.Is(firstErr, context.Canceled) || !errors.Is(repeatErr, context.Canceled) { t.Fatal("component renewed first Stop", firstErr, repeatErr) }; _ = p.Retire(); <-c.cleanupDone
+}
+
+// Private committed-cache staging only; this does not issue an observation.
+func TestKobjectFactoryFinishCommittedCacheAfterRetire(t *testing.T) {
+	w, _, _, effects, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); effects.objects.closeError = syscall.EIO; p := kwFactoryClaimFixture(t, scope, context.Background()); start := context.Background(); c, err := p.reserveFactoryStart(start, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, start, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }
+	first := context.Background(); decision, done := make(chan struct{}), make(chan struct{}); close(decision); close(done); claim := &kwFinishClaim{phase: kwFinishCommitted, ctx: first, scope: scope, decision: decision, jobState: kwFinishJobReturned, jobDone: done}; w.mu.Lock(); w.finishClaim = claim; w.mu.Unlock(); p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; p.mu.Unlock()
+	before, err := p.Finish(first); if err != nil { t.Fatal(err) }; _ = p.Retire(); <-c.cleanupDone; if err := p.Retire(); !errors.Is(err, syscall.EIO) { t.Fatalf("lost cleanup diagnostic: %v", err) }; after, err := p.Finish(context.Background()); if err != nil || !reflect.DeepEqual(before, after) || claim.phase != kwFinishCommitted || claim.cause != nil { t.Fatalf("retirement rewrote committed cache: %v", err) }
+}
+
+func TestKobjectFactoryRootRetainsFailedUnmapUntilExplicitWake(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; returned := make(chan struct{}); launch := func(s *periodiccaller.OwnedScope, job func()) bool { return s.Go(func() { job(); close(returned) }) }; if err := p.enrollFactoryPin(c, first, scope.Context(), launch); err != nil { t.Fatal(err) }
+		leaseEntered, leaseRelease := make(chan struct{}), make(chan struct{}); var leaseOnce sync.Once; defer leaseOnce.Do(func() { close(leaseRelease) }); if !scope.Go(func() { close(leaseEntered); <-leaseRelease }) { t.Fatal("independent lease rejected") }; <-leaseEntered
+		objects, effects, _ := kwColdEpochFixture(t); gate := objects.gate; var allowed atomic.Bool; var attempts atomic.Int32; gate.mu.Lock(); unmap := gate.munmap; gate.munmap = func(data []byte) error { attempts.Add(1); if !allowed.Load() { return syscall.EIO }; return unmap(data) }; gate.mu.Unlock(); p.mu.Lock(); p.objects = objects; wake, cleanupDone, pinDone := c.cleanupWake, c.cleanupDone, c.pinDone; p.mu.Unlock()
+		defer func() { allowed.Store(true); scope.Fail(context.Canceled); select { case wake <- struct{}{}: default: }; <-returned }()
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); retained := c.pinPhase == kwFactoryPinCleanupOwned && p.objects == objects && errors.Is(c.cleanupErr, syscall.EIO); p.mu.Unlock(); if !retained || attempts.Load() != 1 { t.Fatal("failed unmap did not retain root") }; select { case <-pinDone: t.Fatal("retained pin terminalized"); default: }; select { case <-cleanupDone: t.Fatal("retained cleanup returned"); default: }; select { case <-returned: t.Fatal("root callback returned"); default: }
+		before := append([]string(nil), effects.objects.closed...); p, c = nil, nil; synctest.Wait(); if attempts.Load() != 1 { t.Fatal("closed request caused retry spin") }; allowed.Store(true); select { case wake <- struct{}{}: default: }; <-pinDone; <-cleanupDone; <-returned; if attempts.Load() != 2 { t.Fatal("explicit wake did not perform one retry") }; for _, old := range before { for _, later := range effects.objects.closed[len(before):] { if old == later { t.Fatalf("closed descriptor retried: %s", old) } } }; joined := make(chan struct{}); go func() { _ = scope.Stop(context.Background()); close(joined) }(); synctest.Wait(); select { case <-joined: t.Fatal("external join skipped independent lease"); default: }; leaseOnce.Do(func() { close(leaseRelease) }); <-joined
+	})
+}
+
+func TestKobjectFactoryRootWaitsBusyNativeOwner(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); objects, _, binding := kwColdEpochFixture(t); epoch, err := newKobjectNativeEpoch(context.Background(), scope.Context(), objects, binding); if err != nil { t.Fatal(err) }; socket, closes := kwRawCleanupSocket(t, nil); gate := objects.gate; entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; var calls atomic.Int32
+		gate.mu.Lock(); unmap := gate.munmap; gate.munmap = func(data []byte) error { calls.Add(1); close(entered); <-release; return unmap(data) }; gate.mu.Unlock(); nativeDone := make(chan error, 1); go func() { nativeDone <- epoch.Retire() }(); <-entered; p.mu.Lock(); p.epoch, p.transport = epoch, socket; p.mu.Unlock()
+		nativeReturned := false; defer func() { once.Do(func() { close(release) }); if !nativeReturned { _ = <-nativeDone }; _ = p.requestFactoryCleanup(c); <-c.cleanupDone }()
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); retained := c.pinPhase == kwFactoryPinCleanupOwned && p.epoch == epoch && p.transport == socket; p.mu.Unlock(); if !retained || *closes != 0 || calls.Load() != 1 { t.Fatal("busy native owner or socket released") }; select { case <-c.cleanupDone: t.Fatal("busy native cleanup returned"); default: }
+		once.Do(func() { close(release) }); nativeErr := <-nativeDone; nativeReturned = true; if nativeErr != nil { t.Fatal(nativeErr) }; if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; <-c.cleanupDone; if *closes != 1 || calls.Load() != 1 { t.Fatal("released native owner retried or socket not closed") }
+	})
+}
+
+func TestKobjectFactoryRootParksAmbiguousState(t *testing.T) {
+	for _, kind := range []string{"publication", "pin"} { t.Run(kind, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); p.mu.Lock(); if kind == "publication" { broken := make(chan struct{}); close(broken); c.launchPhase, c.launchPublication, c.acquisition, c.acquisitionDone = kwLaunchPending, broken, kwAcquisitionRunning, make(chan struct{}) } else { c.pinPhase = kwFactoryPinPhase(255) }; p.mu.Unlock()
+		restore := func() { p.mu.Lock(); if kind == "publication" { c.launchPhase, c.launchPublication, c.acquisition, c.acquisitionDone = kwLaunchAbsent, nil, kwAcquisitionNotStarted, nil } else { c.pinPhase = kwFactoryPinCleanupOwned }; p.mu.Unlock(); _ = p.requestFactoryCleanup(c) }; defer func() { restore(); <-c.cleanupDone }()
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); diagnostic := c.cleanupErr; p.mu.Unlock(); if diagnostic == nil { t.Fatal("ambiguous owner not recorded") }; select { case <-c.cleanupDone: t.Fatal("ambiguous cleanup returned"); default: }; select { case <-c.pinDone: t.Fatal("ambiguous pin terminalized"); default: }; synctest.Wait(); p.mu.Lock(); unchanged := c.cleanupErr == diagnostic; p.mu.Unlock(); if !unchanged { t.Fatal("closed stop request caused retry spin") }
+	}) }) }
+}
+
+func TestKobjectFactoryAlreadyRetiredEpochError(t *testing.T) {
+	objects, effects, binding := kwColdEpochFixture(t); effects.objects.closeError = syscall.EIO
+	epoch, err := newKobjectNativeEpoch(context.Background(), context.Background(), objects, binding); if err != nil { t.Fatal(err) }; if err := epoch.Retire(); !errors.Is(err, syscall.EIO) { t.Fatalf("missing first close error: %v", err) }
+	socket, closes := kwRawCleanupSocket(t, nil); p := &preparedKobjectWitness{epoch: epoch, transport: socket}; state, err := p.retireRawFactoryOwners()
+	if state != kwPhysicalReleased || !errors.Is(err, syscall.EIO) || *closes != 1 || p.epoch != nil || p.transport != nil { t.Fatalf("lost cached epoch error: %v %v", state, err) }
+	closed := len(effects.objects.closed); if err := epoch.Retire(); !errors.Is(err, syscall.EIO) || len(effects.objects.closed) != closed || *closes != 1 { t.Fatalf("cached retirement retried: %v", err) }
+}
+
+func kwFactoryLaunchFixture(t *testing.T) (*preparedKobjectWitness, *kwFactoryStartClaim, *periodiccaller.OwnedScope) {
+	t.Helper(); scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }; return p, c, scope
+}
+
+func TestKobjectFactoryCleanupWinsLaunch(t *testing.T) {
+	p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; <-c.cleanupDone
+	called := false; if err := p.launchFactoryAcquisition(c, kwFactoryLaunch, func() error { called = true; return nil }); err == nil || called { t.Fatal("launch after cleanup accepted") }
+}
+
+func TestKobjectFactoryLaunchRejectedPublication(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) })
+		result := make(chan error, 1); go func() { result <- p.launchFactoryAcquisition(c, func(s *periodiccaller.OwnedScope, fn func()) bool { close(entered); <-release; s.Fail(syscall.EACCES); return s.Go(fn) }, func() error { t.Error("rejected job ran"); return nil }) }(); <-entered
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); phase := c.pinPhase; p.mu.Unlock(); if phase != kwFactoryPinCleanupOwned { t.Fatal("pending launch released pin") }; select { case <-c.cleanupDone: t.Fatal("pending launch reported cleanup"); default: }
+		once.Do(func() { close(release) }); if err := <-result; !errors.Is(err, syscall.EACCES) { t.Fatalf("lost rejection cause: %v", err) }; <-c.cleanupDone
+		p.mu.Lock(); phase, launchPhase, acquisition, done := c.pinPhase, c.launchPhase, c.acquisition, c.acquisitionDone; p.mu.Unlock(); if phase != kwFactoryPinTerminalized || launchPhase != kwLaunchRejected || acquisition != kwAcquisitionNotStarted { t.Fatal("bad rejected classification") }; select { case <-done: t.Fatal("unlaunched job reported return"); default: }; if strings.Contains(scope.Failure().Error(), "duplicate terminal") { t.Fatal("duplicate abort") }
+	})
+}
+
+func TestKobjectFactoryLaunchWaitsActualReturn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, c, scope := kwFactoryLaunchFixture(t); defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); var once sync.Once; defer once.Do(func() { close(release) })
+		launch := func(s *periodiccaller.OwnedScope, fn func()) bool { started := make(chan struct{}); ok := s.Go(func() { close(started); fn() }); if !ok { return false }; <-started; synctest.Wait(); p.mu.Lock(); phase := c.launchPhase; p.mu.Unlock(); if phase != kwLaunchPending { t.Error("job observed unpublished launch") }; return true }
+		if err := p.launchFactoryAcquisition(c, launch, func() error { close(entered); <-release; return nil }); err != nil { t.Fatal(err) }; <-entered
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); phase := c.pinPhase; p.mu.Unlock(); if phase != kwFactoryPinCleanupOwned { t.Fatal("held job lost pin") }; select { case <-c.cleanupDone: t.Fatal("cleanup preceded job return"); default: }
+		once.Do(func() { close(release) }); <-c.acquisitionDone; <-c.cleanupDone; p.mu.Lock(); phase, acquisition := c.pinPhase, c.acquisition; p.mu.Unlock(); if phase != kwFactoryPinTerminalized || acquisition != kwAcquisitionReturned { t.Fatal("actual return not published") }
+	})
+}
+
+func TestKobjectFactoryHandoffStopRejectsStartup(t *testing.T) {
+	w, _, _, _, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }
+	p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; p.mu.Unlock(); if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; w.mu.Lock(); rejected := w.decided && !w.activated; w.mu.Unlock(); if !rejected { t.Fatal("component startup decision not rejected") }; <-c.cleanupDone
+}
+
+func TestKobjectFactoryHandoffStopPreservesCommittedDecision(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); c, err := p.reserveFactoryStart(context.Background(), scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; p.mu.Lock(); c.request, c.cleanupWake = make(chan struct{}), make(chan struct{}, 1); p.mu.Unlock()
+	socket := &kwStartTestSocket{binding: kobjectSocketBinding{cookie: 1, portID: 2, generation: kwTestScopeGeneration(t, scope)}}; native := &kwStartTestNative{open: func(kobjectSocketBinding) error { return nil }}; monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { return nil }}
+	w, err := newKobjectWitness(scope, native, socket, monitor); if err != nil { t.Fatal(err) }; if err := w.start(context.Background()); err != nil { t.Fatal(err) }; <-w.startJobDone
+	p.mu.Lock(); p.component = w; p.phase = kwFactoryHandedOff; p.mu.Unlock()
+	defer func() { _ = native.Retire(); _ = socket.Retire() }()
+	if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; w.mu.Lock(); committed, startErr := w.decided && w.activated, w.startErr; w.mu.Unlock(); if !committed || startErr != nil { t.Fatalf("committed component decision changed: %v", startErr) }
+}
+
+func TestKobjectFactoryEnrollmentMixedOwnersRetained(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w, _, _, _, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); if state, err := w.retirePhysical(); state != kwPhysicalReleased || err != nil { t.Fatalf("component did not actually retire: %v %v", state, err) }
+		p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err != nil { t.Fatal(err) }; raw := &kwNativeObjects{gateOwnership: kwOwnerBeforeMapping}; p.mu.Lock(); p.component, p.objects = w, raw; p.mu.Unlock()
+		defer func() { _ = raw.retire(); if kwRawNativeReleased(raw) { p.mu.Lock(); if p.objects == raw { p.objects = nil }; p.mu.Unlock() }; _ = p.requestFactoryCleanup(c); <-c.cleanupDone }()
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; synctest.Wait(); p.mu.Lock(); retained := c.pinPhase == kwFactoryPinCleanupOwned && p.objects == raw && errors.Is(c.cleanupErr, errors.ErrUnsupported); p.mu.Unlock(); if !retained { t.Fatal("mixed ownership released pin") }; select { case <-c.cleanupDone: t.Fatal("mixed ownership returned cleanup"); default: }
+	})
+}
+
+func TestKobjectFactoryEnrollmentPublicationAndEmptyCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+		p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+		launch := func(s *periodiccaller.OwnedScope, job func()) bool { entered := make(chan struct{}); ok := s.Go(func() { close(entered); job() }); if !ok { return false }; <-entered; synctest.Wait(); p.mu.Lock(); if c.pinPhase != kwFactoryPinCallerOwned { t.Error("job accessed pin before publication") }; select { case <-c.cleanupDone: t.Error("job returned before publication"); default: }; p.mu.Unlock(); return true }
+		if err := p.enrollFactoryPin(c, first, scope.Context(), launch); err != nil { t.Fatal(err) }
+		pin, done := c.pin, c.cleanupDone; if err := p.enrollFactoryPin(c, first, scope.Context(), kwFactoryLaunch); err == nil || c.pin != pin || c.cleanupDone != done { t.Fatal("repeat enrollment changed ownership") }
+		if err := p.requestFactoryCleanup(c); err != nil { t.Fatal(err) }; <-done
+		p.mu.Lock(); phase, terminalErr, cleanupErr := c.pinPhase, c.pinResult, c.cleanupErr; p.mu.Unlock(); if phase != kwFactoryPinTerminalized || terminalErr != nil || cleanupErr != nil { t.Fatalf("empty cleanup did not release pin: %v %v", terminalErr, cleanupErr) }
+		select { case <-c.pinDone: default: t.Fatal("terminal not published") }
+	})
+}
+
+func TestKobjectFactoryEnrollmentLaunchRejection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background())
+		p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); c, err := p.reserveFactoryStart(first, scope.Context(), &kwStartTestMonitor{}); if err != nil { t.Fatal(err) }
+		launch := func(s *periodiccaller.OwnedScope, job func()) bool { s.Fail(syscall.EACCES); return kwFactoryLaunch(s, job) }
+		if err := p.enrollFactoryPin(c, first, scope.Context(), launch); !errors.Is(err, syscall.EACCES) { t.Fatalf("lost scope failure: %v", err) }
+		if c.enrollment != kwEnrollmentFailed || c.enrollmentLaunch != kwEnrollmentLaunchRejected || c.pinPhase != kwFactoryPinTerminalized || c.pinTerminalErr != nil { t.Fatal("rejected launch did not abort") }; <-c.cleanupDone; <-c.pinDone
+		_ = scope.Stop(context.Background()); if !errors.Is(scope.Failure(), syscall.EACCES) || strings.Contains(scope.Failure().Error(), "duplicate terminal") { t.Fatalf("closer terminalized pin: %v", scope.Failure()) }
+	})
+}
+
+func TestKobjectFactoryStartClaimFirstContext(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); constructor, cancelConstructor := context.WithCancel(context.Background()); p := kwFactoryClaimFixture(t, scope, constructor); cancelConstructor(); monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("reservation called monitor"); return nil }}; if c, err := p.reserveFactoryStart(nil, scope.Context(), monitor); err == nil || c != nil || p.startClaim != nil { t.Fatal("nil caller consumed claim") }; if c, err := p.reserveFactoryStart(context.Background(), context.Background(), monitor); err == nil || c != nil || p.startClaim != nil { t.Fatal("wrong worker consumed claim") }
+	deadline := time.Now().Add(time.Hour); first, cancel := context.WithDeadline(context.Background(), deadline); defer cancel(); claim, err := p.reserveFactoryStart(first, scope.Context(), monitor); if err != nil || claim.first != first || claim.worker != scope.Context() || claim.monitor != monitor || !claim.deadline.Equal(deadline) || claim.binding.Generation != kwTestScopeGeneration(t, scope) || p.phase != kwFactoryAcquiring { t.Fatal("lost original factory claim", err) }; again, err := p.reserveFactoryStart(context.Background(), scope.Context(), monitor); if err != nil || again != claim || !again.deadline.Equal(deadline) { t.Fatal("renewed first claim", err) }
+}
+
+func TestKobjectFactoryStartClaimExpiryAndFailure(t *testing.T) {
+	for _, kind := range []string{"caller", "scope", "failure", "stop"} { t.Run(kind, func(t *testing.T) { parent := &kwFactoryDynamicDeadline{Context: context.Background(), at: time.Now().Add(time.Hour)}; scope := periodiccaller.NewOwnedScope(parent, nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); p := kwFactoryClaimFixture(t, scope, context.Background()); monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("reservation called monitor"); return nil }}; var first context.Context = context.Background(); var cause error; switch kind { case "caller": first = kwFinishSilentDeadline{context.Background(), time.Unix(1, 0)}; cause = context.DeadlineExceeded; case "scope": parent.at = time.Unix(1, 0); cause = context.DeadlineExceeded; case "failure": p.binding.Generation++; scope.Fail(syscall.EACCES); cause = syscall.EACCES; case "stop": p.stopRequested = true; cause = errors.ErrUnsupported }; claim, err := p.reserveFactoryStart(first, scope.Context(), monitor); if claim == nil || claim.phase != kwFactoryClaimRejected || !errors.Is(err, cause) || p.phase != kwFactoryRejected { t.Fatal("accepted ineligible factory claim", err) }; select { case <-claim.decision: default: t.Fatal("rejection not signaled") }; again, err := p.reserveFactoryStart(context.Background(), scope.Context(), monitor); if again != claim || !errors.Is(err, cause) { t.Fatal("renewed rejected claim", err) } }) }
+}
+
+func TestKobjectFactoryClaimRejectionInvariants(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; defer scope.Stop(context.Background()); monitor := &kwStartTestMonitor{start: func(context.Context, kallsyms.OwnedKobjectReceiver) error { t.Fatal("unexpected monitor"); return nil }}
+	for _, kind := range []string{"binding", "unknown", "unsignaled", "late"} { t.Run(kind, func(t *testing.T) { p := kwFactoryClaimFixture(t, scope, context.Background()); first, cancel := context.WithCancel(context.Background()); defer cancel(); c, err := p.reserveFactoryStart(first, scope.Context(), monitor); if err != nil { t.Fatal(err) }; switch kind { case "binding": p.binding.Generation++; c.binding = p.binding; case "unknown": c.phase = kwFactoryClaimPhase(255); case "unsignaled": c.phase = kwFactoryClaimRejected; c.cause = syscall.EACCES; case "late": p.stopRequested = true }; again, err := p.reserveFactoryStart(context.Background(), scope.Context(), monitor); if again != c || err == nil || c.phase != kwFactoryClaimRejected { t.Fatal("claim not rejected", kind, err) }; select { case <-c.decision: default: t.Fatal("rejection was not signaled") }; if kind == "late" { cancel(); _, err = p.reserveFactoryStart(context.Background(), scope.Context(), monitor); if !errors.Is(err, context.Canceled) || !errors.Is(err, errors.ErrUnsupported) { t.Fatal("lost rejection causes", err) } } }) }
+}
+
+// Private cache staging only; this does not issue a qualified observation.
+func TestKobjectWitnessPhysicalCleanupDoesNotRewriteCommittedCache(t *testing.T) {
+	w, _, _, effects, _, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); effects.objects.closeError = syscall.EIO; decision, jobDone := make(chan struct{}), make(chan struct{}); close(decision); close(jobDone); claim := &kwFinishClaim{phase: kwFinishCommitted, ctx: context.Background(), scope: scope, decision: decision, jobState: kwFinishJobReturned, jobDone: jobDone}; w.mu.Lock(); w.finishClaim = claim; w.mu.Unlock(); state, err := w.retirePhysical(); if state != kwPhysicalReleased || !errors.Is(err, syscall.EIO) || claim.phase != kwFinishCommitted || claim.cause != nil || !errors.Is(claim.diagnostics, syscall.EIO) { t.Fatal("cleanup rewrote committed cache", state, err) }
+}
+
+func TestKobjectWitnessPhysicalRetireReaderBorrowers(t *testing.T) {
+	for _, stage := range []string{"receive", "cut", "ack"} { synctest.Test(t, func(t *testing.T) {
+		w, _, _, effects, reader, _, scope := kwPhysicalRetireFixture(t); defer scope.Stop(context.Background()); entered, release := make(chan struct{}), make(chan struct{}); effectDone, effectReturned := make(chan error, 1), make(chan struct{}); var reads atomic.Int32
+		reader.transport.mu.Lock(); if stage == "receive" { reader.transport.recvmsg = func(int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error) { reads.Add(1); close(entered); <-release; return -1, 0, 0, nil, unix.EAGAIN } } else if stage == "cut" { original := reader.transport.setsockoptInt; reader.transport.setsockoptInt = func(fd, level, opt, value int) error { if level == unix.SOL_NETLINK && opt == unix.NETLINK_DROP_MEMBERSHIP { close(entered); <-release }; return original(fd, level, opt, value) } } else { payload := []byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); creds := unix.UnixCredentials(&unix.Ucred{}); reader.transport.recvmsg = func(_ int, raw, oob []byte, _ int) (int, int, int, unix.Sockaddr, error) { reads.Add(1); copy(raw, payload); copy(oob, creds); return len(payload), len(creds), 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 1}, nil } }; reader.transport.mu.Unlock(); if err := reader.Join(); err != nil { t.Fatal(err) }
+		if stage == "ack" { if _, err := reader.Receive(); err != nil { t.Fatal(err) }; close(entered); close(effectReturned) } else { go func() { defer close(effectReturned); if stage == "receive" { _, err := reader.Receive(); effectDone <- err } else { effectDone <- reader.Cut(context.Background()) } }() }; <-entered; done, returned := make(chan kwPhysicalRetirement, 1), make(chan struct{}); go func() { defer close(returned); state, _ := w.retirePhysical(); done <- state }(); released := false; defer func() { if !released { if stage == "ack" { _ = reader.Acknowledge(nil) } else { close(release) } }; <-effectReturned; <-returned }(); synctest.Wait(); select { case <-done: t.Fatal("retired while reader borrow pending", stage); default: }; if len(effects.objects.closed) != 0 || reader.transport.closed { t.Fatal("closed physical owner early", stage) }; if stage == "ack" { if err := reader.Acknowledge(nil); err != nil { t.Fatal(err) } } else { close(release); <-effectDone }; released = true; if state := <-done; state != kwPhysicalReleased { t.Fatal("cold graph retained", stage, state) }; if _, err := reader.Receive(); err == nil || reads.Load() > 1 { t.Fatal("reader reentered after bar", stage, err) }
+	}) }
+}
+
+type kwBoundedSequenceNative struct {
+	binding kobjectSocketBinding
+	mutate func(*kobjectNativeReadout)
+}
+
+func (n *kwBoundedSequenceNative) Open(kobjectSocketBinding) error { return nil }
+func (n *kwBoundedSequenceNative) CloseAdmission() error { return nil }
+func (n *kwBoundedSequenceNative) Settle(context.Context) error { return nil }
+func (n *kwBoundedSequenceNative) Fence(context.Context) error { return nil }
+func (n *kwBoundedSequenceNative) Retire() error { return nil }
+func (n *kwBoundedSequenceNative) Readout() (kobjectNativeReadout, error) {
+	var r kobjectNativeReadout
+	r.binding = n.binding
+	r.barrier = kwReturnSucceeded
+	r.stages[kwEnv] = kwStageFacts{attempted: 7, succeeded: 7}
+	r.recipient = kwRecipientFacts{admitted: 7, queued: 7}
+	r.rootStarted, r.rootReturned = 7, 7
+	r.classicEntries[kwEnv] = 7
+	for h := kwHook(0); h < kwHookCount; h++ {
+		for d := kwDirection(0); d < kwDirectionCount; d++ {
+			g := &r.guards[h][d]
+			g.availability, g.lifetimeBound, g.recursionWidth = kwGuardAvailable, true, 64
+			g.program = kwProgramInfo{programType: kwProgramKprobe, id: 1, returnedLength: 216}
+			if h <= kwHookRelay {
+				g.missWidth = 64
+				if d == kwExit {
+					g.missWidth = 32
+					g.missPolicy = kwMissPolicyEntryBoundedSigned32
+				}
+				g.link = kwLinkInfo{linkType: kwLinkPerfEvent, id: 1, programID: 1, perfType: kwPerfKprobe + uint32(d), returnedLength: 56, address: 1}
+			} else {
+				g.program.programType = kwProgramTracing
+				g.tracingAttachmentID, g.tracingAttachmentType = 1, 1
+			}
+		}
+	}
+	if n.mutate != nil { n.mutate(&r) }
+	return r, nil
+}
+
+type kwBoundedSequenceSocket struct {
+	binding kobjectSocketBinding
+}
+
+func (s *kwBoundedSequenceSocket) Binding() (kobjectSocketBinding, error) { return s.binding, nil }
+func (s *kwBoundedSequenceSocket) Join() error { return nil }
+func (s *kwBoundedSequenceSocket) Cut(context.Context) error { return nil }
+func (s *kwBoundedSequenceSocket) Receive() (*kobject.Event, error) { return nil, errors.ErrUnsupported }
+func (s *kwBoundedSequenceSocket) Acknowledge(error) error { return nil }
+func (s *kwBoundedSequenceSocket) DrainTo(context.Context, uint64) error { return nil }
+func (s *kwBoundedSequenceSocket) Retire() error { return nil }
+func (s *kwBoundedSequenceSocket) readerFacts() (kwReaderFacts, error) { return kwReaderFacts{consumed: 7, dispatched: 7}, nil }
+
+// Model-only check: finish-sequence + validateKobjectReadout enforce bounded32 return-miss rules.
+func TestKobjectWitnessFinishSequenceBoundedReturnMissModel(t *testing.T) {
+	run := func(mutate func(*kobjectNativeReadout)) (kobjectWitnessReadout, error) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+		if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }
+		defer scope.Stop(context.Background())
+		scopeBinding, err := scope.AuxiliaryBinding()
+		if err != nil { t.Fatal(err) }
+		b := kobjectSocketBinding{cookie: 1, portID: 2, generation: scopeBinding.Generation}
+		m := &kwSequenceModel{}
+		w, err := newKobjectWitness(scope, &kwBoundedSequenceNative{binding: b, mutate: mutate}, &kwBoundedSequenceSocket{binding: b}, &kwSequenceMonitor{m})
+		if err != nil { t.Fatal(err) }
+		if err := w.start(context.Background()); err != nil { t.Fatal(err) }
+		<-w.startJobDone
+		claim, err := w.reserveFinish(context.Background())
+		if err != nil { t.Fatal(err) }
+		return w.runFinishSequence(claim)
+	}
+	r, err := run(nil)
+	if err != nil { t.Fatalf("valid bounded32 finish sequence model rejected: %v", err) }
+	if r.native.guards[kwHookEnv][kwExit].missPolicy != kwMissPolicyEntryBoundedSigned32 { t.Fatal("missing bounded policy") }
+	for _, tc := range []struct {
+		name string
+		mutate func(*kobjectNativeReadout)
+	}{
+		{"entry-bound-2p31", func(r *kobjectNativeReadout) { r.classicEntries[kwEnv] = 1 << 31 }},
+		{"entry-below-attempted", func(r *kobjectNativeReadout) { r.classicEntries[kwEnv] = 6 }},
+		{"entry-unqualified-lifetime", func(r *kobjectNativeReadout) { r.guards[kwHookEnv][kwEnter].lifetimeBound = false }},
+		{"exit-width-0", func(r *kobjectNativeReadout) { r.guards[kwHookEnv][kwExit].missWidth = 0 }},
+		{"changed-native-binding", func(r *kobjectNativeReadout) { r.binding.generation++ }},
+		{"pending-barrier", func(r *kobjectNativeReadout) { r.barrier = kwReturnPending }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := run(tc.mutate); err == nil { t.Fatalf("finish sequence accepted %s", tc.name) }
+		})
+	}
+}

@@ -59,11 +59,14 @@ func TestObservedReaderPendingReadoutReturn(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		out.WriteString("package capture\nimport (\n")
-		for _, path := range imports {
-			fmt.Fprintf(&out, "%q\n", path)
+		out.WriteString("package capture\n")
+		if len(imports) > 0 {
+			out.WriteString("import (\n")
+			for _, path := range imports {
+				fmt.Fprintf(&out, "%q\n", path)
+			}
+			out.WriteString(")\n")
 		}
-		out.WriteString(")\n")
 		for _, decl := range file.Decls {
 			if g, ok := decl.(*ast.GenDecl); ok && g.Tok == token.IMPORT {
 				continue
@@ -89,6 +92,15 @@ func TestObservedReaderPendingReadoutReturn(t *testing.T) {
 		return !ok || f.Name.Name != "AttachObserved"
 	})
 	project("owner_projection_test.go", filepath.Join(gadget, "pkg/operators/ebpf/event_finalization_owner.go"), "../../patches/gadget-additions/pkg/operators/ebpf/event_finalization_owner.go.txt", []string{"context", "errors", "fmt", "sync", "github.com/inspektor-gadget/inspektor-gadget/pkg/operators"}, nil)
+	project("admission_types_projection_test.go", filepath.Join(gadget, "pkg/operators/ebpf/event_finalization_native.go"), "../../patches/gadget-additions/pkg/operators/ebpf/event_finalization_native.go.txt", nil, func(d ast.Decl) bool {
+		g, ok := d.(*ast.GenDecl)
+		return ok && g.Tok == token.TYPE
+	})
+	project("event_reader_projection_test.go", filepath.Join(gadget, "pkg/operators/ebpf/event_finalization_reader.go"), "../../patches/gadget-additions/pkg/operators/ebpf/event_finalization_reader.go.txt", []string{"sync", "sync/atomic"}, nil)
+	project("readout_types_projection_test.go", filepath.Join(gadget, "pkg/operators/ebpf/definition_readout.go"), "../../patches/gadget-additions/pkg/operators/ebpf/definition_readout.go.txt", []string{"github.com/cilium/ebpf", "github.com/cilium/ebpf/link", "github.com/cilium/ebpf/ringbuf"}, func(d ast.Decl) bool {
+		g, ok := d.(*ast.GenDecl)
+		return ok && g.Tok == token.TYPE
+	})
 	project("owner_fixture_projection_test.go", filepath.Join(gadget, "pkg/operators/ebpf/event_finalization_owner_test.go"), "../../patches/gadget-additions/pkg/operators/ebpf/event_finalization_owner_test.go.txt", []string{"context", "errors", "sync"}, func(d ast.Decl) bool {
 		f, ok := d.(*ast.FuncDecl)
 		return !ok || len(f.Name.Name) < 4 || f.Name.Name[:4] != "Test"
@@ -141,17 +153,41 @@ func projectRunExit(t *testing.T, cwd, temp string, replacements map[string]stri
 		t.Fatal(err)
 	}
 	var run *ast.FuncDecl
+	var runValidated *ast.FuncDecl
+	var entry *ast.FuncDecl
 	for _, d := range file.Decls {
-		if f, ok := d.(*ast.FuncDecl); ok && f.Name.Name == "Run" {
-			run = f
+		if f, ok := d.(*ast.FuncDecl); ok {
+			if f.Name.Name == "Run" {
+				entry = f
+			}
+			if f.Recv != nil {
+				if receiver, ok := f.Recv.List[0].Type.(*ast.StarExpr); ok {
+					if name, ok := receiver.X.(*ast.Ident); ok && name.Name == "captureRun" {
+						if f.Name.Name == "run" {
+							run = f
+						} else if f.Name.Name == "runValidated" {
+							runValidated = f
+						}
+					}
+				}
+			}
 		}
 	}
-	if run == nil {
+	if run == nil || runValidated == nil || entry == nil {
 		t.Fatal("Run boundary missing")
+	}
+	var wrapper bytes.Buffer
+	if err := format.Node(&wrapper, set, entry); err != nil || !bytes.Contains(wrapper.Bytes(), []byte("return (&captureRun{}).run(ctx, cfg, writer)")) {
+		t.Fatal("Run no longer delegates to the projected real owner", err)
+	}
+	var runWrapper bytes.Buffer
+	if err := format.Node(&runWrapper, set, run); err != nil || !bytes.Contains(runWrapper.Bytes(), []byte("return runWithDefinitionReceipt(ctx, cfg, writer, r.runValidated)")) {
+		t.Fatal("(*captureRun).run no longer delegates through runWithDefinitionReceipt to runValidated", err)
 	}
 	var guard []ast.Stmt
 	var pending *ast.IfStmt
-	for _, stmt := range run.Body.List {
+	var summaryErrStmt ast.Stmt
+	for _, stmt := range runValidated.Body.List {
 		if d, ok := stmt.(*ast.DeferStmt); ok {
 			usesFatal := false
 			ast.Inspect(d, func(n ast.Node) bool {
@@ -164,23 +200,33 @@ func projectRunExit(t *testing.T, cwd, temp string, replacements map[string]stri
 				guard = append(guard, d)
 			}
 		}
-		ast.Inspect(stmt, func(n ast.Node) bool {
-			if i, ok := n.(*ast.IfStmt); ok {
-				ast.Inspect(i.Cond, func(n ast.Node) bool {
-					if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "ReceiverJoined" {
-						pending = i
-					}
-					return true
-				})
+		if pending == nil {
+			ast.Inspect(stmt, func(n ast.Node) bool {
+				if pending != nil {
+					return false
+				}
+				if i, ok := n.(*ast.IfStmt); ok {
+					ast.Inspect(i.Cond, func(n ast.Node) bool {
+						if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "ReceiverJoined" {
+							pending = i
+						}
+						return true
+					})
+				}
+				return true
+			})
+		}
+		if summaryErrStmt == nil {
+			if i, ok := stmt.(*ast.IfStmt); ok {
+				var setsSummaryErrors bytes.Buffer
+				if err := format.Node(&setsSummaryErrors, set, i); err == nil && bytes.Contains(setsSummaryErrors.Bytes(), []byte("summary.Errors")) {
+					summaryErrStmt = stmt
+				}
 			}
-			return true
-		})
-		if pending != nil {
-			break
 		}
 	}
-	if pending == nil {
-		t.Fatal("pending readout boundary missing")
+	if pending == nil || summaryErrStmt == nil {
+		t.Fatal("pending readout or summary error boundary missing")
 	}
 	var out bytes.Buffer
 	out.WriteString(`package capture
@@ -193,7 +239,8 @@ sessionID := "pending-fixture"
 summary := model.Summary{}
 var err error
 `)
-	for _, stmt := range append(append(guard, pending), run.Body.List[len(run.Body.List)-2:]...) {
+	stmts := append(append(guard, pending), summaryErrStmt, runValidated.Body.List[len(runValidated.Body.List)-1])
+	for _, stmt := range stmts {
 		if err := format.Node(&out, set, stmt); err != nil {
 			t.Fatal(err)
 		}

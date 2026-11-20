@@ -1,0 +1,317 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+	"unsafe"
+
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/nativeunwind"
+	sdtypes "go.opentelemetry.io/ebpf-profiler/nativeunwind/stackdeltatypes"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+	"go.opentelemetry.io/ebpf-profiler/processmanager/execinfomanager"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type stubSDP struct{}
+
+func (s *stubSDP) GetIntervalStructuresForFile(_ *pfelf.Reference, _ *sdtypes.IntervalData) error {
+	return nil
+}
+
+func (s *stubSDP) GetAndResetStatistics() nativeunwind.Statistics {
+	return nativeunwind.Statistics{}
+}
+
+type periodicStubEbpf struct {
+	pmebpf.EbpfHandler
+	deleteErr error
+}
+
+func (s *periodicStubEbpf) DeletePidPageMappingInfo(pid libpf.PID, prefixes []lpm.Prefix) (int, error) {
+	if s.deleteErr != nil {
+		return 0, s.deleteErr
+	}
+	return len(prefixes), nil
+}
+
+func (s *periodicStubEbpf) RemoveReportedPID(pid libpf.PID) {}
+
+func (s *periodicStubEbpf) CollectMetrics() []metrics.Metric {
+	return nil
+}
+
+type errorMetricsInstance struct {
+	interpreter.InstanceStubs
+	err     error
+	metrics []metrics.Metric
+}
+
+func (m *errorMetricsInstance) GetAndResetMetrics() ([]metrics.Metric, error) {
+	return m.metrics, m.err
+}
+
+func (m *errorMetricsInstance) Detach(interpreter.EbpfHandler, libpf.PID) error {
+	return nil
+}
+
+type periodicLifetime struct {
+	session string
+	tgid    uint32
+	birth   uint64
+	err     error
+}
+
+func (p *periodicLifetime) Session() string  { return p.session }
+func (p *periodicLifetime) HostTGID() uint32 { return p.tgid }
+func (p *periodicLifetime) Birth() uint64    { return p.birth }
+func (p *periodicLifetime) Validate() error  { return p.err }
+
+// retainedPeriodicAccounting is an in-memory test model, not native ownership.
+type retainedPeriodicAccounting struct {
+	*periodicLifetime
+	released atomic.Bool
+	once sync.Once
+}
+
+func (m *retainedPeriodicAccounting) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	if m.released.Load() { return nil, nil, errors.New("model lifetime released") }
+	return m, func() error { m.once.Do(func() { m.released.Store(true) }); return nil }, nil
+}
+func (m *retainedPeriodicAccounting) Validate() error {
+	if m.released.Load() { return errors.New("model lifetime released") }
+	return m.periodicLifetime.Validate()
+}
+func (m *retainedPeriodicAccounting) Session() string {
+	if m.released.Load() { return "" }; return m.periodicLifetime.Session()
+}
+func (m *retainedPeriodicAccounting) HostTGID() uint32 {
+	if m.released.Load() { return 0 }; return m.periodicLifetime.HostTGID()
+}
+func (m *retainedPeriodicAccounting) Birth() uint64 {
+	if m.released.Load() { return 0 }; return m.periodicLifetime.Birth()
+}
+
+type barePeriodicAccountingProbe struct {
+	*periodicLifetime
+	calls atomic.Int32
+}
+func (p *barePeriodicAccountingProbe) Validate() error { p.calls.Add(1); return p.periodicLifetime.Validate() }
+func (p *barePeriodicAccountingProbe) Session() string { p.calls.Add(1); return p.periodicLifetime.Session() }
+func (p *barePeriodicAccountingProbe) HostTGID() uint32 { p.calls.Add(1); return p.periodicLifetime.HostTGID() }
+func (p *barePeriodicAccountingProbe) Birth() uint64 { p.calls.Add(1); return p.periodicLifetime.Birth() }
+
+func accountingTestScope(t *testing.T) *periodiccaller.OwnedScope {
+	t.Helper()
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := scope.Stop(ctx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) { t.Errorf("scope cleanup: %v", err) } else { t.Logf("scope cleanup result: %v", err) }
+		}
+	})
+	return scope
+}
+
+func TestPeriodicAccountingRejectsUnretainedLifetime(t *testing.T) {
+	scope := accountingTestScope(t)
+	bare := &barePeriodicAccountingProbe{periodicLifetime: &periodicLifetime{session: "bare", tgid: 100, birth: 1}}
+	bindErr := scope.BindLifetime(bare)
+	require.Error(t, bindErr)
+	require.Contains(t, bindErr.Error(), "lacks retained validated identity")
+	require.Equal(t, int32(0), bare.calls.Load())
+	require.True(t, scope.ExecuteCallback(func() {}))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stopErr := scope.Stop(ctx)
+	require.Error(t, stopErr)
+	require.Contains(t, stopErr.Error(), "auxiliary stop readout unavailable")
+	obs, err := scope.Observation()
+	require.Error(t, err)
+	require.NotEqual(t, libpf.AuxiliaryFinal, obs.Outcome)
+	require.Equal(t, int32(0), bare.calls.Load())
+}
+
+func TestCollectInterpreterMetricsOnce_InterpreterError_RecordsFailed(t *testing.T) {
+	ebpf := &periodicStubEbpf{}
+	eim, err := execinfomanager.NewExecutableInfoManager(&stubSDP{}, ebpf, 0)
+	require.NoError(t, err)
+
+	cause := errors.New("interpreter metrics error")
+	inst := &errorMetricsInstance{
+		err:     cause,
+		metrics: []metrics.Metric{{ID: metrics.IDELFInfoCacheHit, Value: 42}},
+	}
+
+	var published []metrics.Metric
+	pm := &ProcessManager{
+		ebpf: ebpf,
+		eim:  eim,
+		interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{
+			123: {util.OnDiskFileIdentifier{}: inst},
+		},
+		metricsAddSlice: func(m []metrics.Metric) {
+			published = append(published, m...)
+		},
+	}
+
+	scope := accountingTestScope(t)
+	lt := &retainedPeriodicAccounting{periodicLifetime: &periodicLifetime{session: "sess-interp-metrics", tgid: 100, birth: 12345}}
+	require.NoError(t, scope.BindLifetime(lt))
+
+	collectInterpreterMetricsOnce(scope.Context(), pm)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, scope.Stop(stopCtx))
+
+	// Verify metrics were still published despite error
+	require.NotEmpty(t, published)
+
+	obs, err := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	require.Error(t, err)
+	require.Equal(t, uint64(1), obs.Counts.Admitted)
+	require.Equal(t, uint64(1), obs.Counts.Failed)
+	require.Equal(t, uint64(0), obs.Counts.Completed)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+	require.NoError(t, libpf.ReconcileKindLedger(obs.Counts))
+	require.ErrorIs(t, err, cause)
+	require.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+	require.Equal(t, libpf.AuxiliarySourceInterpreterMetrics, obs.Binding.Source)
+}
+
+func TestCollectInterpreterMetricsOnce_Positive_RecordsCompleted(t *testing.T) {
+	ebpf := &periodicStubEbpf{}
+	eim, err := execinfomanager.NewExecutableInfoManager(&stubSDP{}, ebpf, 0)
+	require.NoError(t, err)
+
+	inst := &errorMetricsInstance{
+		err:     nil,
+		metrics: []metrics.Metric{{ID: metrics.IDELFInfoCacheHit, Value: 10}},
+	}
+
+	var published []metrics.Metric
+	pm := &ProcessManager{
+		ebpf: ebpf,
+		eim:  eim,
+		interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{
+			123: {util.OnDiskFileIdentifier{}: inst},
+		},
+		metricsAddSlice: func(m []metrics.Metric) {
+			published = append(published, m...)
+		},
+	}
+
+	scope := accountingTestScope(t)
+	lt := &retainedPeriodicAccounting{periodicLifetime: &periodicLifetime{session: "sess-interp-positive", tgid: 100, birth: 12345}}
+	require.NoError(t, scope.BindLifetime(lt))
+
+	collectInterpreterMetricsOnce(scope.Context(), pm)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, scope.Stop(stopCtx))
+
+	require.NotEmpty(t, published)
+	require.True(t, lt.released.Load())
+	require.Error(t, lt.Validate())
+	require.Empty(t, lt.Session())
+	require.Zero(t, lt.HostTGID())
+	require.Zero(t, lt.Birth())
+
+	obs, err := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), obs.Counts.Admitted)
+	require.Equal(t, uint64(0), obs.Counts.Failed)
+	require.Equal(t, uint64(1), obs.Counts.Completed)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+	require.NoError(t, libpf.ReconcileKindLedger(obs.Counts))
+	require.Equal(t, libpf.AuxiliaryFinal, obs.Outcome)
+	require.Equal(t, libpf.AuxiliarySourceInterpreterMetrics, obs.Binding.Source)
+}
+
+func setOwnedScopeErr(scope *periodiccaller.OwnedScope, err error) {
+	field := reflect.ValueOf(scope).Elem().FieldByName("err")
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(err))
+}
+
+func TestCollectInterpreterMetricsOnce_JoinsLocalAndContextCause(t *testing.T) {
+	ebpf := &periodicStubEbpf{}
+	eim, err := execinfomanager.NewExecutableInfoManager(&stubSDP{}, ebpf, 0)
+	require.NoError(t, err)
+	cause := errors.New("interpreter metrics error")
+	pm := &ProcessManager{
+		ebpf: ebpf,
+		eim:  eim,
+		interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{
+			123: {util.OnDiskFileIdentifier{}: &errorMetricsInstance{err: cause}},
+		},
+		metricsAddSlice: func([]metrics.Metric) {},
+	}
+	scope := accountingTestScope(t)
+	require.NoError(t, scope.BindLifetime(&retainedPeriodicAccounting{periodicLifetime: &periodicLifetime{session: "sess-join", tgid: 100, birth: 12345}}))
+	ctx, cancel := context.WithCancel(scope.Context())
+	cancel()
+
+	collectInterpreterMetricsOnce(ctx, pm)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	require.NoError(t, scope.Stop(stopCtx))
+	obs, obsErr := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	require.ErrorIs(t, obsErr, cause)
+	require.ErrorIs(t, obsErr, context.Canceled)
+	require.Equal(t, uint64(1), obs.Counts.Failed)
+	require.Equal(t, uint64(0), obs.Counts.Completed)
+	require.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+}
+
+func TestCollectInterpreterMetricsOnce_UnrelatedParentFailureStaysCompleted(t *testing.T) {
+	ebpf := &periodicStubEbpf{}
+	eim, err := execinfomanager.NewExecutableInfoManager(&stubSDP{}, ebpf, 0)
+	require.NoError(t, err)
+	pm := &ProcessManager{
+		ebpf: ebpf,
+		eim:  eim,
+		interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{
+			123: {util.OnDiskFileIdentifier{}: &errorMetricsInstance{}},
+		},
+		metricsAddSlice: func([]metrics.Metric) {},
+	}
+	scope := accountingTestScope(t)
+	require.NoError(t, scope.BindLifetime(&retainedPeriodicAccounting{periodicLifetime: &periodicLifetime{session: "sess-parent", tgid: 100, birth: 12345}}))
+	parentErr := errors.New("unrelated parent")
+	setOwnedScopeErr(scope, parentErr)
+	require.ErrorIs(t, scope.Failure(), parentErr)
+	require.NoError(t, scope.Context().Err())
+
+	collectInterpreterMetricsOnce(scope.Context(), pm)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	require.ErrorIs(t, scope.Stop(stopCtx), parentErr)
+	obs, obsErr := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	require.ErrorIs(t, obsErr, parentErr)
+	require.Equal(t, uint64(1), obs.Counts.Completed)
+	require.Equal(t, uint64(0), obs.Counts.Failed)
+	require.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+	require.ErrorIs(t, obs.Err, parentErr)
+	parentObs, parentObsErr := scope.Observation()
+	require.ErrorIs(t, parentObsErr, parentErr)
+	require.NotEqual(t, libpf.AuxiliaryFinal, parentObs.Outcome)
+}

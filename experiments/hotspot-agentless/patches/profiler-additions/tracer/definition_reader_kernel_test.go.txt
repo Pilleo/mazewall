@@ -1,0 +1,169 @@
+//go:build mw_kernel && linux
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	ottimes "go.opentelemetry.io/ebpf-profiler/times"
+)
+
+// Assembly only transports malformed bytes to the real reader; it proves no C
+// producer accounting, capture identity, root provenance or final observation.
+func TestKernelTraceDefinitionReaderOutcomes(t *testing.T) {
+	for _, kind := range []string{"target", "foreign", "origin", "frames", "labels", "epoch", "short3", "short4", "short743", "padding", "aborted", "legacy"} {
+		t.Run(kind, func(t *testing.T) {
+			packet := epochTracePacket(0)
+			wantReceived, wantHandedOff, wantRejected, wantAborted := uint64(1), uint64(1), uint64(0), uint64(0)
+			invalid := false
+			switch kind {
+			case "foreign":
+				binary.NativeEndian.PutUint32(packet[:4], 999)
+				wantReceived, wantHandedOff = 0, 0
+			case "origin":
+				binary.NativeEndian.PutUint32(packet[708:712], ^uint32(0))
+				invalid, wantHandedOff, wantRejected = true, 0, 1
+			case "frames":
+				binary.NativeEndian.PutUint16(packet[704:706], 3073)
+				invalid, wantHandedOff, wantRejected = true, 0, 1
+			case "labels":
+				binary.NativeEndian.PutUint32(packet[56:60], 11)
+				invalid, wantHandedOff, wantRejected = true, 0, 1
+			case "epoch":
+				binary.NativeEndian.PutUint32(packet[736:740], 99)
+				invalid, wantHandedOff, wantRejected = true, 0, 1
+			case "short3", "short4", "short743":
+				n := map[string]int{"short3": 3, "short4": 4, "short743": 743}[kind]
+				packet = packet[:n]
+				invalid, wantReceived, wantHandedOff = true, 0, 0
+			case "padding":
+				packet = append(packet, 0, 0, 0, 0)
+			case "aborted":
+				invalid, wantHandedOff, wantAborted = true, 0, 1
+			case "legacy":
+				wantReceived, wantHandedOff = 0, 0
+			}
+			cpus, err := ebpf.PossibleCPU()
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.PerfEventArray, KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := events.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			payload, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: uint32(len(packet)), MaxEntries: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := payload.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := payload.Update(uint32(0), packet, ebpf.UpdateAny); err != nil {
+				t.Fatal(err)
+			}
+			program, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.XDP, License: "GPL", Instructions: asm.Instructions{
+				asm.Mov.Reg(asm.R6, asm.R1), asm.StoreImm(asm.R10, -4, 0, asm.Word), asm.LoadMapPtr(asm.R1, payload.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -4), asm.FnMapLookupElem.Call(), asm.JEq.Imm(asm.R0, 0, "exit"),
+				asm.Mov.Reg(asm.R4, asm.R0), asm.Mov.Reg(asm.R1, asm.R6), asm.LoadMapPtr(asm.R2, events.FD()), asm.LoadImm(asm.R3, 0xffffffff, asm.DWord), asm.Mov.Imm(asm.R5, int32(len(packet))), asm.FnPerfEventOutput.Call(), asm.JEq.Imm(asm.R0, 0, "ok"), asm.Mov.Imm(asm.R0, 0).WithSymbol("exit"), asm.Return(), asm.Mov.Imm(asm.R0, 2).WithSymbol("ok"), asm.Return(),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := program.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			tr := &Tracer{ebpfMaps: map[string]*ebpf.Map{"trace_events": events}, tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}, intervals: ottimes.New(0, time.Millisecond, 0), samplesPerSecond: 128}
+			if kind != "legacy" {
+				binding := definitionBindingFixture()
+				binding.PossibleCPUs = cpus
+				tr.definitionSource = &traceDefinitionSource{binding: binding}
+			}
+			out := make(chan *libpf.EbpfTrace)
+			if _, err := tr.startTraceEventMonitor(ctx, out); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			consumerDone := make(chan struct{})
+			if kind == "aborted" {
+				close(consumerDone)
+			} else {
+				go func() {
+					defer close(consumerDone)
+					for {
+						select {
+						case trace, ok := <-out:
+							if !ok {
+								return
+							}
+							if trace != nil {
+								tr.tracePool.Put(trace)
+							}
+						case <-ctx.Done():
+							return
+						}
+					}
+				}()
+			}
+			t.Cleanup(func() {
+				cancel()
+				for _, done := range []<-chan struct{}{tr.traceReaderCounters.done, consumerDone} {
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						t.Error("native reader/consumer cleanup did not join")
+					}
+				}
+			})
+			ret, _, err := program.Test(make([]byte, 64))
+			if err != nil || ret != 2 {
+				t.Fatal("real perf transport", ret, err)
+			}
+			if kind == "aborted" {
+				for tr.traceReaderCounters.definitionReceived.total.Load() == 0 {
+					select {
+					case <-ctx.Done():
+						t.Fatal("no actual target receipt", ctx.Err())
+					case <-time.After(time.Millisecond):
+					}
+				}
+				cancel()
+			}
+			if invalid {
+				joinCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				if err := tr.WaitTraceReader(joinCtx); err == nil {
+					t.Fatal("invalid native record/canceled handoff qualified")
+				}
+			} else {
+				if err := tr.QuiesceDefinitionSources(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := tr.DrainTraceReader(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reader := tr.traceDefinitionReaderObservation()
+			if reader.Received != wantReceived || reader.HandedOff != wantHandedOff || reader.RejectedRecord != wantRejected || reader.HandoffAborted != wantAborted {
+				t.Fatal("real native reader terminals", kind, reader)
+			}
+		})
+	}
+}

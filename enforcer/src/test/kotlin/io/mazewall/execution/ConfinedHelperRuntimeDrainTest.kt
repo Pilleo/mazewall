@@ -319,14 +319,9 @@ class ConfinedHelperRuntimeDrainTest {
     }
 
     private fun implementationJar(): Path {
-        val source = directory.resolve("Operation.java")
-        Files.writeString(source, "package fixture; public class Operation { public int call() { return 42; } }")
-        assertEquals(0, ToolProvider.getSystemJavaCompiler().run(null, null, null, "-d", directory.toString(), source.toString()))
         val jar = directory.resolve("operation.jar")
-        JarOutputStream(Files.newOutputStream(jar)).use {
-            it.putNextEntry(JarEntry("fixture/Operation.class"))
-            it.write(Files.readAllBytes(directory.resolve("fixture/Operation.class")))
-            it.closeEntry()
+        if (!Files.isRegularFile(jar)) {
+            Files.write(jar, compiledOperationJar)
         }
         return jar
     }
@@ -532,6 +527,85 @@ class ConfinedHelperRuntimeDrainTest {
     }
 
     companion object {
+        private val compiledOperationJar: ByteArray by lazy {
+            val work = Files.createTempDirectory("mazewall-drain-operation-")
+            try {
+                val source = work.resolve("Operation.java")
+                Files.writeString(source, "package fixture; public class Operation { public int call() { return 42; } }")
+                assertEquals(0, ToolProvider.getSystemJavaCompiler().run(null, null, null, "-d", work.toString(), source.toString()))
+                val buffer = java.io.ByteArrayOutputStream()
+                JarOutputStream(buffer).use {
+                    it.putNextEntry(JarEntry("fixture/Operation.class"))
+                    it.write(Files.readAllBytes(work.resolve("fixture/Operation.class")))
+                    it.closeEntry()
+                }
+                buffer.toByteArray()
+            } finally {
+                work.toFile().deleteRecursively()
+            }
+        }
+
+        internal fun runSupportCloseProbe(
+            directory: Path,
+            mode: String,
+        ) {
+            val jar = directory.resolve("operation.jar")
+            if (!Files.isRegularFile(jar)) {
+                Files.write(jar, compiledOperationJar)
+            }
+            val agent = System.getProperty("mazewall.test.childCoverage.agent")
+            val coverageDirectory = System.getProperty("mazewall.test.childCoverage.directory")
+            check((agent == null) == (coverageDirectory == null))
+            val coverageArguments = if (agent == null) {
+                emptyList()
+            } else {
+                val root = Path.of(checkNotNull(coverageDirectory))
+                check(root.isAbsolute && Files.isDirectory(root) && !Files.isSymbolicLink(root))
+                check(root.toRealPath() == root && root == Path.of(System.getProperty("user.dir")).toRealPath().resolve("build/jacoco/unit-children"))
+                val agentPath = Path.of(agent)
+                check(agentPath == root.resolve("jacocoagent.jar") && Files.isRegularFile(agentPath, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                val output = root.resolve("ownership-${java.util.UUID.randomUUID()}.exec")
+                check(!Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                listOf("-javaagent:$agentPath=destfile=$output,append=false,includes=io.mazewall.*")
+            }
+            val command = listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString()) +
+                coverageArguments +
+                listOf(
+                    "-XX:TieredStopAtLevel=1",
+                    "-Xmx256m",
+                    "-Xms64m",
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    ConfinedHelperRuntimeDrainTest::class.java.name,
+                    directory.toString(),
+                    mode,
+                )
+            val process = ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .also { JvmChildProcess.stripInheritedJvmOptions(it.environment()) }
+                .start()
+            val output = CompletableFuture.supplyAsync {
+                process.inputStream.use { input ->
+                    val retained = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(4096)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        retained.write(buffer, 0, minOf(count, (65536 - retained.size()).coerceAtLeast(0)))
+                    }
+                    retained.toString(Charsets.UTF_8)
+                }
+            }
+            try {
+                assertTrue(process.waitFor(45, TimeUnit.SECONDS), "support ownership child did not finish")
+                assertEquals(0, process.exitValue(), output.get(5, TimeUnit.SECONDS))
+            } finally {
+                if (process.isAlive) process.destroyForcibly()
+                assertTrue(process.waitFor(5, TimeUnit.SECONDS), "support ownership child was not reaped")
+            }
+        }
+
         @JvmStatic
         fun main(args: Array<String>) {
             val fixture = ConfinedHelperRuntimeDrainTest()
@@ -559,117 +633,6 @@ class ConfinedHelperRuntimeDrainTest {
     }
 
     @Test
-    fun `transferred live plan reaches exact Ready before B6 refusal`() = runSupportCloseProbe("history_only")
-
-    @Test
-    fun `synthetic original worker receipt reaches the confined listener consumer`() = runSupportCloseProbe("b6_handshake")
-
-    @Test
-    fun `drain revokes an unsent original worker receipt`() = runSupportCloseProbe("b6_handshake_drained")
-
-    @Test
-    fun `exited worker cannot send an unsent original receipt`() = runSupportCloseProbe("b6_handshake_worker_exit")
-
-    @Test
-    fun `drain after peer credentials prevents original receipt handoff`() = runSupportCloseProbe("b6_handshake_after_auth")
-
-    @Test
-    fun `drain after prelude prevents original receipt handoff`() = runSupportCloseProbe("b6_handshake_after_write")
-
-    @Test
-    fun `original Live session denies observation without a task and stays usable`() = runSupportCloseProbe("b6_handshake_observe_empty")
-
-    @Test
-    fun `original Live notification observes its owned task and still replies EPERM`() = runSupportCloseProbe("b6_handshake_observe_task")
-
-    @Test
-    fun `reactor deadline denies once while Live observation is blocked`() = runSupportCloseProbe("b6_handshake_observe_task_timeout")
-
-    @Test
-    fun `lost original Live endpoint fails queued work`() = runSupportCloseProbe("b6_handshake_endpoint_loss")
-
-    @Test
-    fun `receipt cannot install endpoint after original worker exits`() = runSupportCloseProbe("b6_handshake_ack_worker_exit")
-
-    @Test
-    fun `Live observation accepts a fragmented frame within one deadline`() = runSupportCloseProbe("b6_handshake_frame_short")
-
-    @Test
-    fun `Live observation accepts an active prefix lasting beyond one idle interval`() = runSupportCloseProbe("b6_handshake_frame_slow")
-
-    @Test
-    fun `Live observation survives idle polling before the next frame`() = runSupportCloseProbe("b6_handshake_frame_idle")
-
-    @Test
-    fun `Live observation poisons a timed out partial frame`() = runSupportCloseProbe("b6_handshake_frame_partial")
-
-    @Test
-    fun `Live observation poisons a replayed sequence`() = runSupportCloseProbe("b6_handshake_frame_replay")
-
-    @Test
-    fun `Live observation poisons an unsupported frame version`() = runSupportCloseProbe("b6_handshake_frame_malformed")
-
-    @Test
-    fun `Live observation poisons sequence overflow and reuse`() = runSupportCloseProbe("b6_handshake_frame_overflow")
-
-    @Test
-    fun `endpoint loss during Begin ends the exact task without entering its body`() = runSupportCloseProbe("b6_handshake_observe_task_loss_begin")
-
-    @Test
-    fun `changed publication between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_publication")
-
-    @Test
-    fun `changed invocation between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_invocation")
-
-    @Test
-    fun `wrong snapshot binding denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_wrong_binding")
-
-    @Test
-    fun `wrong notification TID denies without copying`() = runSupportCloseProbe("b6_handshake_observe_task_wrong_tid")
-
-    @Test
-    fun `uninstalled endpoint cannot observe a published task`() = runSupportCloseProbe("b6_handshake_observe_task_notinstalled")
-
-    @Test
-    fun `recovered Begin remains unobservable during exact End`() = runSupportCloseProbe("b6_handshake_observe_task_recovered_end")
-
-    @Test
-    fun `pending End remains unobservable`() = runSupportCloseProbe("b6_handshake_observe_task_pending_end")
-
-    @Test
-    fun `busy snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_busy")
-
-    @Test
-    fun `absent snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_absent")
-
-    @Test
-    fun `incomplete snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_incomplete")
-
-    @Test
-    fun `stale snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_stale")
-
-    @Test
-    fun `unsupported snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_unsupported")
-
-    @Test
-    fun `foreign task snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_foreign")
-
-    @Test
-    fun `changed frame between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_frame")
-
-    @Test
-    fun `notification bytes are owned before reactor mutation`() = runSupportCloseProbe("b6_handshake_observe_task_input_mutation")
-
-    @Test
-    fun `task End during first copy revokes observation`() = runSupportCloseProbe("b6_handshake_observe_task_copy_end")
-
-    @Test
-    fun `cancellation during first copy revokes observation`() = runSupportCloseProbe("b6_handshake_observe_task_copy_cancel")
-
-    @Test
-    fun `endpoint loss during first copy prevents a matched result`() = runSupportCloseProbe("b6_handshake_observe_task_copy_loss")
-
-    @Test
     fun `live installation lifetime exposes no public thread returning method`() {
         val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
         val exposed = lifetimeType
@@ -679,9 +642,6 @@ class ConfinedHelperRuntimeDrainTest {
             }
         assertTrue(exposed.isEmpty(), "Live lifetime exposes receiver threads: $exposed")
     }
-
-    @Test
-    fun `receiver physical exit precedes original domain retirement`() = runSupportCloseProbe("receiver_retirement")
 
     // The socket and task are genuine component authorities. This does not exercise a kernel notification.
     private fun receiverRetirementProbe() =
@@ -927,9 +887,6 @@ class ConfinedHelperRuntimeDrainTest {
                 check(!caller.isAlive)
             }
         }
-
-    @Test
-    fun `bound receiver without prepared retirement is refused and closes its socket once`() = runSupportCloseProbe("b6_unprepared_receiver")
 
     private fun standaloneTransportProbe(mode: String) {
         val shared = HelperSecurityObservation()
@@ -2126,15 +2083,6 @@ class ConfinedHelperRuntimeDrainTest {
             val historyHelper = io.mazewall.enforcer.internal.supervisor
                 .SupervisorDaemonManagerTest()
                 .attachSyntheticHistoryHelper(owner, fixture.endpoint.context)
-            val unsafe = sun.misc.Unsafe::class.java
-                .getDeclaredField("theUnsafe")
-                .apply { isAccessible = true }
-                .get(null) as sun.misc.Unsafe
-            val association = unsafe.allocateInstance(io.mazewall.ffi.internal.CheckedBootstrapAssociation::class.java)
-            val associationContext = association.javaClass.getDeclaredField("helperContext").apply { isAccessible = true }
-            associationContext.set(association, historyHelper.context)
-            val originalAssociation = owner.javaClass.getDeclaredField("originalAssociation").apply { isAccessible = true }
-            originalAssociation.set(owner, association)
             val helperManager = owner.javaClass.getDeclaredField("helperManager").apply { isAccessible = true }
             val ownerContext = owner.javaClass.getDeclaredField("startedHelperContext").apply { isAccessible = true }
             val managerContext = historyHelper.manager.javaClass
@@ -2213,112 +2161,21 @@ class ConfinedHelperRuntimeDrainTest {
                 assertFalse(recording.workerThread.get().isAlive)
                 assertTrue(recording.lifecycle.indexOf("worker") < recording.lifecycle.indexOf("installation"))
                 assertEquals(1, fixture.relay.reaps.get())
+                // Negative control only: absent checked association leaves repeated retirement Unknown with zero helper stops.
+                val originalAssociation = owner.javaClass.getDeclaredField("originalAssociation").apply { isAccessible = true }
+                assertNull(originalAssociation.get(owner))
                 val firstHistory = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
-                val stopped = CompletableFuture<ManagedRuntimeAcquisitionStatus>()
-                val stopper = Thread.ofPlatform().start { stopped.complete(owner.retire(timeout)) }
-                try {
-                    assertTrue(historyHelper.entered.await(5, TimeUnit.SECONDS))
-                    val concurrent = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
-                    assertSame(firstHistory.history, concurrent.history)
-                    assertEquals(1, historyHelper.stops.get())
-                } finally {
-                    historyHelper.release.countDown()
-                    stopper.join(6000)
-                }
-                assertFalse(stopper.isAlive)
-                val final = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(stopped.get(1, TimeUnit.SECONDS))
-                assertSame(firstHistory.history, final.history)
-                assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
-                assertEquals(1, historyHelper.stops.get())
+                val secondHistory = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+                assertSame(firstHistory.history, secondHistory.history)
+                val thirdHistory = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+                assertSame(firstHistory.history, thirdHistory.history)
+                assertEquals(0, historyHelper.stops.get())
             } finally {
+                historyHelper.release.countDown()
                 caller.join(6000)
                 assertFalse(caller.isAlive)
             }
         }
-
-    @Test
-    fun `synthetic installed live invocation begins before its physical body`() = runSupportCloseProbe("task_begin")
-
-    @Test
-    fun `recovered live begin failure ends its exact task without entering body`() = runSupportCloseProbe("task_begin_throw")
-
-    @Test
-    fun `fatal recovered live begin ends its exact task and retains identity`() = runSupportCloseProbe("task_begin_fatal")
-
-    @Test
-    fun `pending live task end closes admission and retains its exact task`() = runSupportCloseProbe("task_begin_pending")
-
-    @Test
-    fun `pending live task end retains invalidation failure and typed outcome`() = runSupportCloseProbe("task_begin_pending_throw")
-
-    @Test
-    fun `refused live task end closes admission and retains its exact task`() = runSupportCloseProbe("task_begin_refused")
-
-    @Test
-    fun `live delivery callback retains canonical context failure before task end`() = runSupportCloseProbe("task_begin_late")
-
-    @Test
-    fun `foreign live task lease is neither published nor ended`() = runSupportCloseProbe("task_begin_foreign")
-
-    @Test
-    fun `foreign recovered live task is neither published nor ended`() = runSupportCloseProbe("task_begin_foreign_recovered")
-
-    @Test
-    fun `live task delivery callback holds its lease until callback returns`() = runSupportCloseProbe("task_begin_callback_blocked")
-
-    @Test
-    fun `queued live cancellation invalidates once without task context`() = runSupportCloseProbe("task_begin_cancel")
-
-    @Test
-    fun `running live cancellation retains the task until its physical end`() = runSupportCloseProbe("task_begin_cancel_running")
-
-    @Test
-    fun `concurrent live cancellations share one invalidation`() = runSupportCloseProbe("task_begin_cancel_concurrent")
-
-    @Test
-    fun `live cancellation before worker invocation prevents begin`() = runSupportCloseProbe("task_begin_cancel_before_run")
-
-    @Test
-    fun `live cancellation delivers after invalidation throws without replay`() = runSupportCloseProbe("task_begin_cancel_throw")
-
-    @Test
-    fun `live dependent stage failure does not become invocation failure`() = runSupportCloseProbe("task_begin_dependent")
-
-    @Test
-    fun `live restoration and private inline body retain the same lease`() = runSupportCloseProbe("task_begin_context_inline")
-
-    @Test
-    fun `late ordinary failure and refused end retain both outcomes`() = runSupportCloseProbe("task_begin_late_refused")
-
-    @Test
-    fun `late ordinary failure and fatal end preserve fatal precedence`() = runSupportCloseProbe("task_begin_late_fatal_end")
-
-    @Test
-    fun `late fatal failure and pending end preserve both outcomes`() = runSupportCloseProbe("task_begin_fatal_pending")
-
-    @Test
-    fun `first invocation one shot end guard cannot clear the active second task`() = runSupportCloseProbe("task_begin_stale")
-
-    @Test
-    fun `revoked task tombstone rejects a different cleanup lease`() = runSupportCloseProbe("task_begin_tombstone")
-
-    @Test
-    fun `retained original lease remains endable before slot cleanup record`() = runSupportCloseProbe("task_begin_retained_frontier")
-
-    @Test
-    fun `retained slot lease remains endable before publication`() = runSupportCloseProbe("task_begin_retained_slot")
-
-    @Test
-    fun `live cancellation rejects wrong permit foreign domain and unregistered task`() = runSupportCloseProbe("task_begin_cancel_identity")
-
-    @Test
-    fun `live failure before task claim prevents begin without early invalidation`() = runSupportCloseProbe("task_begin_fail_before_run")
-
-    @Test
-    fun `live failure after task claim invalidates and retains task until end`() = runSupportCloseProbe("task_begin_fail_running")
-
-    @Test
-    fun `refused live begin and fatal recovery retain both failures without end`() = runSupportCloseProbe("task_begin_refused_recovery")
 
     private fun liveInvocationBeginProbe(mode: String) =
         withRuntime(retainOnExit = mode != "task_begin") { fixture ->
@@ -2977,12 +2834,6 @@ class ConfinedHelperRuntimeDrainTest {
             assertEquals(1, installs.get())
         }
 
-    @Test
-    fun `refused live registration retains ambiguous receipt without invented worker`() = runSupportCloseProbe("worker_refused")
-
-    @Test
-    fun `wrong recovered live worker identity retains originals without retirement`() = runSupportCloseProbe("worker_wrong_identity")
-
     private fun refusedWorkerRegistrationProbe(wrongIdentity: Boolean) =
         withRuntime { fixture ->
             skipFixtureResourceClose = true
@@ -3033,12 +2884,6 @@ class ConfinedHelperRuntimeDrainTest {
                 assertFalse(caller.isAlive)
             }
         }
-
-    @Test
-    fun `pending live worker retirement retains installation and originals without replay`() = runSupportCloseProbe("worker_retire_pending")
-
-    @Test
-    fun `refused live worker retirement retains installation and originals without replay`() = runSupportCloseProbe("worker_retire_refused")
 
     private fun workerRetirementIncompleteProbe(mode: String) =
         withRuntime(canonical = true) { fixture ->
@@ -3453,12 +3298,6 @@ class ConfinedHelperRuntimeDrainTest {
             assertEquals(0, fixture.relay.reaps.get())
         }
 
-    @Test
-    fun `live session retirement completes before helper pins and originals`() = runSupportCloseProbe("live_session")
-
-    @Test
-    fun `live session retirement failure remains counted without retry`() = runSupportCloseProbe("live_session_failure")
-
     private fun liveSessionRetirementProbe(mode: String) =
         withRuntime { fixture ->
             skipFixtureResourceClose = true
@@ -3558,78 +3397,6 @@ class ConfinedHelperRuntimeDrainTest {
                 assertFails { fixture.resources.validate() }
             }
         }
-
-    @Test
-    fun `failed support pin close remains counted and retains original resources`() = runSupportCloseProbe("error")
-
-    @Test
-    fun `thrown support pin close remains counted and is never repeated`() = runSupportCloseProbe("throw")
-
-    @Test
-    fun `fatal support close retains original error and never repeats`() = runSupportCloseProbe("fatal")
-
-    @Test
-    fun `interrupted support close is not redispatched on later manager sweep`() = runSupportCloseProbe("interrupt")
-
-    @Test
-    fun `postcapture support close failure remains counted and is never repeated`() = runSupportCloseProbe("postcapture")
-
-    @Test
-    fun `independent support owner closes once when another close becomes unknown`() = runSupportCloseProbe("multiple")
-
-    @Test
-    fun `live carrier retains unknown pin and closes independent pin once`() = runSupportCloseProbe("live_multiple")
-
-    private fun runSupportCloseProbe(mode: String) {
-        val agent = System.getProperty("mazewall.test.childCoverage.agent")
-        val coverageDirectory = System.getProperty("mazewall.test.childCoverage.directory")
-        check((agent == null) == (coverageDirectory == null))
-        val coverageArguments = if (agent == null) {
-            emptyList()
-        } else {
-            val root = Path.of(checkNotNull(coverageDirectory))
-            check(root.isAbsolute && Files.isDirectory(root) && !Files.isSymbolicLink(root))
-            check(root.toRealPath() == root && root == Path.of(System.getProperty("user.dir")).toRealPath().resolve("build/jacoco/unit-children"))
-            val agentPath = Path.of(agent)
-            check(agentPath == root.resolve("jacocoagent.jar") && Files.isRegularFile(agentPath, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            val output = root.resolve("ownership-${java.util.UUID.randomUUID()}.exec")
-            check(!Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            listOf("-javaagent:$agentPath=destfile=$output,append=false,includes=io.mazewall.*")
-        }
-        val command = listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString()) +
-            coverageArguments +
-            listOf(
-            "--enable-native-access=ALL-UNNAMED",
-            "-cp",
-            System.getProperty("java.class.path"),
-            ConfinedHelperRuntimeDrainTest::class.java.name,
-            directory.toString(),
-            mode,
-        )
-        val process = ProcessBuilder(command)
-            .redirectErrorStream(true)
-            .also { JvmChildProcess.stripInheritedJvmOptions(it.environment()) }
-            .start()
-        val output = CompletableFuture.supplyAsync {
-            process.inputStream.use { input ->
-                val retained = java.io.ByteArrayOutputStream()
-                val buffer = ByteArray(4096)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    retained.write(buffer, 0, minOf(count, (65536 - retained.size()).coerceAtLeast(0)))
-                }
-                retained.toString(Charsets.UTF_8)
-            }
-        }
-        try {
-            assertTrue(process.waitFor(45, TimeUnit.SECONDS), "support ownership child did not finish")
-            assertEquals(0, process.exitValue(), output.get(5, TimeUnit.SECONDS))
-        } finally {
-            if (process.isAlive) process.destroyForcibly()
-            assertTrue(process.waitFor(5, TimeUnit.SECONDS), "support ownership child was not reaped")
-        }
-    }
 
     private fun failedSupportCloseProbe(mode: String) =
         withRuntime { f ->

@@ -27,4 +27,14 @@ Approved P2 requires host-configured finite capacity, operation/startup/close bu
 - `./gradlew build` passed in 44 seconds (`run-2871266b9e50`), including the complete real broker integration suite. No warning inventory expansion or assertion weakening.
 
 ---
+## Repository-review expansion — 2026-11-04
+
+[PRT-04](../reviews/2026-11-04-repository-review-findings.md#prt-04) identifies waits that
+escape closeTimeoutMs: minimum five-second maintenance wait and fresh per-worker reap/pump
+allowances. Thread one absolute deadline through them, retaining every unfinished owner on
+expiry. Test held maintenance and multiple delayed slots, then bounded same-owner retry.
+Coordinate with PRT-02 replacement ownership; the existing short-budget late-launch test does
+not cover these paths. No complete native retirement proof was produced by source review.
+
+---
 <!-- id: issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an  file: issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an.md -->

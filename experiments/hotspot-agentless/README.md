@@ -8,8 +8,11 @@ local tree. Benchmark, oracle, stress fixtures and historical results stay here.
 The existing Go import namespace is retained for internal-package compatibility.
 Snapshot updates are explicit source changes with a recorded source revision;
 later canonical edits do not silently change this experiment.
-The current overlay fingerprint is
-`b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3`.
+The current source-preparation fingerprint is
+`7e09e472bd37c2c7b03aeb14dad509a0b56485bcfef2ddcb56e0891a2c08c7f9`.
+The checked target-bootstrap changes are host-tested; fresh native qualification
+is pending. The committed snapshot and earlier `c39ce3f7…` receipts remain
+historical provenance, not qualification for these uncommitted changes.
 The mirrored containerd overlay uses the real patched v2.3.7 client, retaining
 `k8s.io` discovery, explicit namespace overrides and permission-error propagation.
 Rebuild and verify candidate bundles separately; older installations are not

@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 package symbolizer
 
-import "context"
+import (
+	"context"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+)
 
 type DefinitionStopObservation struct {
 	ReaderStopped, ConsumerStopped bool
 	BuffersDrained                 bool
 	AuxiliaryStopped               bool
+	TraceDefinition                *libpf.TraceDefinitionObservation
+	Auxiliary                      *tracer.DefinitionAuxiliaryObservation `json:"-"`
 }
 type DefinitionStopper interface {
 	StopDefinitions(context.Context) (DefinitionStopObservation, error)
@@ -21,11 +27,17 @@ type AuxiliaryStopper interface {
 }
 
 func (s *Symbolizer) StopAuxiliary(ctx context.Context) error {
-	if err := s.stopPruning(ctx); err != nil {
+	claim := s.beginLocalStop(ctx)
+	state := pruneLoopUnknown
+	invoked, index := false, -1
+	defer func() { s.finishLocalStop(claim, state, invoked, index) }()
+	err, state := s.stopPruningState(ctx)
+	if err != nil {
 		return err
 	}
-	for _, r := range s.resolvers {
+	for i, r := range s.resolvers {
 		if stopper, ok := r.(AuxiliaryStopper); ok {
+			invoked, index = true, i
 			return stopper.StopAuxiliary(ctx)
 		}
 	}
@@ -42,10 +54,27 @@ func (s *Symbolizer) DrainDefinitions(ctx context.Context) (DefinitionStopObserv
 }
 
 func (s *Symbolizer) StopDefinitions(ctx context.Context) (DefinitionStopObservation, error) {
-	for _, r := range s.resolvers {
+	claim := s.beginLocalStop(ctx)
+	invoked, index := false, -1
+	defer func() { s.finishLocalStop(claim, pruneLoopUnknown, invoked, index) }()
+	for i, r := range s.resolvers {
 		if stopper, ok := r.(DefinitionStopper); ok {
+			invoked, index = true, i
 			return stopper.StopDefinitions(ctx)
 		}
 	}
 	return DefinitionStopObservation{}, ErrStructuredResolverUnavailable
+}
+
+type DefinitionBindingProvider interface {
+	TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error)
+}
+
+func (s *Symbolizer) TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error) {
+	for _, r := range s.resolvers {
+		if provider, ok := r.(DefinitionBindingProvider); ok {
+			return provider.TraceDefinitionBinding()
+		}
+	}
+	return libpf.TraceDefinitionBinding{}, ErrStructuredResolverUnavailable
 }

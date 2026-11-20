@@ -11,7 +11,7 @@ private const val SESSION_SECONDS = 60L
 private const val RETAINED_OCCURRENCES = 4096
 private const val RETAINED_BYTES = 33554432
 
-/** Explicit trusted local assets and operator-owned launch authority. Runtime admission is always strict. */
+/** Trusted local assets and launch authority. Strict APIs stay strict; [MazewallProfiler.observeHotSpot] explicitly observes ordinary JVMs. */
 public class HotSpotOptions(
     public val assetsDirectory: Path,
     collectorArgvPrefix: List<String> = emptyList(),

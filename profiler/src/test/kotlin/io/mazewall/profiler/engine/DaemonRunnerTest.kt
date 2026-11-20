@@ -19,7 +19,10 @@ class DaemonRunnerTest {
         var constructed = false
         val runner = RealDaemonRunner(
             exitFn = exits::add,
-            engineFactory = { error("engine must not be constructed").also { constructed = true } },
+            engineFactory = {
+                constructed = true
+                error("engine must not be constructed")
+            },
         )
 
         runner.runDaemon(emptyArray())

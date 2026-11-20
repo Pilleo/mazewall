@@ -36,8 +36,17 @@ cross-pairings are errors, not fallbacks.
 
 The candidate checks the expected PID/birth/cgroup/mount tuple before acquiring
 target owners, then owns the existing real pidfd and exec-poison barrier before
-profile discovery. It compares the mapped JVM inode/device, ELF ABI, full SHA256
-and GNU build ID with the existing pinned Temurin25 fingerprint. Runtime flags
+profile discovery. It binds the target-root JVM file to the selected VMA through
+`/proc/<pid>/map_files/<start>-<end>`, comparing both stat device/inode tuples
+and the maps inode before checking ELF ABI, full SHA256 and GNU build ID against
+the pinned Temurin25 fingerprint. Maps device numbers cannot be compared directly
+to stat devices: Linux maps reports the filesystem `s_dev`, while Btrfs stat
+reports a per-subvolume device. Missing/replaced mappings or denied map_files
+access reject discovery with the original cause; there is no inode-only or
+pathname fallback. Following map_files requires initial-user-namespace
+CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE on supported recent Linux kernels;
+the existing qualification capability set already includes CAP_SYS_ADMIN.
+Runtime flags
 must show compiler enabled, tiered compilation enabled, G1 enabled and Serial
 disabled. No safepoint counter is read or advertised by this profile. Expected
 identity is rechecked through discovery, before ready and by the exec/pidfd
@@ -45,6 +54,16 @@ watcher; every captured event must match PID/birth/cgroup. Cgroup checks require
 visible unified hierarchy under `/sys/fs/cgroup`; inaccessible, ambiguous or
 namespace-relative escaping paths fail closed and need an explicit A4 environment
 receipt rather than guessed identity.
+
+After real preflight, pidfd/exec-barrier and JVM discovery, structured capture
+initializes Gadget host state with automount disabled, then constructs the same
+local runtime. The pinned runtime wrapper adds only an unconditional UID0 guard;
+the adapter uses actual permissions instead of that UID assumption. Host checks
+and initialization failures remain intact, including host.Init's process-exit
+paths; subsequent BPF/attach/process-memory denials still reject capture. No UID,
+capability or filesystem is changed by initialization. The separate debug runner
+retains its existing upstream initialization. This source change alone is not
+native qualification.
 
 Owned full sessions construct the exec barrier independently of strict epoch
 mode. Ready, lookup/recovery and AfterReadout keep that real barrier. Existing
@@ -164,7 +183,10 @@ Local detailed Task3 evidence lives in the owning SDD
 
 MazeWall collector tooling and node-agent share hotspot-bridge bundle verification,
 bounded wire validation, typed content IDs and error vocabulary. Kotlin retains
-its strict admission/session implementation and the same regression expectations.
+its strict APIs and now has a separate explicit `MazewallProfiler.observeHotSpot`
+source path using the same session owner with independently supplied target
+identity and observed3 admission. Its host regressions do not qualify native
+public-API execution; see the [two-consumer checkpoint](../superpowers/plans/2026-10-22-hotspot-two-consumer-recovery.md).
 The SDK does not prove pipe EOF, child Wait, process retirement or metadata lifetime;
 those remain owned by each host. Node-agent additionally owns container discovery,
 storage projection and enforcement exclusion. The two Gadget dependency graphs
@@ -175,6 +197,7 @@ Both Go and Kotlin OCI walkers reject contradictory effective media for one dige
 before deduplication, while permitting same-media sharing and retaining full-byte,
 reachable-child and inventory checks. The shared wire boundary rejects case-folded
 aliases of the four canonical provider keys before typed decoding; genuine unknown
-extensions retain their raw bytes. Kotlin keeps exact-key access and schema2-only
-admission. Schema2 still omits schema3-only fields. These locally reviewed repairs
+extensions retain their raw bytes. Kotlin keeps exact-key access and explicitly
+separate schema2/schema3 admission; strict/AUTO never silently select observations.
+Schema2 still omits schema3-only fields. These locally reviewed repairs
 do not qualify native assets or publish an SDK; see the [current release status](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint).

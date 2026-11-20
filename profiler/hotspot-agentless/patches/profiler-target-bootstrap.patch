@@ -1,0 +1,1319 @@
+--- a/interpreter/hotspot/data.go
++++ b/interpreter/hotspot/data.go
+@@ -59,6 +59,8 @@
+ type hotspotVMData struct {
+ 	// err is the permanent error if introspection data is not supported
+ 	err error
++	// initReadErr is shared and immutable after Once publishes the parsed VM data.
++	initReadErr error
+ 
+ 	// version is the JDK numeric version. Used in some places to make version specific
+ 	// adjustments to the unwinding process.
+@@ -234,19 +236,39 @@
+ func (vmd *hotspotVMData) parseIntrospection(it *hotspotIntrospectionTable,
+ 	rm remotememory.RemoteMemory, loadBias libpf.Address,
+ ) error {
+-	stride := libpf.Address(rm.Uint64(it.stride + loadBias))
+-	typeOffs := uint(rm.Uint64(it.typeOffset + loadBias))
+-	addrOffs := uint(rm.Uint64(it.addressOffset + loadBias))
+-	fieldOffs := uint(rm.Uint64(it.fieldOffset + loadBias))
+-	valOffs := uint(rm.Uint64(it.valueOffset + loadBias))
++	readWord := func(addr libpf.Address, required bool) (uint64, bool) {
++		if !required {
++			return rm.Uint64(addr), true
++		}
++		var buf [8]byte
++		n, err := rm.ReadAt(buf[:], int64(addr))
++		if err == nil && n != len(buf) {
++			vmd.initReadErr = errors.Join(vmd.initReadErr, fmt.Errorf("introspection read at %#x: %w", addr, io.ErrUnexpectedEOF))
++		} else if err != nil {
++			vmd.initReadErr = errors.Join(vmd.initReadErr, fmt.Errorf("introspection read at %#x: %w", addr, err))
++			return 0, false
++		}
++		return binary.LittleEndian.Uint64(buf[:]), true
++	}
++	strideVal, _ := readWord(it.stride+loadBias, true)
++	typeVal, _ := readWord(it.typeOffset+loadBias, true)
++	addrVal, _ := readWord(it.addressOffset+loadBias, it.addressOffset != 0)
++	fieldVal, _ := readWord(it.fieldOffset+loadBias, it.fieldOffset != 0)
++	valueVal, _ := readWord(it.valueOffset+loadBias, true)
++	stride := libpf.Address(strideVal)
++	typeOffs, addrOffs, fieldOffs, valOffs := uint(typeVal), uint(addrVal), uint(fieldVal), uint(valueVal)
+ 	base := it.base + loadBias
+ 
+ 	if !it.skipBaseDref {
+-		base = rm.Ptr(base)
++		value, ok := readWord(base, true)
++		base = 0
++		if ok {
++			base = libpf.Address(value) - rm.Bias
++		}
+ 	}
+ 
+ 	if base == 0 || stride == 0 {
+-		return fmt.Errorf("bad introspection table data (%#x / %d)", base, stride)
++		return errors.Join(fmt.Errorf("bad introspection table data (%#x / %d)", base, stride), vmd.initReadErr)
+ 	}
+ 
+ 	// Parse the introspection table
+@@ -254,7 +276,7 @@
+ 	vm := reflect.ValueOf(&vmd.vmStructs).Elem()
+ 	for addr := base; true; addr += stride {
+ 		if err := rm.Read(addr, e); err != nil {
+-			return err
++			return errors.Join(err, vmd.initReadErr)
+ 		}
+ 
+ 		typeNamePtr := npsr.Ptr(e, typeOffs)
+--- a/interpreter/hotspot/instance.go
++++ b/interpreter/hotspot/instance.go
+@@ -78,6 +78,7 @@
+ 	// the needed data from it.
+ 	addrToMethod *freelru.LRU[libpf.Address, *hotspotMethod]
+ 	epochTarget libpf.HotSpotEpochTarget
++	observedBootstrapPID libpf.PID
+ 	epochHighWater uint64
+ 	epochPoisoned bool
+ 	metadataEpoch libpf.HotSpotIdentity
+@@ -604,13 +605,13 @@
+ 	for prefix := range d.prefixes {
+ 		if err2 := ebpf.DeletePidInterpreterMapping(pid, prefix); err2 != nil {
+ 			err = errors.Join(err,
+-				fmt.Errorf("failed to remove page 0x%x/%d: %v",
++				fmt.Errorf("failed to remove page 0x%x/%d: %w",
+ 					prefix.Key, prefix.Length, err2))
+ 		}
+ 	}
+ 
+ 	if err != nil {
+-		return fmt.Errorf("failed to detach hotspotInstance from PID %d: %v",
++		return fmt.Errorf("failed to detach hotspotInstance from PID %d: %w",
+ 			pid, err)
+ 	}
+ 	return nil
+@@ -633,8 +634,12 @@
+ 	} else {
+ 		// JDK 9-: CodeHeap through _heaps array
+ 		heaps := make([]byte, vms.GrowableArrayInt.Sizeof)
+-		if err := rm.Read(rm.Ptr(vms.CodeCache.Heaps+d.bias), heaps); err != nil {
+-			return nil, fmt.Errorf("fail to read heap array: %v", err)
++		heapsAddr, err := d.bootstrapPointer(vms.CodeCache.Heaps + d.bias)
++		if err != nil {
++			return nil, fmt.Errorf("fail to read heap array pointer: %w", err)
++		}
++		if err := rm.Read(heapsAddr, heaps); err != nil {
++			return nil, fmt.Errorf("fail to read heap array: %w", err)
+ 		}
+ 		// Read numHeaps
+ 		numHeaps = npsr.Uint32(heaps, vms.GenericGrowableArray.Len)
+@@ -655,7 +660,7 @@
+ 	heap := make([]byte, vms.CodeHeap.Sizeof)
+ 	heapPtrs := make([]byte, 8*numHeaps)
+ 	if err := rm.Read(heapPtrAddr, heapPtrs); err != nil {
+-		return nil, fmt.Errorf("fail to read heap array values: %v", err)
++		return nil, fmt.Errorf("fail to read heap array values: %w", err)
+ 	}
+ 
+ 	// Extract each heap structure individually
+@@ -666,7 +671,7 @@
+ 			return nil, nil
+ 		}
+ 		if err := rm.Read(heapPtr, heap); err != nil {
+-			return nil, fmt.Errorf("fail to read heap pointer %d: %v", ndx, err)
++			return nil, fmt.Errorf("fail to read heap pointer %d: %w", ndx, err)
+ 		}
+ 
+ 		// The segment shift is same for all heaps. So record it for the process only.
+@@ -712,7 +717,7 @@
+ 			support.ProgUnwindHotspot, host.FileID(area.tsid),
+ 			uint64(area.codeStart)); err != nil {
+ 			return fmt.Errorf(
+-				"failed to insert LPM entry for pid %d, page 0x%x/%d: %v",
++				"failed to insert LPM entry for pid %d, page 0x%x/%d: %w",
+ 				pid, prefix.Key, prefix.Length, err)
+ 		}
+ 
+@@ -797,8 +802,19 @@
+ 		procInfo.Codecache_end = uint64(heap.ranges[0].codeEnd)
+ 	} else {
+ 		// JDK9+ the VM tracks it separately
+-		procInfo.Codecache_start = uint64(d.rm.Ptr(vms.CodeCache.LowBound + d.bias))
+-		procInfo.Codecache_end = uint64(d.rm.Ptr(vms.CodeCache.HighBound + d.bias))
++		start, err := d.bootstrapPointer(vms.CodeCache.LowBound + d.bias)
++		if err != nil {
++			return fmt.Errorf("fail to read code cache low bound: %w", err)
++		}
++		end, err := d.bootstrapPointer(vms.CodeCache.HighBound + d.bias)
++		if err != nil {
++			return fmt.Errorf("fail to read code cache high bound: %w", err)
++		}
++		if d.strictBootstrap() && (start == 0 || end <= start) {
++			return fmt.Errorf("invalid HotSpot code cache bounds: %#x-%#x", start, end)
++		}
++		procInfo.Codecache_start = uint64(start)
++		procInfo.Codecache_end = uint64(end)
+ 	}
+ 
+ 	if err = ebpf.UpdateProcData(libpf.HotSpot, pid, unsafe.Pointer(&procInfo)); err != nil {
+--- a/processmanager/ebpf/asyncupdate.go
++++ b/processmanager/ebpf/asyncupdate.go
+@@ -5,10 +5,10 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+-	"errors"
++	"sync"
+ 	"unsafe"
+-	"sync"
+ 
+ 	cebpf "github.com/cilium/ebpf"
+ 	"go.opentelemetry.io/ebpf-profiler/internal/log"
+@@ -45,6 +45,7 @@
+ // versa.
+ type asyncMapUpdaterPool struct {
+ 	workers []*asyncUpdateWorker
++	counts  asyncQueueCounts
+ }
+ 
+ // newAsyncMapUpdaterPool creates a new worker pool
+@@ -55,7 +56,7 @@
+ 	for range numWorkers {
+ 		queue := make(chan asyncMapInMapUpdate, workerQueueCapacity)
+ 		worker := &asyncUpdateWorker{ctx: ctx, queue: queue}
+-		periodiccaller.GoOwned(ctx, worker.serve)
++		worker.unavailable = !periodiccaller.GoOwned(ctx, worker.serve)
+ 		pool.workers = append(pool.workers, worker)
+ 	}
+ 	return pool
+@@ -70,39 +71,119 @@
+ func (p *asyncMapUpdaterPool) EnqueueUpdate(
+ 	outer *cebpf.Map, fileID host.FileID, inner *cebpf.Map,
+ ) {
++	proof := p.counts.beginLegacyRequest(p, fileID, outer, inner)
+ 	workerIdx := uint64(fileID) % uint64(len(p.workers))
++	proof.bindWorker(int(workerIdx), p.workers[workerIdx])
++	if p.workers[workerIdx].unavailable {
++		proof.noteRejectCleanup(closeRejectedInner(p.workers[workerIdx].ctx, inner))
++		proof.classify(queueRefused, false, nil)
++		return
++	}
+ 	p.workers[workerIdx].admission.Lock()
+ 	defer p.workers[workerIdx].admission.Unlock()
+ 	if err := p.workers[workerIdx].ctx.Err(); err != nil {
+ 		// This spams integration tests
+ 		log.Debugf("Skipping handling of %v: %v", fileID, err)
+-		closeRejectedInner(p.workers[workerIdx].ctx, inner)
++		proof.noteRejectCleanup(closeRejectedInner(p.workers[workerIdx].ctx, inner))
++		proof.classify(queueRefused, false, err)
+ 		return
+ 	}
+ 	update := asyncMapInMapUpdate{
+ 		Outer:  outer,
+ 		FileID: fileID,
+ 		Inner:  inner,
++		proof:  proof,
+ 	}
+ 	select {
+ 	case p.workers[workerIdx].queue <- update:
++		proof.accept()
+ 	case <-p.workers[workerIdx].ctx.Done():
+-		closeRejectedInner(p.workers[workerIdx].ctx, inner)
++		proof.noteRejectCleanup(closeRejectedInner(p.workers[workerIdx].ctx, inner))
++		proof.classify(queueRefused, false, p.workers[workerIdx].ctx.Err())
+ 	}
+ }
+ 
+ // asyncMapInMapUpdate is an asynchronous update request for a map-in-map BPF map.
+ type asyncMapInMapUpdate struct {
+-	Outer  *cebpf.Map
+-	FileID host.FileID
+-	Inner  *cebpf.Map // nil = delete
++	Outer   *cebpf.Map
++	FileID  host.FileID
++	Inner   *cebpf.Map // nil = delete
++	checked *checkedMapUpdate
++	proof   *asyncQueueRequest
++}
++
++type checkedMapResult struct {
++	published bool
++	err       error
++}
++
++type checkedMapUpdate struct {
++	apply  func() (bool, error)
++	reject func() error
++	done   chan checkedMapResult
++	proof  *asyncQueueRequest
++}
++
++func (c *checkedMapUpdate) rejectTerminal(terminal asyncQueueTerminal, err error) {
++	var cleanupErr error
++	if c.reject != nil {
++		cleanupErr = c.reject()
++		err = errors.Join(err, cleanupErr)
++	}
++	c.proof.noteRejectCleanup(cleanupErr)
++	c.proof.classify(terminal, false, err)
++	c.done <- checkedMapResult{err: err}
++}
++
++func (c *checkedMapUpdate) rejectWith(err error) {
++	c.rejectTerminal(queueRefused, err)
++}
++
++func (c *checkedMapUpdate) abortWith(err error) {
++	c.rejectTerminal(queueAborted, err)
++}
++
++func (p *asyncMapUpdaterPool) enqueueChecked(fileID host.FileID, apply func() (bool, error), reject func() error) (bool, error) {
++	request := &checkedMapUpdate{apply: apply, reject: reject, done: make(chan checkedMapResult, 1)}
++	request.proof = p.counts.beginCheckedRequest(p, fileID, request)
++	if len(p.workers) == 0 {
++		request.rejectWith(errors.New("no map update worker"))
++		result := <-request.done
++		return result.published, result.err
++	}
++	workerIdx := uint64(fileID) % uint64(len(p.workers))
++	w := p.workers[workerIdx]
++	request.proof.bindWorker(int(workerIdx), w)
++	if w.unavailable {
++		request.rejectWith(errors.New("map update worker unavailable"))
++		result := <-request.done
++		return result.published, result.err
++	}
++	w.admission.Lock()
++	if err := w.ctx.Err(); err != nil {
++		w.admission.Unlock()
++		request.rejectWith(err)
++	} else {
++		select {
++		case w.queue <- asyncMapInMapUpdate{FileID: fileID, checked: request, proof: request.proof}:
++			request.proof.accept()
++			w.admission.Unlock()
++		case <-w.ctx.Done():
++			w.admission.Unlock()
++			request.rejectWith(w.ctx.Err())
++		}
++	}
++	result := <-request.done
++	return result.published, result.err
+ }
+ 
+ // asyncUpdateWorker represents a worker in a newAsyncMapUpdaterPool.
+ type asyncUpdateWorker struct {
+-	admission sync.Mutex
+-	ctx   context.Context
+-	queue chan asyncMapInMapUpdate
++	admission   sync.Mutex
++	unavailable bool
++	serveEnded  bool
++	ctx         context.Context
++	queue       chan asyncMapInMapUpdate
+ }
+ 
+ // serve is the main loop of an update worker.
+@@ -116,7 +197,21 @@
+ 		case update = <-w.queue:
+ 		}
+ 
+-		if w.ctx.Err() != nil { closeRejectedInner(w.ctx,update.Inner); break WorkerLoop }
++		if err := w.ctx.Err(); err != nil {
++			if update.checked != nil {
++				update.checked.abortWith(err)
++			} else {
++				update.proof.noteRejectCleanup(closeRejectedInner(w.ctx, update.Inner))
++				update.proof.classify(queueAborted, false, err)
++			}
++			break WorkerLoop
++		}
++		if update.checked != nil {
++			published, err := update.checked.apply()
++			update.checked.proof.classifyCheckedApply(published, err)
++			update.checked.done <- checkedMapResult{published: published, err: err}
++			continue
++		}
+ 		var err error
+ 		if update.Inner == nil {
+ 			err = update.Outer.Delete(unsafe.Pointer(&update.FileID))
+@@ -127,8 +222,11 @@
+ 			err = errors.Join(err, update.Inner.Close())
+ 		}
+ 
++		update.proof.classifyLegacyApply(err)
+ 		if err != nil {
+-			if !periodiccaller.ReportOwnedError(w.ctx, err) { log.Warnf("Outer map update failure: %v", err) }
++			if !periodiccaller.ReportOwnedError(w.ctx, err) {
++				log.Warnf("Outer map update failure: %v", err)
++			}
+ 		}
+ 	}
+ 
+@@ -138,8 +236,14 @@
+ 	for {
+ 		select {
+ 		case update := <-w.queue:
+-			closeRejectedInner(w.ctx, update.Inner)
++			if update.checked != nil {
++				update.checked.abortWith(w.ctx.Err())
++			} else {
++				update.proof.noteRejectCleanup(closeRejectedInner(w.ctx, update.Inner))
++				update.proof.classify(queueAborted, false, w.ctx.Err())
++			}
+ 		default:
++			w.serveEnded = true
+ 			return
+ 		}
+ 	}
+--- a/processmanager/ebpf/ebpf.go
++++ b/processmanager/ebpf/ebpf.go
+@@ -504,7 +504,7 @@
+ 
+ 	restoreRlimit, err := rlimit.MaximizeMemlock()
+ 	if err != nil {
+-		return 0, fmt.Errorf("failed to increase rlimit: %v", err)
++		return 0, fmt.Errorf("failed to increase rlimit: %w", err)
+ 	}
+ 	defer restoreRlimit()
+ 
+@@ -516,66 +516,92 @@
+ 
+ 	innerMap, err := cebpf.NewMap(innerMapSpec)
+ 	if err != nil {
+-		return 0, fmt.Errorf("failed to create inner map: %v", err)
+-	}
+-	defer func() {
+-		if err = innerMap.Close(); err != nil {
+-			log.Errorf("Failed to close FD of inner map for 0x%x: %v", fileID, err)
+-		}
+-	}()
+-
+-	// We continue updating the inner map after enqueueing the update to the
+-	// outer map. Both the async update pool and our code below need an open
+-	// file descriptor to work, and we don't know which will complete first.
+-	// We thus clone the FD, transfer ownership of the clone to the update
+-	// pool and continue using our original FD whose lifetime is now no longer
+-	// tied to the FD used in the updater pool.
+-	innerMapCloned, err := innerMap.Clone()
+-	if err != nil {
+-		return 0, fmt.Errorf("failed to clone inner map: %v", err)
+-	}
+-
+-	impl.updateWorkers.EnqueueUpdate(outerMap, fileID, innerMapCloned)
+-
+-	if impl.hasGenericBatchOperations {
+-		innerKeys := make([]uint32, numDeltas)
+-		stackDeltas := make([]support.StackDelta, numDeltas)
+-
+-		// Prepare values for batch update.
++		return 0, fmt.Errorf("failed to create inner map: %w", err)
++	}
++	populate := func() error {
++		if impl.hasGenericBatchOperations {
++			innerKeys := make([]uint32, numDeltas)
++			stackDeltas := make([]support.StackDelta, numDeltas)
++
++			// Prepare values for batch update.
++			for index, delta := range deltas {
++				innerKeys[index] = uint32(index)
++				stackDeltas[index].AddrLow = delta.AddressLow
++				stackDeltas[index].UnwindInfo = delta.UnwindInfo
++			}
++
++			_, err := innerMap.BatchUpdate(
++				ptrCastMarshaler[uint32](innerKeys),
++				ptrCastMarshaler[support.StackDelta](stackDeltas),
++				&cebpf.BatchOptions{Flags: uint64(cebpf.UpdateAny)})
++			if err != nil {
++				return impl.trackMapError(metrics.IDExeIDToStackDeltasBatchUpdate,
++					fmt.Errorf("failed to batch insert %d elements for 0x%x "+
++						"into exeIDTostack_deltas: %w",
++						numDeltas, fileID, err))
++			}
++			return nil
++		}
++
++		innerKey := uint32(0)
++		stackDelta := support.StackDelta{}
+ 		for index, delta := range deltas {
+-			innerKeys[index] = uint32(index)
+-			stackDeltas[index].AddrLow = delta.AddressLow
+-			stackDeltas[index].UnwindInfo = delta.UnwindInfo
+-		}
+-
+-		_, err := innerMap.BatchUpdate(
+-			ptrCastMarshaler[uint32](innerKeys),
+-			ptrCastMarshaler[support.StackDelta](stackDeltas),
+-			&cebpf.BatchOptions{Flags: uint64(cebpf.UpdateAny)})
+-		if err != nil {
+-			return 0, impl.trackMapError(metrics.IDExeIDToStackDeltasBatchUpdate,
+-				fmt.Errorf("failed to batch insert %d elements for 0x%x "+
+-					"into exeIDTostack_deltas: %v",
+-					numDeltas, fileID, err))
+-		}
+-		return mapID, nil
+-	}
+-
+-	innerKey := uint32(0)
+-	stackDelta := support.StackDelta{}
+-	for index, delta := range deltas {
+-		stackDelta.AddrLow = delta.AddressLow
+-		stackDelta.UnwindInfo = delta.UnwindInfo
+-		innerKey = uint32(index)
+-		if err := innerMap.Update(unsafe.Pointer(&innerKey), unsafe.Pointer(&stackDelta),
+-			cebpf.UpdateAny); err != nil {
+-			return 0, impl.trackMapError(metrics.IDExeIDToStackDeltasUpdate, fmt.Errorf(
+-				"failed to insert element %d for 0x%x into exeIDTostack_deltas: %v",
+-				index, fileID, err))
+-		}
+-	}
+-
++			stackDelta.AddrLow = delta.AddressLow
++			stackDelta.UnwindInfo = delta.UnwindInfo
++			innerKey = uint32(index)
++			if err := innerMap.Update(unsafe.Pointer(&innerKey), unsafe.Pointer(&stackDelta),
++				cebpf.UpdateAny); err != nil {
++				return impl.trackMapError(metrics.IDExeIDToStackDeltasUpdate, fmt.Errorf(
++					"failed to insert element %d for 0x%x into exeIDTostack_deltas: %w",
++					index, fileID, err))
++			}
++		}
++
++		return nil
++	}
++	err = installOwnedStackDeltas(fileID, mapID, populate, innerMap.Close,
++		func() (bool, error) {
++			return impl.updateWorkers.enqueueChecked(fileID, func() (bool, error) {
++				fd := uint32(innerMap.FD())
++				err := outerMap.Update(unsafe.Pointer(&fileID), unsafe.Pointer(&fd), cebpf.UpdateNoExist)
++				return err == nil, errors.Join(err, innerMap.Close())
++			}, innerMap.Close)
++		},
++		func() error { return impl.DeleteExeIDToStackDeltas(fileID, mapID) })
++	if err != nil {
++		return 0, err
++	}
+ 	return mapID, nil
++}
++
++type stackDeltaPublishedError struct {
++	fileID host.FileID
++	mapID  uint16
++	err    error
++}
++
++func (e *stackDeltaPublishedError) Error() string {
++	return fmt.Sprintf("stack delta publication for %x map %d remains: %v", e.fileID, e.mapID, e.err)
++}
++
++func (e *stackDeltaPublishedError) Unwrap() error { return e.err }
++
++func installOwnedStackDeltas(fileID host.FileID, mapID uint16, populate func() error, closeOwned func() error,
++	publish func() (bool, error), rollback func() error,
++) error {
++	if err := populate(); err != nil {
++		return errors.Join(err, closeOwned())
++	}
++	published, err := publish()
++	if err == nil && !published {
++		return errors.New("stack delta publication was not performed")
++	}
++	if err != nil && published {
++		if cleanupErr := rollback(); cleanupErr != nil {
++			return &stackDeltaPublishedError{fileID: fileID, mapID: mapID, err: errors.Join(err, cleanupErr)}
++		}
++	}
++	return err
+ }
+ 
+ // DeleteExeIDToStackDeltas removes all eBPF stack delta entries for given fileID and mapID number.
+@@ -587,9 +613,10 @@
+ 
+ 	// Deleting the entry from the outer maps deletes also the entries of the inner
+ 	// map associated with this outer key.
+-	impl.updateWorkers.EnqueueUpdate(outerMap, fileID, nil)
+-
+-	return nil
++	_, err := impl.updateWorkers.enqueueChecked(fileID, func() (bool, error) {
++		return false, outerMap.Delete(unsafe.Pointer(&fileID))
++	}, nil)
++	return err
+ }
+ 
+ // UpdateStackDeltaPages adds fileID/page with given information to eBPF map. If the entry exists,
+@@ -616,22 +643,50 @@
+ 		firstDelta += uint32(numDeltas)
+ 	}
+ 
+-	if impl.hasGenericBatchOperations {
+-		_, err := impl.StackDeltaPageToInfo.BatchUpdate(
+-			ptrCastMarshaler[support.StackDeltaPageKey](keys),
+-			ptrCastMarshaler[support.StackDeltaPageInfo](values),
+-			&cebpf.BatchOptions{Flags: uint64(cebpf.UpdateNoExist)})
+-		return impl.trackMapError(metrics.IDStackDeltaPageToInfoBatchUpdate, err)
+-	}
+-
+-	for index := range keys {
+-		if err := impl.trackMapError(metrics.IDStackDeltaPageToInfoUpdate,
+-			impl.StackDeltaPageToInfo.Update(unsafe.Pointer(&keys[index]),
+-				unsafe.Pointer(&values[index]), cebpf.UpdateNoExist)); err != nil {
+-			return err
+-		}
+-	}
+-	return nil
++	return installStackDeltaPages(keys, values, stackDeltaPageOps{
++		insert: func(k support.StackDeltaPageKey, v support.StackDeltaPageInfo) error {
++			return impl.trackMapError(metrics.IDStackDeltaPageToInfoUpdate,
++				impl.StackDeltaPageToInfo.Update(unsafe.Pointer(&k), unsafe.Pointer(&v), cebpf.UpdateNoExist))
++		},
++		remove: func(k support.StackDeltaPageKey) error {
++			return impl.StackDeltaPageToInfo.Delete(unsafe.Pointer(&k))
++		},
++	})
++}
++
++type stackDeltaPageOps struct {
++	insert func(support.StackDeltaPageKey, support.StackDeltaPageInfo) error
++	remove func(support.StackDeltaPageKey) error
++}
++
++type stackDeltaRollbackError struct {
++	remaining map[support.StackDeltaPageKey]support.StackDeltaPageInfo
++}
++
++func (e *stackDeltaRollbackError) Error() string {
++	return fmt.Sprintf("stack delta rollback incomplete: %d remaining", len(e.remaining))
++}
++
++func installStackDeltaPages(keys []support.StackDeltaPageKey, values []support.StackDeltaPageInfo, ops stackDeltaPageOps) error {
++	if len(keys) != len(values) {
++		return fmt.Errorf("stack delta page key/value count mismatch")
++	}
++	for i, key := range keys {
++		if err := ops.insert(key, values[i]); err != nil {
++			remaining := make(map[support.StackDeltaPageKey]support.StackDeltaPageInfo)
++			for j := 0; j < i; j++ {
++				if cleanupErr := ops.remove(keys[j]); cleanupErr != nil {
++					remaining[keys[j]] = values[j]
++					err = errors.Join(err, cleanupErr)
++				}
++			}
++			if len(remaining) != 0 {
++				err = errors.Join(err, &stackDeltaRollbackError{remaining: remaining})
++			}
++			return err
++		}
++	}
++	return nil
+ }
+ 
+ // DeleteStackDeltaPage removes the entry specified by fileID and page from the eBPF map.
+--- a/processmanager/execinfomanager/manager.go
++++ b/processmanager/execinfomanager/manager.go
+@@ -226,19 +226,32 @@
+ 
+ 	// Create the LoaderInfo for interpreter detection
+ 	loaderInfo := interpreter.NewLoaderInfo(fileID, elfRef)
++	interpreterData, loaderErr := state.detectAndLoadInterpData(loaderInfo)
+ 
+ 	// Insert a corresponding record into our map.
+ 	info = &entry{
+ 		ExecutableInfo: ExecutableInfo{
+-			Data:     state.detectAndLoadInterpData(loaderInfo),
++			Data:     interpreterData,
+ 			LibcInfo: libcInfo,
+ 		},
+-		mapRef: ref,
+-		rc:     1,
++		mapRef:    ref,
++		rc:        1,
++		loaderErr: loaderErr,
+ 	}
+ 	state.executables[fileID] = info
+ 
+ 	return info.ExecutableInfo, nil
++}
++
++// LoaderError reports cached interpreter detection failures for strict PM bootstrap.
++func (mgr *ExecutableInfoManager) LoaderError(fileID host.FileID) error {
++	state := mgr.state.RLock()
++	defer mgr.state.RUnlock(&state)
++	info, ok := state.executables[fileID]
++	if !ok {
++		return fmt.Errorf("executable %v is not cached", fileID)
++	}
++	return info.loaderErr
+ }
+ 
+ // DecRef decrements the reference counter of the executable being tracked.
+@@ -356,13 +369,15 @@
+ // interpreter data. If multiple loaders recognize the executable, it returns a MultiData instance.
+ func (state *executableInfoManagerState) detectAndLoadInterpData(
+ 	loaderInfo *interpreter.LoaderInfo,
+-) interpreter.Data {
++) (interpreter.Data, error) {
+ 	var interpreterDatas []interpreter.Data //nolint:prealloc
++	var loaderErr error
+ 
+ 	// Ask all interpreter loaders whether they want to handle this executable.
+ 	for _, loader := range state.interpreterLoaders {
+ 		data, err := loader(state.ebpf, loaderInfo)
+ 		if err != nil {
++			loaderErr = errors.Join(loaderErr, fmt.Errorf("interpreter loader for %v: %w", loaderInfo.FileName(), err))
+ 			if errors.Is(err, os.ErrNotExist) {
+ 				// Very common if the process exited when we tried to analyze it.
+ 				log.Debugf("Failed to load %v (%#016x): file not found",
+@@ -386,14 +401,14 @@
+ 	// Return based on how many interpreters matched
+ 	switch len(interpreterDatas) {
+ 	case 0:
+-		return nil
++		return nil, loaderErr
+ 	case 1:
+-		return interpreterDatas[0]
++		return interpreterDatas[0], loaderErr
+ 	default:
+ 		// Multiple interpreters matched, create a MultiData
+ 		log.Debugf("Multiple interpreters (%d) matched for %v (%#016x)",
+ 			len(interpreterDatas), loaderInfo.FileName(), loaderInfo.FileID())
+-		return interpreter.NewMultiData(interpreterDatas)
++		return interpreter.NewMultiData(interpreterDatas), loaderErr
+ 	}
+ }
+ 
+@@ -448,15 +463,18 @@
+ 	mapID, err := state.ebpf.UpdateExeIDToStackDeltas(fileID, ebpfDeltas)
+ 	if err != nil {
+ 		return mapRef{},
+-			fmt.Errorf("failed UpdateExeIDToStackDeltas for FileID %x: %v", fileID, err)
++			fmt.Errorf("failed UpdateExeIDToStackDeltas for FileID %x: %w", fileID, err)
+ 	}
+ 
+ 	// Update stack delta pages
+ 	if err = state.ebpf.UpdateStackDeltaPages(fileID, numDeltasPerPage, mapID,
+ 		firstPageAddr); err != nil {
+-		_ = state.ebpf.DeleteExeIDToStackDeltas(fileID, ref.MapID)
++		cleanupErr := state.ebpf.DeleteExeIDToStackDeltas(fileID, mapID)
++		if cleanupErr != nil {
++			cleanupErr = fmt.Errorf("unresolved stack delta cleanup for FileID %x mapID %d: %w", fileID, mapID, cleanupErr)
++		}
+ 		return mapRef{},
+-			fmt.Errorf("failed UpdateStackDeltaPages for FileID %x: %v", fileID, err)
++			errors.Join(fmt.Errorf("failed UpdateStackDeltaPages for FileID %x: %w", fileID, err), cleanupErr)
+ 	}
+ 	state.numStackDeltaMapPages += numPages
+ 
+@@ -508,7 +526,7 @@
+ 	}
+ 	index := uint16(len(state.unwindInfoIndex))
+ 	if err := state.ebpf.UpdateUnwindInfo(index, info); err != nil {
+-		return 0, fmt.Errorf("failed to insert unwind info #%d: %v", index, err)
++		return 0, fmt.Errorf("failed to insert unwind info #%d: %w", index, err)
+ 	}
+ 	state.unwindInfoIndex[info] = index
+ 	return index, nil
+@@ -543,7 +561,8 @@
+ 	// ExecutableInfo is the public portion of the EIM entry.
+ 	ExecutableInfo
+ 	// mapRef stores info for identifying associated data in BPF maps.
+-	mapRef mapRef
++	mapRef    mapRef
++	loaderErr error
+ 	// rc determines in how many processes this executable is currently loaded.
+ 	rc uint64
+ }
+--- a/processmanager/processinfo.go
++++ b/processmanager/processinfo.go
+@@ -12,6 +12,7 @@
+ // HA/tracer and tools/coredump modules only.
+ 
+ import (
++	"context"
+ 	"errors"
+ 	"fmt"
+ 	"os"
+@@ -31,6 +32,7 @@
+ 	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+ 	"go.opentelemetry.io/ebpf-profiler/lpm"
+ 	"go.opentelemetry.io/ebpf-profiler/process"
++	"go.opentelemetry.io/ebpf-profiler/processmanager/execinfomanager"
+ 	"go.opentelemetry.io/ebpf-profiler/reporter"
+ 	"go.opentelemetry.io/ebpf-profiler/times"
+ 	"go.opentelemetry.io/ebpf-profiler/util"
+@@ -73,8 +75,12 @@
+ // assignLibcInfo updates the LibcInfo for the Interpreters on given PID.
+ // Caller must hold pm.mu write lock.
+ func (pm *ProcessManager) assignLibcInfo(pid libpf.PID, libcInfo *libc.LibcInfo) {
++	_ = pm.assignLibcInfoChecked(pid, libcInfo, ordinarySynchronization)
++}
++
++func (pm *ProcessManager) assignLibcInfoChecked(pid libpf.PID, libcInfo *libc.LibcInfo, mode synchronizationMode) error {
+ 	if libcInfo == nil {
+-		return
++		return nil
+ 	}
+ 
+ 	var newLibcInfo = *libcInfo
+@@ -82,10 +88,10 @@
+ 	if !ok {
+ 		// This is guaranteed not to happen since assignLibcInfo is always called after
+ 		// pm.updatePidInformation - but to avoid a possible panic we just return here.
+-		return
++		return nil
+ 	} else if info.libcInfo != nil {
+ 		if info.libcInfo.IsEqual(newLibcInfo) {
+-			return
++			return nil
+ 		} else {
+ 			info.libcInfo.Merge(newLibcInfo)
+ 			newLibcInfo = *info.libcInfo
+@@ -97,10 +103,14 @@
+ 	// Update the tsdInfo to interpreters that are already attached
+ 	for _, instance := range pm.interpreters[pid] {
+ 		if err := instance.UpdateLibcInfo(pm.ebpf, pid, newLibcInfo); err != nil {
++			if mode.strictBootstrap() {
++				return fmt.Errorf("update PID %v LibcInfo: %w", pid, err)
++			}
+ 			log.Errorf("Failed to update PID %v LibcInfo: %v",
+ 				pid, err)
+ 		}
+ 	}
++	return nil
+ }
+ 
+ // getLibcInfo retrieves the LibcInfo of given PID
+@@ -116,15 +126,15 @@
+ //
+ // Caller must hold pm.mu write lock.
+ func (pm *ProcessManager) getPidInformation(pid libpf.PID, pr process.Process,
+-) *processInfo {
++) (*processInfo, error) {
+ 	if info, ok := pm.pidToProcessInfo[pid]; ok {
+-		return info
++		return info, nil
+ 	}
+ 
+ 	// Insert a dummy page into the eBPF map pid_page_to_mapping_info that provides the eBPF
+ 	// a quick way to check if we know something about this particular process.
+ 	if err := pm.ebpf.UpdatePidPageMappingInfo(pid, dummyPrefix, 0, 0); err != nil {
+-		return nil
++		return nil, err
+ 	}
+ 
+ 	info := &processInfo{
+@@ -133,7 +143,7 @@
+ 	}
+ 	pm.pidToProcessInfo[pid] = info
+ 	pm.pidPageToMappingInfoSize++
+-	return info
++	return info, nil
+ }
+ 
+ // assignInterpreter will update the interpreters maps with given interpreter.Instance.
+@@ -161,6 +171,22 @@
+ // The caller is responsible to hold the ProcessManager lock to avoid race conditions.
+ func (pm *ProcessManager) handleNewInterpreter(pr process.Process, bias libpf.Address,
+ 	oid util.OnDiskFileIdentifier, data interpreter.Data) error {
++	return pm.handleNewInterpreterChecked(context.Background(), pr, bias, oid, data, ordinarySynchronization, nil)
++}
++
++func (pm *ProcessManager) handleNewInterpreterChecked(ctx context.Context, pr process.Process, bias libpf.Address,
++	oid util.OnDiskFileIdentifier, data interpreter.Data, mode synchronizationMode, journal *bootstrapJournal) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	if mode.strictBootstrap() {
++		if journal == nil {
++			return errors.New("missing bootstrap journal")
++		}
++		if err := journal.checkProcessLocked(pm, pr.PID()); err != nil {
++			return err
++		}
++	}
+ 	// The same interpreter can be found multiple times under various different
+ 	// circumstances. Check if this is already handled.
+ 	pid := pr.PID()
+@@ -175,6 +201,22 @@
+ 		return fmt.Errorf("failed to attach to %v in PID %v: %w",
+ 			data, pid, err)
+ 	}
++	if mode.strictBootstrap() && instance == nil {
++		return errors.New("interpreter attach returned nil instance")
++	}
++	if mode.strictBootstrap() {
++		journal.entries = append(journal.entries, bootstrapAcquisition{instance: instance, pid: pid, key: oid})
++		if err := ctx.Err(); err != nil {
++			return err
++		}
++	}
++	if mode == strictObservedBootstrap {
++		if capable, ok := instance.(hotspotObservedBootstrap); ok && !bootstrapNil(capable) {
++			if err := capable.ConfigureHotSpotObservedBootstrap(pid); err != nil {
++				return fmt.Errorf("configure observed HotSpot bootstrap PID %v: %w", pid, err)
++			}
++		}
++	}
+ 
+ 	if pm.epochTarget.PID == pid {
+ 		if capable, ok := instance.(interpreter.HotSpotEpochInstance); ok {
+@@ -185,15 +227,21 @@
+ 	}
+ 	log.Debugf("Attached to %v interpreter in PID %v", data, pid)
+ 	pm.assignInterpreter(pid, oid, instance)
++	if mode.strictBootstrap() {
++		journal.entries[len(journal.entries)-1].installed = true
++	}
+ 
+ 	if libcInfo := pm.getLibcInfo(pid); libcInfo != nil {
+ 		err = instance.UpdateLibcInfo(pm.ebpf, pid, *libcInfo)
+ 		if err != nil {
++			if mode.strictBootstrap() {
++				return fmt.Errorf("update PID %v LibcInfo: %w", pid, err)
++			}
+ 			log.Errorf("Failed to update PID %v LibcInfo: %v", pid, err)
+ 		}
+ 	}
+ 
+-	return nil
++	return ctx.Err()
+ }
+ 
+ func (pm *ProcessManager) getELFInfo(pr process.Process, mapping *process.Mapping,
+@@ -265,28 +313,56 @@
+ 	return info
+ }
+ 
+-func (pm *ProcessManager) processNewMapping(pid libpf.PID, m *Mapping) uint64 {
++func (pm *ProcessManager) processNewMapping(pid libpf.PID, m *Mapping) (uint64, error) {
++	return pm.processNewMappingChecked(context.Background(), pid, m, nil)
++}
++
++func (pm *ProcessManager) processNewMappingChecked(ctx context.Context, pid libpf.PID, m *Mapping, journal *bootstrapJournal) (uint64, error) {
++	if journal != nil {
++		if err := ctx.Err(); err != nil {
++			return 0, err
++		}
++		if m == nil || !m.FrameMapping.Valid() {
++			return 0, errors.New("invalid bootstrap frame mapping")
++		}
++	}
+ 	mf := m.FrameMapping.Value()
++	if journal != nil && (m.Vaddr == 0 || mf.File == (libpf.FrameMappingFile{}) || mf.End <= mf.Start ||
++		uint64(mf.End-mf.Start) > ^uint64(0)-uint64(m.Vaddr)) {
++		return 0, errors.New("invalid bootstrap mapping bounds")
++	}
+ 
+ 	// Update the eBPF maps with information about this mapping.
+ 	prefixes, err := lpm.CalculatePrefixList(uint64(m.Vaddr), uint64(m.Vaddr+mf.End-mf.Start))
+ 	if err != nil {
+ 		log.Errorf("Failed to create LPM entries for PID %d: %v", pid, err)
+-		return 0
++		return 0, err
+ 	}
+ 
+ 	added := uint64(0)
+ 	bias := uint64(m.Vaddr - mf.Start)
+ 	fileID := uint64(host.FileIDFromLibpf(mf.File.Value().FileID))
+ 	for _, prefix := range prefixes {
++		if err := ctx.Err(); err != nil {
++			return added, err
++		}
++		if journal != nil && (prefix == dummyPrefix || journal.ownsPrefix(prefix)) {
++			return added, fmt.Errorf("overlapping bootstrap prefix %#x/%d", prefix.Key, prefix.Length)
++		}
+ 		if err = pm.ebpf.UpdatePidPageMappingInfo(pid, prefix, fileID, bias); err != nil {
+ 			log.Errorf("Failed to update pid_page_to_mapping_info (pid: %d, page: 0x%x/%d): %v",
+ 				pid, prefix.Key, prefix.Length, err)
+-			break
++			return added, err
++		}
++		if journal != nil {
++			journal.prefixes = append(journal.prefixes, prefix)
++			pm.mu.Lock()
++			pm.pidPageToMappingInfoSize++
++			pm.mu.Unlock()
+ 		}
+ 		added++
+ 	}
+-	return added
++	return added, ctx.Err()
+ }
+ 
+ func (pm *ProcessManager) processRemovedMapping(pid libpf.PID, m *Mapping) uint64 {
+@@ -339,11 +415,36 @@
+ var errInvalidVirtualAddress = errors.New("invalid ELF virtual address")
+ 
+ func (pm *ProcessManager) newFrameMapping(pr process.Process, m *process.Mapping) (libpf.FrameMapping, error) {
++	return pm.newFrameMappingChecked(context.Background(), pr, m, ordinarySynchronization, nil)
++}
++
++func (pm *ProcessManager) newFrameMappingChecked(ctx context.Context, pr process.Process, m *process.Mapping,
++	mode synchronizationMode, journal *bootstrapJournal) (libpf.FrameMapping, error) {
++	if err := ctx.Err(); err != nil {
++		return libpf.FrameMapping{}, err
++	}
++	if mode.strictBootstrap() {
++		if journal == nil {
++			return libpf.FrameMapping{}, errors.New("missing bootstrap journal")
++		}
++		pm.mu.Lock()
++		err := journal.checkProcessLocked(pm, pr.PID())
++		pm.mu.Unlock()
++		if err != nil {
++			return libpf.FrameMapping{}, err
++		}
++	}
+ 	elfRef := pfelf.NewReference(m.Path.String(), pr)
+ 	defer elfRef.Close()
+ 
+ 	info := pm.getELFInfo(pr, m, elfRef)
++	if err := ctx.Err(); err != nil {
++		return libpf.FrameMapping{}, err
++	}
+ 	if info.err != nil {
++		if mode.strictBootstrap() && info.err == pfelf.ErrNotELF && path.Base(m.Path.String()) != "libjvm.so" {
++			return libpf.FrameMapping{}, fmt.Errorf("%w: %w", errBootstrapNonELF, info.err)
++		}
+ 		// Unable to get the information. Most likely cause is that the
+ 		// process has exited already and the mapping file is unavailable
+ 		// or it is not an ELF file. Ignore these errors silently.
+@@ -362,18 +463,32 @@
+ 	}
+ 
+ 	fileID := host.FileIDFromLibpf(info.mappingFile.Value().FileID)
+-	ei, err := pm.eim.AddOrIncRef(fileID, elfRef)
++	var ei execinfomanager.ExecutableInfo
++	var err error
++	if mode.strictBootstrap() {
++		ei, err = journal.acquireELF(ctx, pm.eim, fileID, elfRef)
++	} else {
++		ei, err = pm.eim.AddOrIncRef(fileID, elfRef)
++	}
+ 	if err != nil {
+ 		return libpf.FrameMapping{}, err
+ 	}
+ 
+ 	pm.mu.Lock()
+-	pm.assignLibcInfo(pr.PID(), ei.LibcInfo)
+-	if ei.Data != nil {
++	err = pm.assignLibcInfoChecked(pr.PID(), ei.LibcInfo, mode)
++	if err == nil && ei.Data != nil {
+ 		bias := libpf.Address(m.Vaddr - elfSpaceVA)
+-		pm.handleNewInterpreter(pr, bias, m.GetOnDiskFileIdentifier(), ei.Data)
++		err = pm.handleNewInterpreterChecked(ctx, pr, bias, m.GetOnDiskFileIdentifier(), ei.Data, mode, journal)
+ 	}
+ 	pm.mu.Unlock()
++	if mode.strictBootstrap() {
++		if err != nil {
++			return libpf.FrameMapping{}, err
++		}
++		if err := ctx.Err(); err != nil {
++			return libpf.FrameMapping{}, err
++		}
++	}
+ 
+ 	return libpf.NewFrameMapping(libpf.FrameMappingData{
+ 		File:       info.mappingFile,
+@@ -414,10 +529,27 @@
+ // TODO: Periodic synchronization of mappings for every tracked PID.
+ func (pm *ProcessManager) synchronizeMappings(pr process.Process,
+ 	processMappings []process.Mapping) bool {
++	newProcess, _ := pm.synchronizeMappingsChecked(context.Background(), pr, processMappings, ordinarySynchronization, nil)
++	return newProcess
++}
++
++func (pm *ProcessManager) synchronizeMappingsChecked(ctx context.Context, pr process.Process,
++	processMappings []process.Mapping, mode synchronizationMode, journal *bootstrapJournal) (bool, error) {
+ 	pid := pr.PID()
++	if err := ctx.Err(); err != nil {
++		return false, err
++	}
+ 
+ 	// Get current executable name
+ 	exe, err := pr.GetExe()
++	if mode.strictBootstrap() {
++		if err != nil {
++			return false, fmt.Errorf("get executable for PID %v: %w", pid, err)
++		}
++		if err := ctx.Err(); err != nil {
++			return false, err
++		}
++	}
+ 	if err != nil && !os.IsNotExist(err) {
+ 		// The /proc/PID/exe returns "not exists" error also in
+ 		// the case of main thread exit. Ignore it.
+@@ -425,10 +557,21 @@
+ 	}
+ 
+ 	pm.mu.Lock()
+-	info := pm.getPidInformation(pid, pr)
++	if mode.strictBootstrap() {
++		if err := journal.checkProcessLocked(pm, pid); err != nil {
++			pm.mu.Unlock()
++			return false, err
++		}
++	}
++	info, infoErr := pm.getPidInformation(pid, pr)
+ 	if info == nil {
+ 		pm.mu.Unlock()
+-		return false
++		return false, infoErr
++	}
++	if mode.strictBootstrap() && journal.info == nil {
++		journal.info = info
++		journal.pid = pid
++		journal.prefixes = append(journal.prefixes, dummyPrefix)
+ 	}
+ 	// Check if process meta needs an update
+ 	updateProcessMeta := exe != libpf.NullString && exe != info.meta.Executable
+@@ -455,6 +598,9 @@
+ 	mpAdd := make([]*Mapping, 0, len(processMappings))
+ 	interpretersValid := make(libpf.Set[util.OnDiskFileIdentifier], numInterpreters)
+ 	for idx := range processMappings {
++		if err := ctx.Err(); err != nil {
++			return false, err
++		}
+ 		m := &processMappings[idx]
+ 		if !m.IsExecutable() || m.IsAnonymous() {
+ 			continue
+@@ -471,8 +617,11 @@
+ 		if !fm.Valid() {
+ 			newMapping = true
+ 			var err error
+-			fm, err = pm.newFrameMapping(pr, m)
++			fm, err = pm.newFrameMappingChecked(ctx, pr, m, mode, journal)
+ 			if err != nil {
++				if mode.strictBootstrap() && !errors.Is(err, errBootstrapNonELF) {
++					return false, fmt.Errorf("map PID %v file %v: %w", pid, m.Path, err)
++				}
+ 				// newFrameMapping logged the message if needed
+ 				continue
+ 			}
+@@ -492,13 +641,18 @@
+ 			mpAdd = append(mpAdd, &mappings[len(mappings)-1])
+ 		}
+ 	}
++	if mode.strictBootstrap() && len(mappings) == 0 {
++		return false, fmt.Errorf("PID %v has no executable ELF mappings", pid)
++	}
+ 
+ 	// Detach removed interpreters and remove old mappings
+ 	numChanges := uint64(0)
+ 	for _, m := range mpRemove {
+ 		numChanges += pm.processRemovedMapping(pid, m)
+ 	}
+-	pm.pidPageToMappingInfoSize -= numChanges
++	if mode == ordinarySynchronization {
++		pm.pidPageToMappingInfoSize -= numChanges
++	}
+ 	pm.mu.Lock()
+ 	pm.processRemovedInterpreters(pid, interpretersValid)
+ 	pm.mu.Unlock()
+@@ -506,9 +660,19 @@
+ 	// Add new mappings
+ 	numChanges = 0
+ 	for _, m := range mpAdd {
+-		numChanges += pm.processNewMapping(pid, m)
+-	}
+-	pm.pidPageToMappingInfoSize += numChanges
++		var owned *bootstrapJournal
++		if mode.strictBootstrap() {
++			owned = journal
++		}
++		added, err := pm.processNewMappingChecked(ctx, pid, m, owned)
++		numChanges += added
++		if mode.strictBootstrap() && err != nil {
++			return false, fmt.Errorf("install PID %v mapping: %w", pid, err)
++		}
++	}
++	if mode == ordinarySynchronization {
++		pm.pidPageToMappingInfoSize += numChanges
++	}
+ 
+ 	// Update metadata of the process.
+ 	var meta process.ProcessMeta
+@@ -519,7 +683,7 @@
+ 	// Sort and publish the new mappings and meta
+ 	slices.SortFunc(mappings, compareMapping)
+ 	pm.mu.Lock()
+-	info = pm.getPidInformation(pid, pr)
++	info, _ = pm.getPidInformation(pid, pr)
+ 	if info != nil {
+ 		info.mappings = mappings
+ 		if updateProcessMeta {
+@@ -531,8 +695,14 @@
+ 
+ 	// Synchronize all interpreters with updated mappings
+ 	for _, instance := range interpreters {
++		if err := ctx.Err(); err != nil {
++			return false, err
++		}
+ 		err := instance.SynchronizeMappings(pm.ebpf, pm.exeReporter, pr, processMappings)
+ 		if err != nil {
++			if mode.strictBootstrap() {
++				return false, fmt.Errorf("synchronize PID %v interpreter: %w", pid, err)
++			}
+ 			if alive, _ := isPIDLive(pid); alive {
+ 				log.Errorf("Failed to handle new anonymous mapping for PID %d: %v", pid, err)
+ 			} else {
+@@ -546,7 +716,7 @@
+ 		log.Debugf("Added %v mappings, removed %v mappings for PID %v with %d interpreters",
+ 			len(mpAdd), len(mpRemove), pid, len(interpreters))
+ 	}
+-	return newProcess
++	return newProcess, ctx.Err()
+ }
+ 
+ // processPIDExit informs the ProcessManager that a process exited and no longer will be scheduled.
+@@ -598,7 +768,34 @@
+ 
+ // SynchronizeProcess triggers ProcessManager to update its internal information
+ // about a process. This includes process exit information as well as changed memory mappings.
++type synchronizationMode uint8
++
++var errBootstrapNonELF = errors.New("nonrequired mapping is not an ELF file")
++
++const (
++	ordinarySynchronization synchronizationMode = iota
++	strictEpochBootstrap
++)
++
+ func (pm *ProcessManager) SynchronizeProcess(pr process.Process) {
++	_ = pm.synchronizeProcessChecked(context.Background(), pr, ordinarySynchronization, nil)
++}
++
++func (pm *ProcessManager) synchronizeProcessChecked(ctx context.Context, pr process.Process,
++	mode synchronizationMode, journal *bootstrapJournal,
++) error {
++	if mode != ordinarySynchronization && !mode.strictBootstrap() {
++		return errors.New("invalid synchronization mode")
++	}
++	pm.mu.RLock()
++	authorized := (mode == strictEpochBootstrap && pm.epochTarget.PID == pr.PID()) || (mode == strictObservedBootstrap && pm.observedPID == pr.PID() && pm.epochTarget.PID == 0)
++	pm.mu.RUnlock()
++	if mode.strictBootstrap() && (journal == nil || !authorized) {
++		return errors.New("strict synchronization requires the configured target and an ownership journal")
++	}
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+ 	pid := pr.PID()
+ 	log.Debugf("= PID: %v", pid)
+ 
+@@ -608,9 +805,12 @@
+ 	pm.mu.Unlock()
+ 
+ 	if ok {
++		if mode.strictBootstrap() {
++			return fmt.Errorf("PID %v waiting for cleanup", pid)
++		}
+ 		log.Debugf("PID %v waiting for cleanup, aborting SynchronizeProcess", pid)
+ 		pm.ebpf.RemoveReportedPID(pid)
+-		return
++		return nil
+ 	}
+ 
+ 	pm.mappingStats.numProcAttempts.Add(1)
+@@ -618,6 +818,17 @@
+ 	mappings, numParseErrors, err := pr.GetMappings()
+ 	elapsed := time.Since(start)
+ 	pm.mappingStats.numProcParseErrors.Add(numParseErrors)
++	if mode.strictBootstrap() {
++		if err != nil {
++			return fmt.Errorf("get mappings for PID %v: %w", pid, err)
++		}
++		if err := ctx.Err(); err != nil {
++			return err
++		}
++		if numParseErrors != 0 || len(mappings) == 0 {
++			return fmt.Errorf("incomplete mappings for PID %v: %d parse errors, %d mappings", pid, numParseErrors, len(mappings))
++		}
++	}
+ 
+ 	if err != nil {
+ 		if os.IsPermission(err) {
+@@ -626,7 +837,7 @@
+ 			// inspect it. Exiting here keeps the PID in the eBPF maps so
+ 			// we avoid a notification flood to resynchronize.
+ 			pm.mappingStats.errProcPerm.Add(1)
+-			return
++			return nil
+ 		}
+ 
+ 		if errors.Is(err, process.ErrNoMappings) {
+@@ -635,7 +846,7 @@
+ 			// As it's likely that a future iteration can extract mappings from a
+ 			// different thread in the process, notify eBPF to enable further notifications.
+ 			pm.ebpf.RemoveReportedPID(pid)
+-			return
++			return nil
+ 		}
+ 
+ 		// All other errors imply that the process has exited.
+@@ -651,13 +862,17 @@
+ 		// Clean up, and notify eBPF.
+ 		log.Debugf("removing pid due to mappings read error: %v", err)
+ 		pm.processPIDExit(pid)
+-		return
++		return nil
+ 	}
+ 
+ 	util.AtomicUpdateMaxUint32(&pm.mappingStats.maxProcParseUsec, uint32(elapsed.Microseconds()))
+ 	pm.mappingStats.totalProcParseUsec.Add(uint32(elapsed.Microseconds()))
+ 
+-	if pm.synchronizeMappings(pr, mappings) {
++	newProcess, syncErr := pm.synchronizeMappingsChecked(ctx, pr, mappings, mode, journal)
++	if syncErr != nil {
++		return syncErr
++	}
++	if newProcess {
+ 		log.Debugf("+ PID: %v", pid)
+ 		// TODO: Fine-grained reported_pids handling (evaluate per-PID mapping
+ 		// synchronization based on per-PID state such as time since last
+@@ -672,6 +887,7 @@
+ 		// Also see: Unified PID Events design doc
+ 		pm.ebpf.RemoveReportedPID(pid)
+ 	}
++	return nil
+ }
+ 
+ // CleanupPIDs executes a periodic synchronization of pidToProcessInfo table with system processes.
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -32,6 +32,7 @@
+ 	"go.opentelemetry.io/ebpf-profiler/metrics"
+ 	"go.opentelemetry.io/ebpf-profiler/nativeunwind/elfunwindinfo"
+ 	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
++	"go.opentelemetry.io/ebpf-profiler/process"
+ 	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+ 	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpf"
+ 	"go.opentelemetry.io/ebpf-profiler/reporter"
+@@ -228,11 +229,10 @@
+ // NewTracer loads eBPF code and map definitions from the ELF module at the configured path.
+ func NewTracer(ctx context.Context, cfg *Config) (result *Tracer, resultErr error) {
+ 	auxCtx, auxiliary := newAuxiliaryContext(ctx, cfg)
++	bootstrapCleanupHandled := false
+ 	defer func() {
+-		if result == nil && auxiliary != nil {
+-			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+-			defer cancel()
+-			resultErr = errors.Join(resultErr, auxiliary.Stop(stopCtx))
++		if auxiliary != nil {
++			resultErr = stopFailedConstructor(result == nil, bootstrapCleanupHandled, resultErr, auxiliary.Stop)
+ 		}
+ 	}()
+ 	if cfg.TraceDefinitionLifetime != nil {
+@@ -365,7 +365,10 @@
+ 		tracer.monitorPIDEventsMapMethod = (*tracer).monitorPIDEventsMapSingle
+ 	}
+ 
+-	return tracer, nil
++	return completeTracerBootstrap(ctx, tracer, cfg, processManager.BootstrapHotSpotEpoch, processManager.BootstrapHotSpotObserved, func(cause error) error {
++		bootstrapCleanupHandled = true
++		return disposeBootstrapFailure(tracer, cause)
++	}, process.New)
+ }
+ 
+ // Close provides functionality for Tracer to perform cleanup tasks.

@@ -3,6 +3,7 @@ import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.gradle.process.ExecOperations
 import java.math.BigDecimal
 import java.nio.ByteBuffer
@@ -152,75 +153,86 @@ application {
         )
 }
 
-// Native HotSpot assets are explicit operator tasks, never prerequisites of JVM builds.
-val hotSpotToolsBinary = layout.projectDirectory.file("hotspot-agentless/build/mw-collector-tools")
-val buildHotSpotTools =
-    tasks.register<Exec>("buildHotSpotTools") {
+// Native HotSpot Go asset tasks are opt-in (-PincludeHotSpotGoBuild=true or INCLUDE_HOTSPOT_GO_BUILD=true)
+// and are never prerequisites of JVM builds.
+val includeHotSpotGoBuild =
+    providers.gradleProperty("includeHotSpotGoBuild").orNull == "true" ||
+        providers
+            .environmentVariable("INCLUDE_HOTSPOT_GO_BUILD")
+            .orNull
+            ?.lowercase()
+            .let { it == "true" || it == "1" }
+
+if (includeHotSpotGoBuild) {
+    val hotSpotToolsBinary = layout.projectDirectory.file("hotspot-agentless/build/mw-collector-tools")
+    val buildHotSpotTools =
+        tasks.register<Exec>("buildHotSpotTools") {
+            group = "distribution"
+            description = "Compile the pinned native asset maintenance tool from its declared sources."
+            workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+            inputs.files(fileTree("hotspot-agentless/cmd/mw-collector-tools"), fileTree("hotspot-agentless/internal/tooling"))
+            inputs.files("hotspot-agentless/go.mod", "hotspot-agentless/go.sum", "hotspot-agentless/dependencies.lock.json")
+            inputs.property(
+                "goCompilerVersion",
+                providers
+                    .exec { commandLine("go", "version") }
+                    .standardOutput.asText
+                    .map { it.trim() },
+            )
+            outputs.file(hotSpotToolsBinary)
+            environment("CGO_ENABLED", "0")
+            environment("GOOS", "linux")
+            environment("GOARCH", "amd64")
+            commandLine("go", "build", "-trimpath", "-buildvcs=false", "-o", "build/mw-collector-tools", "./cmd/mw-collector-tools")
+        }
+
+    tasks.register<Exec>("buildHotSpotAssets") {
         group = "distribution"
-        description = "Compile the pinned native asset maintenance tool from its declared sources."
+        description = "Build the pinned external HotSpot collector and verified local OCI bundle (requires Go/Docker)."
         workingDir(layout.projectDirectory.dir("hotspot-agentless"))
-        inputs.files(fileTree("hotspot-agentless/cmd/mw-collector-tools"), fileTree("hotspot-agentless/internal/tooling"))
-        inputs.files("hotspot-agentless/go.mod", "hotspot-agentless/go.sum", "hotspot-agentless/dependencies.lock.json")
-        inputs.property(
-            "goCompilerVersion",
-            providers
-                .exec { commandLine("go", "version") }
-                .standardOutput.asText
-                .map { it.trim() },
-        )
-        outputs.file(hotSpotToolsBinary)
-        environment("CGO_ENABLED", "0")
-        environment("GOOS", "linux")
-        environment("GOARCH", "amd64")
-        commandLine("go", "build", "-trimpath", "-buildvcs=false", "-o", "build/mw-collector-tools", "./cmd/mw-collector-tools")
+        commandLine("make", "bundle")
     }
 
-tasks.register<Exec>("buildHotSpotAssets") {
-    group = "distribution"
-    description = "Build the pinned external HotSpot collector and verified local OCI bundle (requires Go/Docker)."
-    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
-    commandLine("make", "bundle")
-}
+    tasks.register<Exec>("verifyHotSpotAssets") {
+        group = "verification"
+        description = "Verify an existing local HotSpot bundle without constructing native inputs."
+        dependsOn(buildHotSpotTools)
+        workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+        commandLine(hotSpotToolsBinary.asFile.absolutePath, "verify", "--bundle", "build/assets")
+        mustRunAfter("buildHotSpotAssets")
+    }
 
-tasks.register<Exec>("verifyHotSpotAssets") {
-    group = "verification"
-    description = "Verify an existing local HotSpot bundle without constructing native inputs."
-    dependsOn(buildHotSpotTools)
-    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
-    commandLine(hotSpotToolsBinary.asFile.absolutePath, "verify", "--bundle", "build/assets")
-    mustRunAfter("buildHotSpotAssets")
-}
+    tasks.register<Exec>("distHotSpotAssets") {
+        group = "distribution"
+        description = "Package verified local HotSpot assets, selected dependency notices and corresponding native source."
+        dependsOn("verifyHotSpotAssets")
+        workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+        commandLine(
+            hotSpotToolsBinary.asFile.absolutePath,
+            "release",
+            "--bundle",
+            "build/assets",
+            "--output",
+            "build/distributions/mazewall-hotspot-${project.version}-linux-amd64.tar.gz",
+            "--library-version",
+            project.version.toString(),
+        )
+    }
 
-tasks.register<Exec>("distHotSpotAssets") {
-    group = "distribution"
-    description = "Package verified local HotSpot assets, selected dependency notices and corresponding native source."
-    dependsOn("verifyHotSpotAssets")
-    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
-    commandLine(
-        hotSpotToolsBinary.asFile.absolutePath,
-        "release",
-        "--bundle",
-        "build/assets",
-        "--output",
-        "build/distributions/mazewall-hotspot-${project.version}-linux-amd64.tar.gz",
-        "--library-version",
-        project.version.toString(),
-    )
-}
-
-tasks.register<Exec>("installHotSpotAssets") {
-    group = "distribution"
-    description = "Verify/install an existing bundle into a new explicit -PhotSpotAssetsDirectory path."
-    workingDir(layout.projectDirectory.dir("hotspot-agentless"))
-    dependsOn(buildHotSpotTools)
-    mustRunAfter("buildHotSpotAssets", "verifyHotSpotAssets")
-    val destination = providers.gradleProperty("hotSpotAssetsDirectory")
-    executable = hotSpotToolsBinary.asFile.absolutePath
-    argumentProviders.add(
-        CommandLineArgumentProvider {
-            listOf("install", "--bundle", "build/assets", "--output", destination.get())
-        },
-    )
+    tasks.register<Exec>("installHotSpotAssets") {
+        group = "distribution"
+        description = "Verify/install an existing bundle into a new explicit -PhotSpotAssetsDirectory path."
+        workingDir(layout.projectDirectory.dir("hotspot-agentless"))
+        dependsOn(buildHotSpotTools)
+        mustRunAfter("buildHotSpotAssets", "verifyHotSpotAssets")
+        val destination = providers.gradleProperty("hotSpotAssetsDirectory")
+        executable = hotSpotToolsBinary.asFile.absolutePath
+        argumentProviders.add(
+            CommandLineArgumentProvider {
+                listOf("install", "--bundle", "build/assets", "--output", destination.get())
+            },
+        )
+    }
 }
 
 sourceSets {
@@ -862,8 +874,21 @@ tasks.check {
     dependsOn(integrationTest, integrationTestFreshJvm)
 }
 
+tasks.named<ProcessResources>("processTestResources") {
+    from(rootProject.file("experiments/hotspot-agentless/src/ObservedWorkload.java")) {
+        into("hotspot")
+    }
+}
+
 tasks.test {
     dependsOn("installDist")
+    val observedHotSpotAcceptance = providers.environmentVariable("MW_HOTSPOT_OBSERVED_ACCEPTANCE").orElse("").get() == "true"
+    inputs.property("observedHotSpotAcceptance", observedHotSpotAcceptance)
+    outputs.upToDateWhen { !observedHotSpotAcceptance }
+    outputs.cacheIf { !observedHotSpotAcceptance }
+    for (name in listOf("MW_HOTSPOT_OBSERVED_ACCEPTANCE", "MW_HOTSPOT_OBSERVED_JAVA", "MW_HOTSPOT_ASSET_TEST_DIR")) {
+        environment(name, providers.environmentVariable(name).orElse("").get())
+    }
     inputs
         .dir(layout.buildDirectory.dir("install/tier-e-daemon"))
         .withPropertyName("installedTierEDistribution")

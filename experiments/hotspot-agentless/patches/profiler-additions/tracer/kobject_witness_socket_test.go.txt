@@ -1,0 +1,573 @@
+package tracer
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func TestDecodeKobjectDatagram(t *testing.T) {
+	valid := []byte("add@/devices/a\x00ACTION=add\x00DEVPATH=/devices/a\x00SUBSYSTEM=test\x00SEQNUM=7\x00EXTRA=a=b\x00EMPTY=\x00")
+	from := &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 1}
+	creds := unix.UnixCredentials(&unix.Ucred{Pid: 42, Uid: 1000, Gid: 1001})
+	event, meta, err := decodeKobjectDatagram(valid, from, 0, creds)
+	if err != nil || event == nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if event.Action != "add" || event.DevicePath != "/devices/a" || event.Subsystem != "test" || event.Sequence != 7 || event.Values["EXTRA"] != "a=b" || event.Values["EMPTY"] != "" || meta.pid != 42 || meta.uid != 1000 || meta.gid != 1001 || meta.senderPort != 0 || meta.groups != 1 {
+		t.Fatalf("unexpected event or metadata: %+v %+v", event, meta)
+	}
+	if _, ok := event.Values["EMPTY"]; !ok { t.Fatal("empty value lost") }
+	for i := range valid { valid[i] = 0 }
+	for i := range creds { creds[i] = 0 }
+	if event.DevicePath != "/devices/a" || event.Values["EXTRA"] != "a=b" || meta.pid != 42 || meta.uid != 1000 { t.Fatal("decode retained input buffers") }
+	if _, _, err := decodeKobjectDatagram([]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"), from, 0, unix.UnixCredentials(&unix.Ucred{})); err != nil { t.Fatalf("kernel credentials: %v", err) }
+}
+
+type kwAcquisitionClockContext struct {
+	context.Context
+	deadline time.Time
+	done <-chan struct{}
+}
+
+func (c kwAcquisitionClockContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c kwAcquisitionClockContext) Done() <-chan struct{} { return c.done }
+
+func TestKobjectAcquisitionAbsoluteClock(t *testing.T) {
+	for _, mode := range []string{"expired", "socket", "bind", "socket-error"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var log []string
+				calls := kwTestCalls(&log)
+				ctx := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+				if mode == "expired" { ctx.deadline = time.Now() }
+				if mode == "socket" || mode == "socket-error" {
+					original := calls.socket
+					calls.socket = func(a, b, c int) (int, error) {
+						fd, err := original(a, b, c)
+						time.Sleep(2 * time.Second)
+						if mode == "socket-error" { err = unix.EACCES }
+						return fd, err
+					}
+				}
+				if mode == "bind" {
+					original := calls.bind
+					calls.bind = func(fd int, addr unix.Sockaddr) error { err := original(fd, addr); time.Sleep(2 * time.Second); return err }
+				}
+				if mode == "socket-error" {
+					original := calls.close
+					calls.close = func(fd int) error { _ = original(fd); return unix.EIO }
+				}
+				owner, err := acquireKobjectSocketWithCalls(ctx, 12, calls)
+				if owner != nil || !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("owner=%v err=%v", owner, err) }
+				var want []string
+				switch mode {
+				case "expired":
+				case "socket", "socket-error": want = []string{"socket", "close"}
+				case "bind": want = []string{"socket", "passcred", "bind", "close"}
+				}
+				if !reflect.DeepEqual(log, want) { t.Fatalf("effects=%v want=%v", log, want) }
+				if mode == "socket-error" && (!errors.Is(err, unix.EACCES) || !errors.Is(err, unix.EIO)) { t.Fatalf("lost native errors: %v", err) }
+			})
+		})
+	}
+}
+
+func TestKobjectEffectAbsoluteClock(t *testing.T) {
+	for _, mode := range []string{"join-expired", "join-late", "cut-expired", "cut-late"} {
+		t.Run(mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+			calls := 0
+			late := mode == "join-late" || mode == "cut-late"
+			s, _ := kwMembershipFixture(t, func(int, int, int, int) error { calls++; if late { time.Sleep(2*time.Second) }; return nil })
+			defer s.close()
+			if mode == "cut-expired" || mode == "cut-late" { late = false; if err := s.join(context.Background()); err != nil { t.Fatal(err) }; calls = 0; late = mode == "cut-late" }
+			ctx := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+			if !late { ctx.deadline = time.Now() }
+			var err error
+			if mode == "join-expired" || mode == "join-late" { err = s.join(ctx) } else { err = s.cut(ctx) }
+			if !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("membership error: %v", err) }
+			if late && calls != 1 || !late && calls != 0 { t.Fatalf("membership effects: %d", calls) }
+			if late && mode == "join-late" && s.joinReturn != kwReturnSucceeded || late && mode == "cut-late" && s.cutReturn != kwReturnSucceeded { t.Fatal("lost actual membership success") }
+		}) })
+	}
+	t.Run("receive-and-poll", func(t *testing.T) {
+		s, _ := kwMembershipFixture(t, func(int,int,int,int) error { return nil }); defer s.close()
+		if err := s.join(context.Background()); err != nil { t.Fatal(err) }
+		calls := 0; s.recvmsg = func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error) { calls++; return -1,0,0,nil,unix.EACCES }
+		ctx := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now(), done: make(chan struct{})}
+		if _, err := s.receive(ctx, make([]byte,1), make([]byte,1)); !errors.Is(err, context.DeadlineExceeded) || calls != 0 { t.Fatalf("receive: %v calls=%d", err, calls) }
+		s2, _ := kwMembershipFixture(t, func(int,int,int,int) error { return nil }); defer s2.close()
+		if err := s2.join(context.Background()); err != nil { t.Fatal(err) }
+		s2.poll = func([]unix.PollFd,int)(int,error) { calls++; return 0,nil }
+		if _, err := s2.waitReadable(ctx); !errors.Is(err, context.DeadlineExceeded) || calls != 0 { t.Fatalf("poll: %v calls=%d", err, calls) }
+	})
+	t.Run("receive-late-error", func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		s, _ := kwMembershipFixture(t, func(int,int,int,int) error { return nil }); defer s.close()
+		if err := s.join(context.Background()); err != nil { t.Fatal(err) }
+		calls := 0; s.recvmsg = func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error) { calls++; time.Sleep(2*time.Second); return -1,0,0,nil,unix.EACCES }
+		ctx := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+		_, err := s.receive(ctx, make([]byte,1), make([]byte,1))
+		if calls != 1 || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, unix.EACCES) { t.Fatalf("late receive: %v calls=%d", err, calls) }
+	}) })
+	for _, mode := range []string{"worker", "drain"} {
+		t.Run(mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+			var log []string; calls := kwTestCalls(&log); reads := 0
+			calls.recvmsg = func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error) { reads++; return -1,0,0,nil,unix.EAGAIN }
+			s, err := acquireKobjectSocketWithCalls(context.Background(), 1, calls); if err != nil { t.Fatal(err) }
+			startup, cancel := context.WithCancel(context.Background()); defer cancel()
+			clock := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+			var worker context.Context = context.Background(); if mode == "worker" { worker = clock }
+			r, err := newKobjectSocketReader(startup, worker, s); if err != nil { _ = s.close(); t.Fatal(err) }; defer r.Retire()
+			if err = r.Join(); err != nil { t.Fatal(err) }; cancel()
+			if _, err = r.Binding(); err != nil { t.Fatalf("startup cancellation affected worker: %v", err) }
+			if mode == "drain" { r.mu.Lock(); r.drainContext = clock; r.mu.Unlock() }
+			time.Sleep(2*time.Second)
+			if _, err = r.Receive(); !errors.Is(err, context.DeadlineExceeded) || reads != 0 { t.Fatalf("receive: %v reads=%d", err, reads) }
+		}) })
+	}
+	t.Run("ack-first-drain", func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		r := kwReaderPendingForReview(t); defer r.Retire()
+		r.mu.Lock(); r.drainContext = kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}; r.mu.Unlock()
+		time.Sleep(2*time.Second)
+		if err := r.Acknowledge(nil); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("ack: %v", err) }
+		facts, _ := r.readerFacts(); if facts.pending != 0 || facts.aborted != 0 || facts.dispatched != 1 { t.Fatalf("facts: %+v", facts) }
+		if _, err := r.Receive(); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("receive after expiry: %v", err) }
+		if err := r.Retire(); err != nil { t.Fatalf("retire: %v", err) }
+	}) })
+}
+
+func TestKobjectDeadlineWaits(t *testing.T) {
+	for _, mode := range []string{"first", "worker"} {
+		t.Run("cut-"+mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+			var log []string; calls := kwTestCalls(&log); entered, release := make(chan struct{}), make(chan struct{}); base := calls.setsockoptInt; drops := 0
+			calls.setsockoptInt = func(fd,level,opt,value int) error { if level == unix.SOL_NETLINK && opt == unix.NETLINK_DROP_MEMBERSHIP { drops++; close(entered); <-release; return nil }; return base(fd,level,opt,value) }
+			s, err := acquireKobjectSocketWithCalls(context.Background(), 1, calls); if err != nil { t.Fatal(err) }
+			clock := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+			var worker context.Context = context.Background(); if mode == "worker" { worker = clock }
+			r, err := newKobjectSocketReader(context.Background(), worker, s); if err != nil { _ = s.close(); t.Fatal(err) }
+			var once sync.Once; var result chan error; received := false
+			defer func() { once.Do(func(){close(release)}); if r.cutDone != nil { <-r.cutDone }; if result != nil && !received { <-result }; _ = r.Retire() }()
+			if err = r.Join(); err != nil { t.Fatal(err) }
+			var first context.Context = context.Background(); if mode == "first" { first = clock }
+			result = make(chan error,1); go func(){ result <- r.Cut(first) }(); <-entered; synctest.Wait()
+			time.Sleep(2*time.Second)
+			err = <-result; received = true; if !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("cut: %v",err) }
+			if err = r.Retire(); !errors.Is(err,errKobjectReaderPending) { t.Fatalf("retire pending: %v",err) }
+			if err = r.Cut(context.Background()); !errors.Is(err,context.DeadlineExceeded) || drops != 1 { t.Fatalf("renewed cut: %v drops=%d",err,drops) }
+			once.Do(func(){close(release)}); <-r.cutDone
+			if s.cutReturn != kwReturnSucceeded { t.Fatal("lost physical cut return") }
+			if err = r.Cut(context.Background()); !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("late cut: %v",err) }
+		}) })
+	}
+	t.Run("drain-first", func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		r := kwReaderPendingForReview(t)
+		parent, cancel := context.WithCancel(context.Background()); done := make(chan struct{}); received := false
+		clock := kwAcquisitionClockContext{Context: parent, deadline: time.Now().Add(time.Second), done: done}
+		result := make(chan error,1)
+		defer func(){ cancel(); close(done); if !received { <-result }; facts,_ := r.readerFacts(); if facts.pending != 0 { _ = r.Acknowledge(nil) }; _ = r.Retire() }()
+		go func(){ result <- r.DrainTo(clock,1) }(); synctest.Wait()
+		r.mu.Lock(); latched := r.drainContext != nil; r.mu.Unlock(); if !latched { t.Fatal("first drain not latched") }
+		time.Sleep(2*time.Second)
+		err := <-result; received = true; if !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("drain: %v",err) }
+		if err := r.Retire(); !errors.Is(err,errKobjectReaderPending) { t.Fatalf("retire pending: %v",err) }
+		if err := r.DrainTo(context.Background(),1); !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("renewed drain: %v",err) }
+		if err := r.Acknowledge(nil); !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("ack: %v",err) }
+		facts,_ := r.readerFacts(); if facts.pending != 0 || facts.dispatched != 1 { t.Fatalf("facts: %+v",facts) }
+		if err := r.Retire(); err != nil { t.Fatalf("retire: %v",err) }
+	}) })
+}
+
+func TestKobjectTransportLockedClock(t *testing.T) {
+	t.Run("drain-zero-expired", func(t *testing.T) {
+		var log []string; s, err := acquireKobjectSocketWithCalls(context.Background(), 1, kwTestCalls(&log)); if err != nil { t.Fatal(err) }
+		r, err := newKobjectSocketReader(context.Background(), context.Background(), s); if err != nil { _ = s.close(); t.Fatal(err) }; defer r.Retire()
+		if err = r.Join(); err != nil { t.Fatal(err) }; if err = r.Cut(context.Background()); err != nil { t.Fatal(err) }
+		first := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now(), done: make(chan struct{})}
+		if err = r.DrainTo(first, 0); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("expired drain: %v", err) }
+		if err = r.DrainTo(context.Background(), 0); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("renewed drain: %v", err) }
+		if _, err = r.Receive(); !errors.Is(err, context.DeadlineExceeded) || err == io.EOF { t.Fatalf("false EOF: %v", err) }
+	})
+	t.Run("worker-before-join", func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		var log []string; calls := kwTestCalls(&log); base := calls.setsockoptInt; joins := 0
+		calls.setsockoptInt = func(fd,level,opt,value int) error { if level == unix.SOL_NETLINK && opt == unix.NETLINK_ADD_MEMBERSHIP { joins++ }; return base(fd,level,opt,value) }
+		s, err := acquireKobjectSocketWithCalls(context.Background(), 1, calls); if err != nil { t.Fatal(err) }
+		worker := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+		r, err := newKobjectSocketReader(context.Background(), worker, s); if err != nil { _ = s.close(); t.Fatal(err) }
+		result := make(chan error,1); locked, received := true,false; s.mu.Lock()
+		defer func(){ if locked { s.mu.Unlock() }; if !received { <-result }; _ = r.Retire() }()
+		go func(){ result <- r.Join() }(); synctest.Wait(); time.Sleep(2*time.Second); s.mu.Unlock(); locked = false
+		err = <-result; received = true; if !errors.Is(err,context.DeadlineExceeded) || joins != 0 { t.Fatalf("join: %v effects=%d",err,joins) }
+	}) })
+	t.Run("latched-drain-before-recv", func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+		var log []string; calls := kwTestCalls(&log); reads := 0
+		calls.recvmsg = func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error) { reads++; return -1,0,0,nil,unix.EAGAIN }
+		s, err := acquireKobjectSocketWithCalls(context.Background(), 1, calls); if err != nil { t.Fatal(err) }
+		r, err := newKobjectSocketReader(context.Background(), context.Background(), s); if err != nil { _ = s.close(); t.Fatal(err) }
+		if err = r.Join(); err != nil { _ = r.Retire(); t.Fatal(err) }; if err = r.Cut(context.Background()); err != nil { _ = r.Retire(); t.Fatal(err) }
+		parent, cancel := context.WithCancel(context.Background()); done := make(chan struct{}); first := kwAcquisitionClockContext{Context: parent, deadline: time.Now().Add(time.Second), done: done}
+		recv, drain := make(chan error,1), make(chan error,1); recvGot, drainGot, sLocked, rLocked := false,false,false,false
+		defer func(){ if sLocked { s.mu.Unlock() }; if rLocked { r.mu.Unlock() }; cancel(); close(done); if !recvGot { <-recv }; if !drainGot { <-drain }; _ = r.Retire() }()
+		s.mu.Lock(); sLocked = true
+		go func(){ _, e := r.Receive(); recv <- e }(); synctest.Wait()
+		go func(){ drain <- r.DrainTo(first,1) }(); synctest.Wait()
+		r.mu.Lock(); rLocked = true; if r.drainContext == nil || !r.active { t.Fatal("drain or read not latched") }
+		time.Sleep(2*time.Second); s.mu.Unlock(); sLocked = false; synctest.Wait(); r.mu.Unlock(); rLocked = false
+		e := <-recv; recvGot = true; if !errors.Is(e,context.DeadlineExceeded) || reads != 0 { t.Fatalf("receive: %v effects=%d",e,reads) }
+		e = <-drain; drainGot = true; if !errors.Is(e,context.DeadlineExceeded) { t.Fatalf("drain: %v",e) }
+	}) })
+}
+
+func TestKobjectDrainFrozenReceipt(t *testing.T) {
+	for _, mode := range []string{"deadline", "worker-cancel"} {
+		t.Run(mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
+			var log []string; s, err := acquireKobjectSocketWithCalls(context.Background(), 1, kwTestCalls(&log)); if err != nil { t.Fatal(err) }
+			worker, cancel := context.WithCancel(context.Background()); defer cancel()
+			r, err := newKobjectSocketReader(context.Background(), worker, s); if err != nil { _ = s.close(); t.Fatal(err) }; defer r.Retire()
+			if err = r.Join(); err != nil { t.Fatal(err) }; if err = r.Cut(context.Background()); err != nil { t.Fatal(err) }
+			first := kwAcquisitionClockContext{Context: context.Background(), deadline: time.Now().Add(time.Second), done: make(chan struct{})}
+			if err = r.DrainTo(first, 0); err != nil { t.Fatalf("first drain: %v",err) }
+			effects := len(log)
+			if mode == "deadline" { time.Sleep(2*time.Second) } else { cancel() }
+			if err = r.DrainTo(context.Background(), 0); err != nil { t.Fatalf("lost receipt: %v",err) }
+			if err = r.DrainTo(context.Background(), 1); err == nil { t.Fatal("changed goal accepted") }
+			if err = r.DrainTo(context.Background(), 0); err != nil { t.Fatalf("changed goal overwrote receipt: %v",err) }
+			if len(log) != effects { t.Fatalf("new effects: %v",log[effects:]) }
+		}) })
+	}
+}
+
+func TestKobjectGuardedAcquisitionAndRestore(t *testing.T) {
+	t.Run("precheck", func(t *testing.T) {
+		var log []string; raw := kwTestCalls(&log)
+		guarded := kwGuardAcquisitionCalls(raw, func() error { return unix.EACCES })
+		s, err := acquireKobjectSocketWithCalls(context.Background(), 1, guarded)
+		if s != nil || !errors.Is(err,unix.EACCES) || len(log) != 0 { t.Fatalf("owner=%v err=%v effects=%v",s,err,log) }
+		guarded = kwGuardAcquisitionCalls(raw, nil)
+		if _, err = acquireKobjectSocketWithCalls(context.Background(), 1, guarded); err == nil || len(log) != 0 { t.Fatalf("nil eligibility: %v %v",err,log) }
+		raw.bind = nil; guarded = kwGuardAcquisitionCalls(raw, func() error { return nil })
+		if _, err = acquireKobjectSocketWithCalls(context.Background(), 1, guarded); err == nil || len(log) != 0 { t.Fatalf("nil raw callback: %v %v",err,log) }
+	})
+	t.Run("late-fd", func(t *testing.T) {
+		var log []string; raw := kwTestCalls(&log); var gate error; socket, closeFD := raw.socket, raw.close
+		raw.socket = func(a,b,c int)(int,error) { fd,_ := socket(a,b,c); gate = context.DeadlineExceeded; return fd,unix.EACCES }
+		raw.close = func(fd int) error { _ = closeFD(fd); return unix.EIO }
+		s, err := acquireKobjectSocketWithCalls(context.Background(), 1, kwGuardAcquisitionCalls(raw,func() error{return gate}))
+		if s != nil || !errors.Is(err,context.DeadlineExceeded) || !errors.Is(err,unix.EACCES) || !errors.Is(err,unix.EIO) || !reflect.DeepEqual(log,[]string{"socket","close"}) { t.Fatalf("owner=%v err=%v effects=%v",s,err,log) }
+	})
+	t.Run("late-info", func(t *testing.T) {
+		var log []string; raw := kwTestCalls(&log); var gate error; original := raw.getsockoptUint64
+		raw.getsockoptUint64 = func(a,b,c int)(uint64,uint32,error) { value,n,err := original(a,b,c); gate=context.DeadlineExceeded; return value,n,err }
+		guarded := kwGuardAcquisitionCalls(raw,func() error{return gate})
+		value,n,err := guarded.getsockoptUint64(17,unix.SOL_SOCKET,unix.SO_COOKIE)
+		if value != 99 || n != 8 || !errors.Is(err,context.DeadlineExceeded) { t.Fatalf("value=%d len=%d err=%v",value,n,err) }
+		gate=nil; log=nil
+		s,err := acquireKobjectSocketWithCalls(context.Background(), 1, guarded)
+		if s != nil || !errors.Is(err,context.DeadlineExceeded) || !reflect.DeepEqual(log,[]string{"socket","passcred","bind","name","cookie","close"}) { t.Fatalf("owner=%v err=%v effects=%v",s,err,log) }
+	})
+	t.Run("restore-runtime", func(t *testing.T) {
+		var log []string; raw := kwTestCalls(&log); var gate error
+		s, err := acquireKobjectSocketWithCalls(context.Background(), 1, kwGuardAcquisitionCalls(raw,func() error{return gate})); if err != nil { t.Fatal(err) }
+		if err = s.restoreRuntimeCalls(raw); err != nil { _ = s.close(); t.Fatal(err) }; gate=context.DeadlineExceeded
+		r, err := newKobjectSocketReader(context.Background(),context.Background(),s); if err != nil { _ = s.close(); t.Fatal(err) }; defer r.Retire()
+		if err = s.restoreRuntimeCalls(raw); err == nil { t.Fatal("restored after handoff") }
+		if err = r.Join(); err != nil { t.Fatalf("join retained acquisition guard: %v",err) }
+		if err = r.Cut(context.Background()); err != nil { t.Fatalf("cut retained acquisition guard: %v",err) }
+	})
+}
+
+func kwTestCalls(log *[]string) kwSocketCalls {
+	return kwSocketCalls{
+		socket: func(domain, kind, proto int) (int, error) { *log = append(*log, "socket"); if domain != unix.AF_NETLINK || kind != unix.SOCK_DGRAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC || proto != unix.NETLINK_KOBJECT_UEVENT { panic("socket arguments") }; return 17, nil },
+		close: func(fd int) error { *log = append(*log, "close"); if fd != 17 && fd != 0 { panic("close fd") }; return nil },
+		bind: func(fd int, sa unix.Sockaddr) error { *log = append(*log, "bind"); a, ok := sa.(*unix.SockaddrNetlink); if !ok || a.Family != unix.AF_NETLINK || a.Pid != 0 || a.Groups != 0 { panic("bind arguments") }; return nil },
+		getsockname: func(fd int) (unix.Sockaddr, error) { *log = append(*log, "name"); return &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Pid: 37}, nil },
+		getsockoptUint64: func(fd, level, opt int) (uint64, uint32, error) { *log = append(*log, "cookie"); if level != unix.SOL_SOCKET || opt != unix.SO_COOKIE { panic("cookie arguments") }; return 99, 8, nil },
+		getsockoptInt: func(fd, level, opt int) (int32, uint32, error) { *log = append(*log, "nsid"); if level != unix.SOL_NETLINK || opt != unix.NETLINK_LISTEN_ALL_NSID { panic("nsid arguments") }; return 0, 4, nil },
+		setsockoptInt: func(fd, level, opt, value int) error { if level == unix.SOL_NETLINK && value == 1 && (opt == unix.NETLINK_ADD_MEMBERSHIP || opt == unix.NETLINK_DROP_MEMBERSHIP) { return nil }; *log = append(*log, "passcred"); if level != unix.SOL_SOCKET || opt != unix.SO_PASSCRED || value != 1 { panic("passcred arguments") }; return nil },
+		recvmsg: func(int, []byte, []byte, int) (int,int,int,unix.Sockaddr,error) { return -1,0,0,nil,unix.EAGAIN },
+		poll: func([]unix.PollFd,int) (int,error) { return 0,nil },
+	}
+}
+
+func TestAcquireKobjectSocketFactsAndClose(t *testing.T) {
+	var log []string
+	calls := kwTestCalls(&log)
+	calls.socket = func(_, _, _ int) (int, error) { log = append(log, "socket"); return 0, nil }
+	s, err := acquireKobjectSocketWithCalls(context.Background(), 12, calls)
+	if err != nil { t.Fatal(err) }
+	b, err := s.binding()
+	if err != nil || b.cookie != 99 || b.portID != 37 || b.generation != 12 { t.Fatalf("binding: %+v %v", b, err) }
+	if err := s.close(); err != nil { t.Fatal(err) }; if err := s.close(); err != nil { t.Fatal(err) }
+	if _, err := s.binding(); err == nil { t.Fatal("closed binding accepted") }
+	if !reflect.DeepEqual(log, []string{"socket", "passcred", "bind", "name", "cookie", "nsid", "close"}) { t.Fatal(log) }
+}
+
+func TestAcquireKobjectSocketFailures(t *testing.T) {
+	denied := unix.EACCES
+	tests := []struct{name string; setup func(*kwSocketCalls); want error}{
+		{"socket", func(c *kwSocketCalls) { c.socket = func(int,int,int)(int,error){ return -1, denied } }, denied},
+		{"socket returned fd with error", func(c *kwSocketCalls) { c.socket = func(int,int,int)(int,error){ return 17, denied } }, denied},
+		{"socket negative", func(c *kwSocketCalls) { c.socket = func(int,int,int)(int,error){ return -1, nil } }, nil},
+		{"passcred", func(c *kwSocketCalls) { c.setsockoptInt = func(int,int,int,int) error { return denied } }, denied},
+		{"bind", func(c *kwSocketCalls) { c.bind = func(int,unix.Sockaddr) error { return denied } }, denied},
+		{"name", func(c *kwSocketCalls) { c.getsockname = func(int)(unix.Sockaddr,error){ return nil, denied } }, denied},
+		{"nil name", func(c *kwSocketCalls) { c.getsockname = func(int)(unix.Sockaddr,error){ var a *unix.SockaddrNetlink; return a,nil } }, nil},
+		{"bad family", func(c *kwSocketCalls) { c.getsockname = func(int)(unix.Sockaddr,error){ return &unix.SockaddrNetlink{Family: unix.AF_UNIX,Pid:1},nil } }, nil},
+		{"zero port", func(c *kwSocketCalls) { c.getsockname = func(int)(unix.Sockaddr,error){ return &unix.SockaddrNetlink{Family: unix.AF_NETLINK},nil } }, nil},
+		{"groups", func(c *kwSocketCalls) { c.getsockname = func(int)(unix.Sockaddr,error){ return &unix.SockaddrNetlink{Family: unix.AF_NETLINK,Pid:1,Groups:1},nil } }, nil},
+		{"cookie error", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 0,0,unix.EPERM } }, unix.EPERM},
+		{"zero cookie", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 0,8,nil } }, nil},
+		{"short cookie", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 99,4,nil } }, nil},
+		{"cookie length zero", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 99,0,nil } }, nil},
+		{"cookie length seven", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 99,7,nil } }, nil},
+		{"cookie length nine", func(c *kwSocketCalls) { c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error){ return 99,9,nil } }, nil},
+		{"nsid error", func(c *kwSocketCalls) { c.getsockoptInt = func(int,int,int)(int32,uint32,error){ return 0,0,unix.EPERM } }, unix.EPERM},
+		{"nsid enabled", func(c *kwSocketCalls) { c.getsockoptInt = func(int,int,int)(int32,uint32,error){ return 1,4,nil } }, nil},
+		{"nsid short", func(c *kwSocketCalls) { c.getsockoptInt = func(int,int,int)(int32,uint32,error){ return 0,3,nil } }, nil},
+		{"nsid zero length", func(c *kwSocketCalls) { c.getsockoptInt = func(int,int,int)(int32,uint32,error){ return 0,0,nil } }, nil},
+		{"nsid long", func(c *kwSocketCalls) { c.getsockoptInt = func(int,int,int)(int32,uint32,error){ return 0,5,nil } }, nil},
+	}
+	for _, tc := range tests { t.Run(tc.name, func(t *testing.T) { var log []string; c := kwTestCalls(&log); tc.setup(&c); s, err := acquireKobjectSocketWithCalls(context.Background(), 1, c); if s != nil || err == nil || (tc.want != nil && !errors.Is(err,tc.want)) { t.Fatalf("result %v %v",s,err) }; count := 0; for _, call := range log { if call == "close" { count++ } }; if tc.name == "socket" || tc.name == "socket negative" { if count != 0 { t.Fatal(log) } } else if count != 1 { t.Fatal(log) } }) }
+	var log []string; c := kwTestCalls(&log); c.bind = func(int,unix.Sockaddr) error { return unix.EACCES }; c.close = func(int) error { return unix.EIO }; _, err := acquireKobjectSocketWithCalls(context.Background(),1,c); if !errors.Is(err,unix.EACCES) || !errors.Is(err,unix.EIO) { t.Fatal(err) }
+	for _, ctx := range []context.Context{nil, func() context.Context { ctx,cancel := context.WithCancel(context.Background()); cancel(); return ctx }()} { log = nil; _, err := acquireKobjectSocketWithCalls(ctx,1,kwTestCalls(&log)); if err == nil || len(log) != 0 { t.Fatal(err,log) } }
+	log = nil; c = kwTestCalls(&log); c.close = nil; if _, err := acquireKobjectSocketWithCalls(context.Background(),1,c); err == nil || len(log) != 0 { t.Fatal(err,log) }; if _, err := acquireKobjectSocketWithCalls(context.Background(),0,kwTestCalls(&log)); err == nil || len(log) != 0 { t.Fatal(err,log) }
+}
+
+func TestAcquireKobjectSocketCancellation(t *testing.T) {
+	for _, stage := range []string{"bind", "name", "cookie"} { t.Run(stage, func(t *testing.T) { var log []string; c := kwTestCalls(&log); ctx,cancel := context.WithCancel(context.Background()); switch stage {
+	case "bind": c.bind = func(int,unix.Sockaddr) error { log = append(log,"bind-enter"); cancel(); log = append(log,"bind-return"); return nil }
+	case "name": c.getsockname = func(int)(unix.Sockaddr,error) { log = append(log,"name-enter"); cancel(); log = append(log,"name-return"); return &unix.SockaddrNetlink{Family:unix.AF_NETLINK,Pid:1},nil }
+	case "cookie": c.getsockoptUint64 = func(int,int,int)(uint64,uint32,error) { log = append(log,"cookie-enter"); cancel(); log = append(log,"cookie-return"); return 1,8,nil }
+	}; _,err := acquireKobjectSocketWithCalls(ctx,1,c); if !errors.Is(err,context.Canceled) || len(log)<2 || log[len(log)-2] != stage+"-return" || log[len(log)-1] != "close" { t.Fatal(err,log) } }) }
+	var log []string; c := kwTestCalls(&log); ctx,cancel := context.WithCancel(context.Background()); c.bind = func(int,unix.Sockaddr) error { cancel(); return unix.EPERM }; c.close = func(int) error { return unix.EIO }; _,err := acquireKobjectSocketWithCalls(ctx,1,c); if !errors.Is(err,context.Canceled) || !errors.Is(err,unix.EPERM) || !errors.Is(err,unix.EIO) { t.Fatal(err) }
+}
+
+func TestKobjectSocketConcurrentClose(t *testing.T) {
+	var log []string; c := kwTestCalls(&log); entered, release := make(chan struct{}), make(chan struct{}); var mu sync.Mutex; count := 0
+	c.close = func(int) error { mu.Lock(); count++; mu.Unlock(); close(entered); <-release; return unix.EIO }
+	s,err := acquireKobjectSocketWithCalls(context.Background(),1,c); if err != nil { t.Fatal(err) }; results := make(chan error,2); go func(){ results <- s.close() }(); <-entered; go func(){ results <- s.close() }(); select { case <-results: t.Fatal("close returned before native close"); default: }; close(release); for i:=0;i<2;i++ { if !errors.Is(<-results,unix.EIO) { t.Fatal("close error lost") } }; mu.Lock(); defer mu.Unlock(); if count != 1 { t.Fatal(count) }
+}
+
+func kwMembershipFixture(t *testing.T, membership func(int, int, int, int) error) (*kwUnjoinedSocket, *[]string) {
+	t.Helper()
+	var log []string
+	c := kwTestCalls(&log)
+	passcred := c.setsockoptInt
+	c.setsockoptInt = func(fd, level, opt, value int) error {
+		if level == unix.SOL_SOCKET && opt == unix.SO_PASSCRED { return passcred(fd, level, opt, value) }
+		return membership(fd, level, opt, value)
+	}
+	s, err := acquireKobjectSocketWithCalls(context.Background(), 12, c)
+	if err != nil { t.Fatal(err) }
+	return s, &log
+}
+
+func TestKobjectMembershipSequence(t *testing.T) {
+	var ops []int
+	s, log := kwMembershipFixture(t, func(fd, level, opt, value int) error {
+		if fd != 17 || level != unix.SOL_NETLINK || value != 1 { t.Fatal("membership arguments") }
+		ops = append(ops, opt); return nil
+	})
+	if len(ops) != 0 { t.Fatal("constructor joined") }
+	if err := s.join(context.Background()); err != nil { t.Fatal(err) }
+	b, err := s.binding(); if err != nil || b.cookie != 99 || b.portID != 37 || b.generation != 12 { t.Fatal(b, err) }
+	if err := s.cut(context.Background()); err != nil { t.Fatal(err) }
+	if !reflect.DeepEqual(ops, []int{unix.NETLINK_ADD_MEMBERSHIP, unix.NETLINK_DROP_MEMBERSHIP}) || s.phase != kwSocketCut || s.joinReturn != kwReturnSucceeded || s.cutReturn != kwReturnSucceeded { t.Fatal(ops, s.phase, s.joinReturn, s.cutReturn) }
+	for _, call := range *log { if call == "close" { t.Fatal("cut closed fd") } }
+	if err := s.cut(context.Background()); err == nil || s.phase != kwSocketQuarantined { t.Fatal("duplicate cut") }
+	if err := s.join(context.Background()); err == nil || len(ops) != 2 { t.Fatal("rejoined") }
+}
+
+func TestKobjectMembershipQuarantine(t *testing.T) {
+	for _, op := range []string{"join", "cut"} { t.Run(op, func(t *testing.T) {
+		calls := 0; s, _ := kwMembershipFixture(t, func(int,int,int,int) error { calls++; if op == "join" || calls == 2 { return unix.EPERM }; return nil })
+		if op == "cut" { if err := s.join(context.Background()); err != nil { t.Fatal(err) } }
+		var err error; if op == "join" { err = s.join(context.Background()) } else { err = s.cut(context.Background()) }
+		if !errors.Is(err, unix.EPERM) || s.phase != kwSocketQuarantined { t.Fatal(err, s.phase) }
+		if op == "join" && s.joinReturn != kwReturnFailed || op == "cut" && s.cutReturn != kwReturnFailed { t.Fatal("return fact") }
+		prior := calls; if s.join(context.Background()) == nil || s.cut(context.Background()) == nil || calls != prior { t.Fatal("quarantine retried") }
+		if _, err := s.binding(); err == nil { t.Fatal("quarantined binding") }
+	}) }
+	calls := 0; s, _ := kwMembershipFixture(t, func(int,int,int,int) error { calls++; return nil }); if err := s.join(context.Background()); err != nil { t.Fatal(err) }; if s.join(context.Background()) == nil || s.phase != kwSocketQuarantined || calls != 1 { t.Fatal("duplicate join") }
+	calls = 0; s, _ = kwMembershipFixture(t, func(int,int,int,int) error { calls++; return nil }); if err := s.join(context.Background()); err != nil { t.Fatal(err) }; if err := s.cut(context.Background()); err != nil { t.Fatal(err) }; if s.join(context.Background()) == nil || s.phase != kwSocketQuarantined || calls != 2 { t.Fatal("join after cut") }
+	for _, op := range []string{"join", "cut"} { calls = 0; s, _ = kwMembershipFixture(t, func(int,int,int,int) error { calls++; return nil }); if op == "cut" { if err := s.join(context.Background()); err != nil { t.Fatal(err) } }; ctx,cancel := context.WithCancel(context.Background()); cancel(); prior := calls; var err error; if op == "join" { err = s.join(ctx) } else { err = s.cut(ctx) }; if !errors.Is(err,context.Canceled) || calls != prior || s.phase != kwSocketQuarantined { t.Fatal(err,calls) } }
+	s, _ = kwMembershipFixture(t, func(int,int,int,int) error { t.Fatal("unexpected syscall"); return nil }); s.phase = kwSocketPhase(255); if s.join(context.Background()) == nil || s.phase != kwSocketQuarantined { t.Fatal("unknown phase") }
+	s, _ = kwMembershipFixture(t, func(int,int,int,int) error { t.Fatal("unexpected syscall"); return nil }); s.setsockoptInt = nil; if s.join(context.Background()) == nil || s.phase != kwSocketQuarantined { t.Fatal("nil callback") }
+	s, _ = kwMembershipFixture(t, func(int,int,int,int) error { t.Fatal("unexpected syscall"); return nil }); if s.join(nil) == nil || s.phase != kwSocketQuarantined { t.Fatal("nil context") }
+	s, _ = kwMembershipFixture(t, func(int,int,int,int) error { t.Fatal("unexpected syscall"); return nil }); if err := s.close(); err != nil { t.Fatal(err) }; if s.join(context.Background()) == nil || s.cut(context.Background()) == nil || s.phase != kwSocketRetired { t.Fatal("closed") }
+}
+
+func TestKobjectMembershipPendingReturn(t *testing.T) {
+	for _, op := range []string{"join", "cut"} { t.Run(op, func(t *testing.T) {
+		entered, release := make(chan struct{}), make(chan struct{}); calls := 0
+		s, _ := kwMembershipFixture(t, func(fd, level, option, value int) error { calls++; if op == "cut" && calls == 1 { return nil }; close(entered); <-release; return nil })
+		if op == "cut" { if err := s.join(context.Background()); err != nil { t.Fatal(err) } }
+		ctx,cancel := context.WithCancel(context.Background()); result := make(chan error,1); go func(){ if op == "join" { result <- s.join(ctx) } else { result <- s.cut(ctx) } }(); <-entered; cancel()
+		closed := make(chan error,1); go func(){ closed <- s.close() }(); select { case <-closed: t.Fatal("close returned during membership"); default: }; select { case <-result: t.Fatal("membership returned early"); default: }; close(release)
+		if err := <-result; !errors.Is(err,context.Canceled) { t.Fatal(err) }; if err := <-closed; err != nil { t.Fatal(err) }; if s.phase != kwSocketRetired { t.Fatal(s.phase) }; if op == "join" && s.joinReturn != kwReturnSucceeded || op == "cut" && s.cutReturn != kwReturnSucceeded { t.Fatal("actual success lost") }; if _,err := s.binding(); err == nil { t.Fatal("retired binding") }
+	}) }
+	ctx,cancel := context.WithCancel(context.Background()); s, _ := kwMembershipFixture(t, func(int,int,int,int) error { cancel(); return unix.EACCES }); err := s.join(ctx); if !errors.Is(err,context.Canceled) || !errors.Is(err,unix.EACCES) || s.phase != kwSocketQuarantined || s.joinReturn != kwReturnFailed { t.Fatal(err) }
+	for _, op := range []string{"join", "cut"} { ctx,cancel := context.WithCancel(context.Background()); calls := 0; s, _ := kwMembershipFixture(t, func(int,int,int,int) error { calls++; if op == "join" || calls == 2 { cancel() }; return nil }); if op == "cut" { if err := s.join(ctx); err != nil { t.Fatal(err) } }; var err error; if op == "join" { err = s.join(ctx) } else { err = s.cut(ctx) }; if !errors.Is(err,context.Canceled) || s.phase != kwSocketQuarantined || op == "join" && s.joinReturn != kwReturnSucceeded || op == "cut" && s.cutReturn != kwReturnSucceeded { t.Fatal(err) }; prior := calls; if s.join(context.Background()) == nil || s.cut(context.Background()) == nil || calls != prior { t.Fatal("late success retried") } }
+}
+
+func TestKobjectReceiveFacts(t *testing.T) {
+	var log []string; c := kwTestCalls(&log); addr := &unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1}; calls := 0
+	c.recvmsg = func(fd int, raw, oob []byte, flags int)(int,int,int,unix.Sockaddr,error) { calls++; if fd != 17 || flags != 0 { t.Fatal("receive arguments") }; return 2,3,unix.MSG_EOR,addr,nil }
+	s,err := acquireKobjectSocketWithCalls(context.Background(),1,c); if err != nil { t.Fatal(err) }; if _,err := s.receive(context.Background(),make([]byte,8),make([]byte,8)); err == nil || calls != 0 { t.Fatal("unjoined receive") }; if err := s.join(context.Background()); err != nil { t.Fatal(err) }
+	r,err := s.receive(context.Background(),make([]byte,8),make([]byte,8)); addr.Pid = 7; if err != nil || r.outcome != kwReceiveDatagram || r.n != 2 || r.oobN != 3 || r.flags != unix.MSG_EOR || r.from.(*unix.SockaddrNetlink).Pid != 0 { t.Fatal(r,err) }
+	if err := s.cut(context.Background()); err != nil { t.Fatal(err) }; if _,err := s.receive(context.Background(),make([]byte,8),make([]byte,8)); err != nil { t.Fatal(err) }
+	if _,err := s.receive(context.Background(),nil,make([]byte,8)); err == nil || calls != 2 { t.Fatal("empty buffer") }
+}
+
+func TestKobjectReceiveTerminals(t *testing.T) {
+	for _, tc := range []struct{name string; n,oob int; err error; outcome kwReceiveOutcome}{ {"again",-1,0,unix.EAGAIN,kwReceiveNoDatagram}, {"interrupt",-1,0,unix.EINTR,kwReceiveNoDatagram}, {"overflow",-1,0,unix.ENOBUFS,kwReceiveFailed}, {"permission",-1,0,unix.EPERM,kwReceiveFailed}, {"negative",-1,0,nil,kwReceiveFailed}, {"oversize",9,0,nil,kwReceiveDatagram}, {"bad oob",1,-1,nil,kwReceiveDatagram}, {"wrapper error after consumption",0,0,unix.EAFNOSUPPORT,kwReceiveDatagram} } { t.Run(tc.name,func(t *testing.T) {
+		var log []string; c := kwTestCalls(&log); c.recvmsg = func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ return tc.n,tc.oob,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},tc.err }; s,e := acquireKobjectSocketWithCalls(context.Background(),1,c); if e != nil { t.Fatal(e) }; if e=s.join(context.Background()); e != nil { t.Fatal(e) }; r,e := s.receive(context.Background(),make([]byte,8),make([]byte,8)); if r.outcome != tc.outcome || r.n != tc.n { t.Fatal(r,e) }; if tc.name != "again" && tc.name != "interrupt" && e == nil { t.Fatal("missing terminal error") }; if tc.name == "overflow" || tc.name == "permission" || tc.name == "wrapper error after consumption" { if !errors.Is(e,tc.err) { t.Fatal(e) } }
+	}) }
+	for _, n := range []int{0,1} { var log []string; c:=kwTestCalls(&log); ctx,cancel:=context.WithCancel(context.Background()); c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ cancel(); return n,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; r,e:=s.receive(ctx,make([]byte,8),make([]byte,8)); if r.outcome!=kwReceiveDatagram || r.n!=n || !errors.Is(e,context.Canceled) { t.Fatal(r,e) } }
+}
+
+func TestKobjectPollFacts(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); short,called:=false,false; c.poll=func(fds []unix.PollFd, timeout int)(int,error){ called=true; if len(fds)!=1 || fds[0].Fd!=17 || fds[0].Events!=unix.POLLIN || (!short && timeout!=25) || (short && (timeout<1 || timeout>5)) { t.Fatal(fds,timeout) }; fds[0].Revents=unix.POLLIN; return 1,nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; ready,e:=s.waitReadable(context.Background()); if !ready || e!=nil { t.Fatal(ready,e) }
+	short=true; called=false; ctx,cancel:=context.WithDeadline(context.Background(),time.Now().Add(5*time.Millisecond)); defer cancel(); ready,e=s.waitReadable(ctx); if !called && !errors.Is(e,context.DeadlineExceeded) || called && !ready && !errors.Is(e,context.DeadlineExceeded) || ready && e!=nil { t.Fatal(ready,e,called) }
+	var expiredLog []string; expiredCalls:=kwTestCalls(&expiredLog); polled:=false; expiredCalls.poll=func([]unix.PollFd,int)(int,error){ polled=true; return 0,nil }; expiredSocket,e:=acquireKobjectSocketWithCalls(context.Background(),1,expiredCalls); if e!=nil { t.Fatal(e) }; if e=expiredSocket.join(context.Background()); e!=nil { t.Fatal(e) }; expired,expiredCancel:=context.WithDeadline(context.Background(),time.Now().Add(-time.Second)); defer expiredCancel(); if _,e=expiredSocket.waitReadable(expired); !errors.Is(e,context.DeadlineExceeded) || polled { t.Fatal(e,polled) }
+	for _,tc:=range []struct{n int; revents int16; err error; failed bool}{ {0,0,nil,false}, {-1,0,unix.EINTR,false}, {-1,0,unix.EAGAIN,false}, {-1,0,unix.EPERM,true}, {2,0,nil,true}, {-1,0,nil,true}, {1,0,nil,true}, {1,unix.POLLERR,nil,true}, {1,unix.POLLHUP,nil,true}, {1,unix.POLLNVAL,nil,true}, {1,0x4000,nil,true} } { var log []string; c:=kwTestCalls(&log); c.poll=func(f []unix.PollFd,_ int)(int,error){ f[0].Revents=tc.revents; return tc.n,tc.err }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; ready,e:=s.waitReadable(context.Background()); if ready || (e!=nil)!=tc.failed { t.Fatal(tc,ready,e) } }
+}
+
+func TestKobjectIOBorrowAndGuards(t *testing.T) {
+	for _, op := range []string{"recv", "poll"} { t.Run(op,func(t *testing.T) {
+		var log []string; c:=kwTestCalls(&log); c.socket=func(int,int,int)(int,error){ return 0,nil }; entered,release:=make(chan struct{}),make(chan struct{}); ctx,cancel:=context.WithCancel(context.Background()); calls:=0
+		c.recvmsg=func(fd int,_ []byte,_ []byte,_ int)(int,int,int,unix.Sockaddr,error){ if fd!=0 { t.Fatal(fd) }; calls++; close(entered); <-release; return 0,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }
+		c.poll=func(f []unix.PollFd,_ int)(int,error){ if f[0].Fd!=0 { t.Fatal(f) }; calls++; close(entered); <-release; f[0].Revents=unix.POLLIN; return 1,nil }
+		s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; done:=make(chan error,1); go func(){ if op=="recv" { _,e:=s.receive(ctx,make([]byte,8),make([]byte,8)); done<-e } else { _,e:=s.waitReadable(ctx); done<-e } }(); <-entered; cancel(); closed:=make(chan error,1); go func(){ closed<-s.close() }(); select { case <-closed: t.Fatal("closed while borrowed"); default: }; close(release); if e:=<-done; !errors.Is(e,context.Canceled) { t.Fatal(e) }; if e:=<-closed; e!=nil { t.Fatal(e) }; if _,e:=s.receive(context.Background(),make([]byte,8),make([]byte,8)); e==nil || calls!=1 { t.Fatal("closed receive") }
+	}) }
+	var log []string; c:=kwTestCalls(&log); c.recvmsg=nil; if _,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); e==nil || len(log)!=0 { t.Fatal("missing recv callback") }; c=kwTestCalls(&log); c.poll=nil; if _,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); e==nil || len(log)!=0 { t.Fatal("missing poll callback") }
+	log=nil; c=kwTestCalls(&log); calls:=0; c.poll=func([]unix.PollFd,int)(int,error){ calls++; return 0,nil }; c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ calls++; return -1,0,0,nil,unix.EAGAIN }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; ctx,cancel:=context.WithCancel(context.Background()); cancel(); if _,e=s.waitReadable(ctx); !errors.Is(e,context.Canceled) { t.Fatal(e) }; if _,e=s.receive(ctx,make([]byte,8),make([]byte,8)); !errors.Is(e,context.Canceled) || calls!=0 { t.Fatal(e,calls) }; s.phase=kwSocketQuarantined; if _,e=s.waitReadable(context.Background()); e==nil { t.Fatal("quarantined poll") }; if _,e=s.receive(context.Background(),make([]byte,8),make([]byte,8)); e==nil || calls!=0 { t.Fatal("quarantined receive") }
+}
+
+func TestKobjectReceiveStickyFailure(t *testing.T) {
+	for _, cause:=range []error{unix.ENOBUFS,unix.EPERM} { t.Run(cause.Error(),func(t *testing.T){ var log []string; c:=kwTestCalls(&log); recv,poll,member:=0,0,0; base:=c.setsockoptInt; c.setsockoptInt=func(fd,level,opt,value int) error { if level==unix.SOL_NETLINK { member++ }; return base(fd,level,opt,value) }; c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ recv++; if recv==1 { return -1,0,0,nil,cause }; return 1,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK},nil }; c.poll=func([]unix.PollFd,int)(int,error){ poll++; return 1,nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; r,e:=s.receive(context.Background(),make([]byte,8),make([]byte,8)); if r.outcome!=kwReceiveFailed || !errors.Is(e,cause) { t.Fatal(r,e) }; _,e=s.binding(); if !errors.Is(e,cause) { t.Fatal(e) }; _,e=s.receive(context.Background(),make([]byte,8),make([]byte,8)); if !errors.Is(e,cause) { t.Fatal(e) }; _,e=s.waitReadable(context.Background()); if !errors.Is(e,cause) { t.Fatal(e) }; if !errors.Is(s.join(context.Background()),cause) || !errors.Is(s.cut(context.Background()),cause) || recv!=1 || poll!=0 || member!=1 { t.Fatal(recv,poll,member) }; if e=s.close(); e!=nil { t.Fatal(e) }; if _,e=s.binding(); !errors.Is(e,cause) { t.Fatal(e) } }) }
+	for _,cause:=range []error{unix.EAGAIN,unix.EINTR} { var log []string; c:=kwTestCalls(&log); n:=0; c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ n++; if n==1 { return -1,0,0,nil,cause }; return 1,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; r,e:=s.receive(context.Background(),make([]byte,8),make([]byte,8)); if r.outcome!=kwReceiveNoDatagram || e!=nil { t.Fatal(r,e) }; r,e=s.receive(context.Background(),make([]byte,8),make([]byte,8)); if r.outcome!=kwReceiveDatagram || e!=nil { t.Fatal(r,e) } }
+	var log []string; c:=kwTestCalls(&log); ctx,cancel:=context.WithCancel(context.Background()); c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ cancel(); return 0,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; r,e:=s.receive(ctx,make([]byte,8),make([]byte,8)); if r.outcome!=kwReceiveDatagram || r.n!=0 || !errors.Is(e,context.Canceled) { t.Fatal(r,e) }; if _,e=s.waitReadable(context.Background()); !errors.Is(e,context.Canceled) { t.Fatal(e) }
+	for _,n:=range []int{-1,9} { var log []string; c:=kwTestCalls(&log); calls:=0; c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ calls++; return n,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; if e=s.join(context.Background()); e!=nil { t.Fatal(e) }; r,e:=s.receive(context.Background(),make([]byte,8),make([]byte,8)); if e==nil || n==9 && r.outcome!=kwReceiveDatagram || n<0 && r.outcome!=kwReceiveFailed { t.Fatal(r,e) }; original:=e; if _,e=s.receive(context.Background(),make([]byte,8),make([]byte,8)); !errors.Is(e,original) || calls!=1 { t.Fatal(e,calls) } }
+}
+
+func TestKobjectReaderPartitionAndDrain(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); calls:=0; payload:=[]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=module\x00SEQNUM=1\x00"); cred:=unix.UnixCredentials(&unix.Ucred{})
+	c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ calls++; copy(raw,payload); copy(oob,cred); return len(payload),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }
+	s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; startup,cancel:=context.WithCancel(context.Background()); reader,e:=newKobjectSocketReader(startup,context.Background(),s); if e!=nil { t.Fatal(e) }; if e=reader.Join(); e!=nil { t.Fatal(e) }; cancel(); event,e:=reader.Receive(); if e!=nil || event.Subsystem!="module" { t.Fatal(event,e) }; if _,e=reader.Receive(); e==nil || calls!=1 { t.Fatal("pending allowed another receive") }; if e=reader.Cut(context.Background()); e!=nil { t.Fatal(e) }; if e=reader.Retire(); e==nil { t.Fatal("retired pending callback") }; if e=reader.Acknowledge(nil); e!=nil { t.Fatal(e) }; if e=reader.DrainTo(context.Background(),1); e!=nil { t.Fatal(e) }; if _,e=reader.Receive(); !errors.Is(e,errKobjectReaderDrained) { t.Fatal(e) }; f,e:=reader.readerFacts(); if e!=nil || f.consumed!=1 || f.dispatched!=1 || f.pending!=0 { t.Fatal(f,e) }; if e=reader.Retire(); e!=nil { t.Fatal(e) }
+}
+
+func TestKobjectReaderRejectsConsumed(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ copy(raw,"bad\x00"); creds:=unix.UnixCredentials(&unix.Ucred{}); copy(oob,creds); return 4,len(creds),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); e==nil { t.Fatal("accepted malformed") }; f,_:=r.readerFacts(); if f.consumed!=1 || f.rejected!=1 || f.pending!=0 { t.Fatal(f) }
+}
+
+func TestKobjectReaderBoundedCut(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); entered,release:=make(chan struct{}),make(chan struct{}); base:=c.setsockoptInt; drops:=0; c.setsockoptInt=func(fd,level,opt,value int) error { if level==unix.SOL_NETLINK && opt==unix.NETLINK_DROP_MEMBERSHIP { drops++; close(entered); <-release; return nil }; return base(fd,level,opt,value) }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; ctx,cancel:=context.WithCancel(context.Background()); result:=make(chan error,1); go func(){ result<-r.Cut(ctx) }(); <-entered; cancel(); if e=<-result; !errors.Is(e,context.Canceled) { t.Fatal(e) }; if e=r.Retire(); !errors.Is(e,errKobjectReaderPending) { t.Fatal(e) }; for _,v:=range log { if v=="close" { t.Fatal("closed while cut pending") } }; close(release); <-r.cutDone; if e=r.Cut(context.Background()); !errors.Is(e,context.Canceled) || drops!=1 { t.Fatal(e,drops) }; if e=r.Retire(); e!=nil { t.Fatal(e) }
+}
+
+func TestKobjectReaderAckAfterDeadline(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); p:=[]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); cred:=unix.UnixCredentials(&unix.Ucred{}); c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ copy(raw,p); copy(oob,cred); return len(p),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); e!=nil { t.Fatal(e) }; if e=r.Cut(context.Background()); e!=nil { t.Fatal(e) }; ctx,cancel:=context.WithCancel(context.Background()); cancel(); if e=r.DrainTo(ctx,1); !errors.Is(e,context.Canceled) { t.Fatal(e) }; f,_:=r.readerFacts(); if f.pending!=1 || f.aborted!=0 { t.Fatal(f) }; if e=r.Retire(); !errors.Is(e,errKobjectReaderPending) { t.Fatal(e) }; if e=r.Acknowledge(nil); !errors.Is(e,context.Canceled) { t.Fatal(e) }; f,_=r.readerFacts(); if f.pending!=0 || f.aborted!=1 || f.dispatched!=0 { t.Fatal(f) }; if e=r.DrainTo(context.Background(),1); !errors.Is(e,context.Canceled) { t.Fatal(e) }; if e=r.Retire(); e!=nil { t.Fatal(e) }
+}
+
+func TestKobjectReaderTimeoutIsNotDrain(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); calls,polls:=0,0; p:=[]byte("change@/a\x00ACTION=change\x00DEVPATH=/a\x00SUBSYSTEM=block\x00SEQNUM=3\x00"); cred:=unix.UnixCredentials(&unix.Ucred{}); c.poll=func([]unix.PollFd,int)(int,error){ polls++; return 0,nil }; c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ calls++; if calls==1 { return -1,0,0,nil,unix.EAGAIN }; copy(raw,p); copy(oob,cred); return len(p),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if _,e=newKobjectSocketReader(context.Background(),context.Background(),s); e==nil { t.Fatal("duplicate owner") }; if e=r.Join(); e!=nil { t.Fatal(e) }; event,e:=r.Receive(); if e!=nil || event.Subsystem!="block" || calls!=2 || polls!=1 { t.Fatal(event,e,calls,polls) }; if e=r.Acknowledge(unix.EIO); !errors.Is(e,unix.EIO) { t.Fatal(e) }; f,_:=r.readerFacts(); if f.consumed!=1 || f.aborted!=1 || f.pending!=0 || f.dispatched!=0 { t.Fatal(f) }; if e=r.Acknowledge(nil); !errors.Is(e,unix.EIO) { t.Fatal(e) }
+}
+
+func TestKobjectReaderZeroGoal(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if e=r.Cut(context.Background()); e!=nil { t.Fatal(e) }; if e=r.DrainTo(context.Background(),0); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); !errors.Is(e,errKobjectReaderDrained) || !errors.Is(e,io.EOF) { t.Fatal(e) }; if e=r.DrainTo(context.Background(),1); e==nil { t.Fatal("goal changed") }
+}
+
+func TestKobjectReaderConcurrentReceive(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); entered,release:=make(chan struct{}),make(chan struct{}); calls:=0; p:=[]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); cred:=unix.UnixCredentials(&unix.Ucred{}); c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ calls++; close(entered); <-release; copy(raw,p); copy(oob,cred); return len(p),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; done:=make(chan error,1); go func(){ _,err:=r.Receive(); done<-err }(); <-entered; if _,e=r.Receive(); !errors.Is(e,errKobjectReaderPending) { t.Fatal(e) }; if e=r.Retire(); !errors.Is(e,errKobjectReaderPending) { t.Fatal(e) }; close(release); if e=<-done; !errors.Is(e,context.Canceled) { t.Fatal(e) }; f,_:=r.readerFacts(); if calls!=1 || f.consumed!=1 || f.aborted!=1 || f.pending!=0 { t.Fatal(calls,f) }; if e=r.Retire(); e!=nil { t.Fatal(e) }
+}
+
+func TestKobjectReaderLateConsumedAndOverflow(t *testing.T) {
+	for _,late:=range []bool{false,true} { var log []string; c:=kwTestCalls(&log); worker,cancel:=context.WithCancel(context.Background()); c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ if late { cancel() }; return 0,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),worker,s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); e==nil { t.Fatal("empty accepted") }; f,_:=r.readerFacts(); if f.consumed!=1 || f.pending!=0 || f.rejected+f.aborted!=1 { t.Fatal(f) }; if late && !errors.Is(e,context.Canceled) { t.Fatal(e) }; cancel() }
+	var log []string; c:=kwTestCalls(&log); c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ return 0,0,0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; r.facts.consumed=^uint64(0); if _,e=r.Receive(); e==nil || r.facts.consumed!=^uint64(0) { t.Fatal("overflow wrapped") }
+}
+
+type kwBlockedDoneContext struct {
+	context.Context
+	once sync.Once
+	entered, release chan struct{}
+}
+
+func (c *kwBlockedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func(){ close(c.entered); <-c.release })
+	return c.Context.Done()
+}
+
+func kwReaderPendingForReview(t *testing.T) *kwSocketReader {
+	t.Helper(); var log []string; c:=kwTestCalls(&log); p:=[]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); cred:=unix.UnixCredentials(&unix.Ucred{}); c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ copy(raw,p); copy(oob,cred); return len(p),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); e!=nil { t.Fatal(e) }; if e=r.Cut(context.Background()); e!=nil { t.Fatal(e) }; return r
+}
+
+func TestKobjectReaderFirstDrainDeadlineAuthoritative(t *testing.T) {
+	r0:=kwReaderPendingForReview(t); ctx0,cancel0:=context.WithCancel(context.Background()); blocked0:=&kwBlockedDoneContext{Context:ctx0,entered:make(chan struct{}),release:make(chan struct{})}; done0:=make(chan error,1); go func(){ done0<-r0.DrainTo(blocked0,1) }(); <-blocked0.entered; cancel0(); f0,_:=r0.readerFacts(); if f0.pending!=1 { t.Fatal(f0) }; if e:=r0.Acknowledge(nil); !errors.Is(e,context.Canceled) { t.Fatal(e) }; f0,_=r0.readerFacts(); if f0.pending!=0 || f0.aborted!=0 || f0.dispatched!=1 { t.Fatal(f0) }; if e:=r0.DrainTo(context.Background(),1); !errors.Is(e,context.Canceled) { t.Fatal(e) }; close(blocked0.release); if e:=<-done0; !errors.Is(e,context.Canceled) { t.Fatal(e) }
+	r:=kwReaderPendingForReview(t); first,cancel:=context.WithCancel(context.Background()); blocked:=&kwBlockedDoneContext{Context:first,entered:make(chan struct{}),release:make(chan struct{})}; done:=make(chan error,1); go func(){ done<-r.DrainTo(blocked,1) }(); <-blocked.entered; cancel(); f,_:=r.readerFacts(); if f.pending!=1 { t.Fatal(f) }; if e:=r.Acknowledge(unix.EIO); !errors.Is(e,context.Canceled) || !errors.Is(e,unix.EIO) { t.Fatal(e) }; f,_=r.readerFacts(); if f.pending!=0 || f.aborted!=1 || f.dispatched!=0 { t.Fatal(f) }; if e:=r.DrainTo(context.Background(),1); !errors.Is(e,context.Canceled) || !errors.Is(e,unix.EIO) { t.Fatal(e) }; close(blocked.release); if e:=<-done; !errors.Is(e,context.Canceled) { t.Fatal(e) }
+	r=kwReaderPendingForReview(t); if e:=r.Acknowledge(nil); e!=nil { t.Fatal(e) }; first,cancel=context.WithCancel(context.Background()); if e:=r.DrainTo(first,1); e!=nil { t.Fatal(e) }; cancel(); if e:=r.DrainTo(context.Background(),1); !errors.Is(e,context.Canceled) { t.Fatal(e) }; if _,e:=r.Receive(); !errors.Is(e,context.Canceled) || errors.Is(e,io.EOF) { t.Fatal(e) }
+	r=kwReaderPendingForReview(t); if e:=r.DrainTo(context.Background(),0); e==nil { t.Fatal("too-small goal") }
+}
+
+func TestKobjectReaderEOFIsOnlyDrainedSignal(t *testing.T) {
+	for _,cause:=range []error{io.EOF,errors.Join(unix.EIO,io.EOF)} { var log []string; c:=kwTestCalls(&log); p:=[]byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00"); cred:=unix.UnixCredentials(&unix.Ucred{}); c.recvmsg=func(_ int,raw,oob []byte,_ int)(int,int,int,unix.Sockaddr,error){ copy(raw,p); copy(oob,cred); return len(p),len(cred),0,&unix.SockaddrNetlink{Family:unix.AF_NETLINK,Groups:1},nil }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if _,e=r.Receive(); e!=nil { t.Fatal(e) }; if e=r.Acknowledge(cause); !errors.Is(e,io.EOF) { t.Fatal(e) }; if _,e=r.Receive(); e==nil || errors.Is(e,io.EOF) { t.Fatal(e) }; _,e=r.readerFacts(); if !errors.Is(e,io.EOF) { t.Fatal(e) } }
+}
+
+func TestKobjectReaderEOFBoundaryPreservesPermissions(t *testing.T) {
+	for _,cause:=range []error{errors.Join(io.EOF,unix.EPERM),errors.Join(fmt.Errorf("wrapped: %w",io.EOF),unix.EPERM)} { r:=kwReaderPendingForReview(t); ack:=r.Acknowledge(cause); if !errors.Is(ack,io.EOF) || !errors.Is(ack,unix.EPERM) { t.Fatal(ack) }; _,err:=r.Receive(); if err==nil || errors.Is(err,io.EOF) || !errors.Is(err,unix.EPERM) { t.Fatal(err) }; _,factsErr:=r.readerFacts(); if !errors.Is(factsErr,io.EOF) || !errors.Is(factsErr,unix.EPERM) { t.Fatal(factsErr) } }
+}
+
+func TestKobjectReaderBareEOFOnlyAfterDrain(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; if e=r.Cut(context.Background()); e!=nil { t.Fatal(e) }; if e=r.DrainTo(context.Background(),0); e!=nil { t.Fatal(e) }; event,e:=r.Receive(); if event!=nil || e!=io.EOF { t.Fatal(event,e) }
+	for _,cause:=range []error{io.EOF,errors.Join(io.EOF,unix.EPERM),errors.Join(fmt.Errorf("wrapped: %w",io.EOF),unix.EPERM)} { reader:=kwReaderPendingForReview(t); if e:=reader.Acknowledge(cause); !errors.Is(e,io.EOF) { t.Fatal(e) }; event,e:=reader.Receive(); if event!=nil || e==nil || e==io.EOF || errors.Is(e,io.EOF) { t.Fatal(event,e) }; if errors.Is(cause,unix.EPERM) && !errors.Is(e,unix.EPERM) { t.Fatal(e) } }
+}
+
+func TestKobjectReaderPreservesLateNativeError(t *testing.T) {
+	var log []string; c:=kwTestCalls(&log); entered,release:=make(chan struct{}),make(chan struct{}); c.recvmsg=func(int,[]byte,[]byte,int)(int,int,int,unix.Sockaddr,error){ close(entered); <-release; return -1,0,0,nil,unix.ENOBUFS }; s,e:=acquireKobjectSocketWithCalls(context.Background(),1,c); if e!=nil { t.Fatal(e) }; r,e:=newKobjectSocketReader(context.Background(),context.Background(),s); if e!=nil { t.Fatal(e) }; if e=r.Join(); e!=nil { t.Fatal(e) }; done:=make(chan error,1); go func(){ _,err:=r.Receive(); done<-err }(); <-entered; first:=r.Acknowledge(nil); if first==nil { t.Fatal("expected poison") }; close(release); if e=<-done; !errors.Is(e,first) || !errors.Is(e,unix.ENOBUFS) { t.Fatal(e) }
+}
+
+func TestDecodeKobjectDatagramRejectsInvalid(t *testing.T) {
+	valid := []byte("add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00")
+	addr := &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 1}
+	cred := unix.UnixCredentials(&unix.Ucred{Pid: 42, Uid: 1000})
+	var nilAddr *unix.SockaddrNetlink
+	tests := []struct{name string; raw []byte; from unix.Sockaddr; flags int; oob []byte}{
+		{"nil sender", valid, nilAddr, 0, cred},
+		{"wrong family", valid, &unix.SockaddrNetlink{Family: unix.AF_UNIX, Groups: 1}, 0, cred},
+		{"wrong port", valid, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Pid: 1, Groups: 1}, 0, cred},
+		{"wrong group", valid, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: 2}, 0, cred},
+		{"truncated payload", valid, addr, unix.MSG_TRUNC, cred},
+		{"truncated control", valid, addr, unix.MSG_CTRUNC, cred},
+		{"unexpected flags", valid, addr, unix.MSG_OOB, cred},
+		{"missing credentials", valid, addr, 0, nil},
+		{"duplicate credentials", valid, addr, 0, append(bytes.Clone(cred), cred...)},
+		{"truncated credentials", valid, addr, 0, cred[:len(cred)-2]},
+		{"malformed control", valid, addr, 0, []byte{1, 2, 3}},
+		{"unknown control", valid, addr, 0, unix.UnixRights(5)},
+		{"negative pid", valid, addr, 0, unix.UnixCredentials(&unix.Ucred{Pid: -1})},
+	}
+	badPayloads := []string{
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1",
+		"add@/a\x00\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SEQNUM=1\x00",
+		"add@/a\x00ACTION=add\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00X=1\x00X=2\x00",
+		"remove@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00",
+		"add@/b\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00=bad\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=1\x00bad\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=-1\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=+1\x00",
+		"add@/a\x00ACTION=add\x00DEVPATH=/a\x00SUBSYSTEM=x\x00SEQNUM=18446744073709551616\x00",
+	}
+	for _, tc := range tests { t.Run(tc.name, func(t *testing.T) { if _, _, err := decodeKobjectDatagram(tc.raw, tc.from, tc.flags, tc.oob); err == nil { t.Fatal("accepted invalid datagram") } }) }
+	for _, raw := range badPayloads { if _, _, err := decodeKobjectDatagram([]byte(raw), addr, 0, cred); err == nil { t.Fatalf("accepted invalid payload %q", raw) } }
+}

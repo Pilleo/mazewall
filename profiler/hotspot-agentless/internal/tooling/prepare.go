@@ -1,6 +1,7 @@
 package tooling
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Pilleo/mazewall/hotspot-bridge/bundle"
@@ -27,8 +29,8 @@ const (
 	identityObservations
 )
 
-var gadgetPatches = []string{"gadget-structured.patch", "gadget-health.patch", "gadget-epoch.patch", "gadget-shutdown.patch", "gadget-event-loss.patch", "gadget-finalization.patch", "gadget-definition-drain.patch", "gadget-auxiliary-ownership.patch", "gadget-containerd-v2.patch"}
-var profilerPatches = []string{"profiler-health.patch", "profiler-quality.patch", "profiler-identity.patch", "profiler-epoch-capture.patch", "profiler-epoch-memory.patch", "profiler-epoch-handler.patch", "profiler-shutdown.patch", "profiler-definition-drain.patch", "profiler-metadata-retirement.patch", "profiler-auxiliary-ownership.patch"}
+var gadgetPatches = []string{"gadget-structured.patch", "gadget-health.patch", "gadget-epoch.patch", "gadget-shutdown.patch", "gadget-event-loss.patch", "gadget-finalization.patch", "gadget-definition-drain.patch", "gadget-auxiliary-ownership.patch", "gadget-containerd-v2.patch", "gadget-prune-accounting.patch"}
+var profilerPatches = []string{"profiler-health.patch", "profiler-quality.patch", "profiler-identity.patch", "profiler-epoch-capture.patch", "profiler-epoch-memory.patch", "profiler-epoch-handler.patch", "profiler-shutdown.patch", "profiler-definition-drain.patch", "profiler-metadata-retirement.patch", "profiler-auxiliary-ownership.patch", "profiler-target-bootstrap.patch", "profiler-pid-process.patch", "profiler-periodic-accounting.patch", "profiler-reload-accounting.patch", "profiler-kobject-witness.patch"}
 
 func additions(root, directory string) ([]string, error) {
 	var paths []string
@@ -63,6 +65,7 @@ func preparationInputs(root string, mode preparationMode) ([]string, error) {
 		paths = append(paths, "patches/"+name)
 	}
 	paths = append(paths, "scripts/rebuild-profiler-ebpf.sh")
+	paths = append(paths, "scripts/rebuild-profiler-ebpf/main.go")
 	profiler, err := additions(root, "patches/profiler-additions")
 	if err != nil {
 		return nil, err
@@ -115,6 +118,29 @@ func command(root string, args ...string) error {
 	child.Dir = root
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
+	if err := child.Run(); err != nil {
+		return fmt.Errorf("%v: %w", args, err)
+	}
+	return nil
+}
+
+const (
+	prepareStageBudget    = 540 * time.Second
+	prepareWaitDelay      = 2 * time.Second
+	clientReturnAllowance = 5 * time.Second // covers WaitDelay (2s) + bounded child exit/pipe drain
+)
+
+func deriveBuilderDeadline(overallEnd time.Time) time.Time {
+	// Floor to whole Unix seconds so the integer deadline never exceeds overallEnd - clientReturnAllowance.
+	return time.Unix(overallEnd.Add(-clientReturnAllowance).Unix(), 0)
+}
+
+func commandContext(ctx context.Context, root string, args ...string) error {
+	child := exec.CommandContext(ctx, args[0], args[1:]...)
+	child.Dir = root
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
+	child.WaitDelay = prepareWaitDelay
 	if err := child.Run(); err != nil {
 		return fmt.Errorf("%v: %w", args, err)
 	}
@@ -351,7 +377,11 @@ func prepare(root string, mode preparationMode) error {
 				return err
 			}
 		}
-		if err := command(root, "bash", filepath.Join(root, "scripts/rebuild-profiler-ebpf.sh"), generatedProfiler); err != nil {
+		overallEnd := time.Now().Add(prepareStageBudget)
+		ctx, cancel := context.WithDeadline(context.Background(), overallEnd)
+		defer cancel()
+		stageDeadline := deriveBuilderDeadline(overallEnd).Unix()
+		if err := commandContext(ctx, root, "bash", filepath.Join(root, "scripts/rebuild-profiler-ebpf.sh"), generatedProfiler, fmt.Sprintf("%d", stageDeadline)); err != nil {
 			return err
 		}
 		artifacts := map[string]string{}

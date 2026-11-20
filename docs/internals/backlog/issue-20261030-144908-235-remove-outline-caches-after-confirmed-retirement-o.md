@@ -32,4 +32,16 @@ The real129-heading failure/cleanup case and all four file-mode native tests pas
 The former confirmed-dead cache-retention minor is fixed. Open pending managed landing.
 
 ---
+## Repository-review sibling-path expansion — 2026-11-04
+
+[KD-E1](../reviews/2026-11-04-repository-review-findings.md#kd-e1) preserves the corrected
+actual-file OutlineFileApplication behavior. PortalExample, PortalDocumentAgent, DocumentAgent,
+ThreadReadExample and their two presentation fixtures still delete synthetic roots in outer
+finally after incomplete/exceptional close, skipping retirement checks and losing retry access.
+Reuse the existing retirement-gated cleanup pattern with a retained owner and primary/suppressed
+failures. Test actual app cleanup against held/failed physical retirement, retain root/no success
+marker, then release/retry/delete. Logical-owner sequencing was reproduced; no operator-file
+loss or live-worker JAR failure is proved. Do not reopen core retained-owner fixes as absent.
+
+---
 <!-- id: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o  file: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md -->

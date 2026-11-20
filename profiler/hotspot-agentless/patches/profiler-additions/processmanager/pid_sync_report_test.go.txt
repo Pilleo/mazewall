@@ -1,0 +1,328 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"os"
+	"syscall"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+	"go.opentelemetry.io/ebpf-profiler/times"
+)
+
+type stubReportingEbpf struct {
+	pmebpf.EbpfHandler
+	removedPIDs []libpf.PID
+	deletedPIDs []libpf.PID
+}
+
+func (s *stubReportingEbpf) RemoveReportedPID(pid libpf.PID) {
+	s.removedPIDs = append(s.removedPIDs, pid)
+}
+
+func (s *stubReportingEbpf) DeletePid(pid libpf.PID) {
+	s.deletedPIDs = append(s.deletedPIDs, pid)
+}
+
+func (s *stubReportingEbpf) UpdatePidPageMappingInfo(pid libpf.PID, prefix lpm.Prefix, fileID, bias uint64) error {
+	return errors.New("mapping update error")
+}
+
+type stubReportingProcess struct {
+	process.Process
+	pid            libpf.PID
+	mappings       []process.Mapping
+	numParseErrors uint32
+	err            error
+	calls          int
+}
+
+func (p *stubReportingProcess) PID() libpf.PID {
+	if p.pid == 0 {
+		return 1234
+	}
+	return p.pid
+}
+
+func (p *stubReportingProcess) GetExe() (libpf.String, error) {
+	return libpf.NullString, errors.New("stub exe error")
+}
+
+func (p *stubReportingProcess) GetMappings() ([]process.Mapping, uint32, error) {
+	p.calls++
+	return p.mappings, p.numParseErrors, p.err
+}
+
+// TestClassifyOrdinarySync tests the unexported decision helper for line 890.
+// Note: Pure classifier coverage; full end-to-end OrdinaryNil requires valid ELF
+// and /proc access, which is unproved in host fixtures without kernel/ELF support.
+func TestClassifyOrdinarySync(t *testing.T) {
+	// Clean mappings with 0 parse errors classifies as OrdinaryNil.
+	require.Equal(t, OrdinaryNil, classifyOrdinarySync(0, 1))
+	require.Equal(t, OrdinaryNil, classifyOrdinarySync(0, 42))
+
+	// Incomplete mappings with parse errors classifies as PartialOrEmpty.
+	require.Equal(t, PartialOrEmpty, classifyOrdinarySync(1, 1))
+	require.Equal(t, PartialOrEmpty, classifyOrdinarySync(5, 10))
+
+	// Empty mappings with 0 parse errors classifies as PartialOrEmpty.
+	require.Equal(t, PartialOrEmpty, classifyOrdinarySync(0, 0))
+
+	// Empty mappings with parse errors classifies as PartialOrEmpty.
+	require.Equal(t, PartialOrEmpty, classifyOrdinarySync(2, 0))
+}
+
+func TestSynchronizeOrdinaryReported_Context(t *testing.T) {
+	pm := &ProcessManager{ebpf: &stubReportingEbpf{}}
+	pr := &stubReportingProcess{pid: 2001}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	err := pm.synchronizeProcessChecked(ctx, pr, ordinarySynchronization, nil, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		// Verify pm.mu is not locked during report callback
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, Context, reportedBranch)
+	require.ErrorIs(t, reportedErr, context.Canceled)
+}
+
+func TestSynchronizeOrdinaryReported_ExitWaiting(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:       ebpfStub,
+		exitEvents: map[libpf.PID]times.KTime{3001: 1},
+	}
+	pr := &stubReportingProcess{pid: 3001}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, ExitWaiting, reportedBranch)
+	require.NoError(t, reportedErr)
+	require.Contains(t, ebpfStub.removedPIDs, libpf.PID(3001))
+}
+
+func TestSynchronizeOrdinaryReported_PermissionIgnored(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{ebpf: ebpfStub}
+	pr := &stubReportingProcess{pid: 4001, err: os.ErrPermission}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, PermissionIgnored, reportedBranch)
+	require.NoError(t, reportedErr)
+	require.Equal(t, uint32(1), pm.mappingStats.errProcPerm.Load())
+	// PID is left reported in eBPF (not removed)
+	require.NotContains(t, ebpfStub.removedPIDs, libpf.PID(4001))
+}
+
+func TestSynchronizeOrdinaryReported_NoMappings(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{ebpf: ebpfStub}
+	pr := &stubReportingProcess{pid: 5001, err: process.ErrNoMappings}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, NoMappings, reportedBranch)
+	require.NoError(t, reportedErr)
+	require.Contains(t, ebpfStub.removedPIDs, libpf.PID(5001))
+}
+
+func TestSynchronizeOrdinaryReported_NotExistExited(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:             ebpfStub,
+		pidToProcessInfo: make(map[libpf.PID]*processInfo),
+	}
+	pr := &stubReportingProcess{pid: 6001, err: os.ErrNotExist}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, NotExistExited, reportedBranch)
+	require.NoError(t, reportedErr)
+	require.Equal(t, uint32(1), pm.mappingStats.errProcNotExist.Load())
+}
+
+func TestSynchronizeOrdinaryReported_ESRCHExited(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:             ebpfStub,
+		pidToProcessInfo: make(map[libpf.PID]*processInfo),
+	}
+	pr := &stubReportingProcess{pid: 7001, err: &os.PathError{Op: "open", Path: "/proc/7001/maps", Err: syscall.ESRCH}}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, ESRCHExited, reportedBranch)
+	require.NoError(t, reportedErr)
+	require.Equal(t, uint32(1), pm.mappingStats.errProcESRCH.Load())
+}
+
+func TestSynchronizeOrdinaryReported_OtherMappingErrorExited(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:             ebpfStub,
+		pidToProcessInfo: make(map[libpf.PID]*processInfo),
+	}
+	pr := &stubReportingProcess{pid: 8001, err: errors.New("i/o error reading maps")}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, OtherMappingErrorExited, reportedBranch)
+	require.NoError(t, reportedErr)
+}
+
+func TestSynchronizeOrdinaryReported_MappingsError_SyncErrDiscardedByWrapper(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:             ebpfStub,
+		pidToProcessInfo: make(map[libpf.PID]*processInfo),
+	}
+	mapping := process.Mapping{
+		Vaddr: 0x400000, Length: 0x1000, Path: libpf.Intern("/nonexistent/path/elf"),
+	}
+	pr := &stubReportingProcess{pid: 9001, mappings: []process.Mapping{mapping}}
+
+	var reportedBranch OrdinarySyncBranch
+	var reportedErr error
+	reportCount := 0
+
+	// Wrapper is void; syncErr is discarded by wrapper
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+		reportedErr = err
+		require.True(t, pm.mu.TryLock())
+		pm.mu.Unlock()
+	})
+
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, MappingsError, reportedBranch)
+	require.Error(t, reportedErr)
+}
+
+func TestSynchronizeOrdinaryReported_PartialThenMappingsError_OneTerminal(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:             ebpfStub,
+		pidToProcessInfo: make(map[libpf.PID]*processInfo),
+	}
+	mapping := process.Mapping{
+		Vaddr: 0x400000, Length: 0x1000, Path: libpf.Intern("/nonexistent/path/elf"),
+	}
+	// numParseErrors > 0 AND mappings will error in synchronizeMappingsChecked
+	pr := &stubReportingProcess{
+		pid:            9002,
+		mappings:       []process.Mapping{mapping},
+		numParseErrors: 3,
+	}
+
+	reportCount := 0
+	var reportedBranch OrdinarySyncBranch
+
+	pm.SynchronizeOrdinaryReported(pr, func(b OrdinarySyncBranch, err error) {
+		reportCount++
+		reportedBranch = b
+	})
+
+	// Partial that later returns syncErr is exactly ONE MappingsError, not a second terminal
+	require.Equal(t, 1, reportCount)
+	require.Equal(t, MappingsError, reportedBranch)
+}
+
+func TestSynchronizeProcess_LegacySideEffects(t *testing.T) {
+	ebpfStub := &stubReportingEbpf{}
+	pm := &ProcessManager{
+		ebpf:       ebpfStub,
+		exitEvents: map[libpf.PID]times.KTime{9999: 1},
+	}
+	pr := &stubReportingProcess{pid: 9999}
+
+	// Legacy call remains void and performs ordinary side effects
+	pm.SynchronizeProcess(pr)
+	require.Contains(t, ebpfStub.removedPIDs, libpf.PID(9999))
+}

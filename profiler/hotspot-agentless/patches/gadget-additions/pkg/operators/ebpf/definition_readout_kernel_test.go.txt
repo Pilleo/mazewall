@@ -1,0 +1,304 @@
+//go:build mw_kernel && linux
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/spf13/viper"
+)
+
+// Actual Start/attach/root/window control only. The quiet ring program is not
+// an OTel producer or a composed capture/process-lifetime qualification fixture.
+func TestKernelDefinitionReadoutAuthorityOriginalRoot(t *testing.T) {
+	for _, kind := range []string{"joined", "direct_callback", "held_callback_deadline", "root_replaced", "held_borrower_close"} {
+		t.Run(kind, func(t *testing.T) {
+			gc := gadgetcontext.New(context.Background(), "definition-original-root")
+			t.Cleanup(gc.Cancel)
+			i := eventFinalizationScopeFixture()
+			i.logger, i.gadgetCtx, i.bpfOperator = gc.Logger(), gc, &ebpfOperator{}
+			i.config = viper.New()
+			i.params, i.paramValues = map[string]*param{}, map[string]string{}
+			stat, err := os.ReadFile("/proc/self/stat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			end := strings.LastIndex(string(stat), ")")
+			if end < 0 {
+				t.Fatal("actual self stat delimiter unavailable")
+			}
+			fields := strings.Fields(string(stat)[end+1:])
+			if len(fields) < 20 {
+				t.Fatal("actual self birth unavailable")
+			}
+			birth, err := strconv.ParseUint(fields[19], 10, 64)
+			if err != nil || birth == 0 {
+				t.Fatal("actual self birth", birth, err)
+			}
+			pid := uint32(os.Getpid())
+			for key, value := range map[string]string{"collect_ustack": "true", "collect_otel_stack": "true", ParamTraceKernel: "false", "target_pid": strconv.Itoa(os.Getpid()), "target_start_ticks": strconv.FormatUint(birth, 10), "target_safepoint_counter": "0"} {
+				i.params[key] = &param{Param: &api.Param{Key: key, DefaultValue: value, TypeHint: "string"}}
+			}
+			p := i.collectionSpec.Programs["capture_openat"]
+			p.License, p.AttachTo = "GPL", "__x64_sys_openat"
+			p.Instructions = asm.Instructions{asm.Mov.Imm(asm.R0, 0), asm.Return()}
+			i.collectionSpec.Maps["events"].MaxEntries = 4096
+			i.collectionSpec.Maps["selected_counts"] = &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 32, MaxEntries: 1}
+			ds, err := datasource.New(datasource.TypeSingle, "openat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accessor, err := ds.AddField("wire", api.Kind_Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			i.tracers["openat"].ds, i.tracers["openat"].accessor, i.tracers["openat"].eventSize = ds, accessor, 4
+			entered, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			var actions atomic.Uint32
+			borrowerDone := make(chan struct{})
+			var borrowerStarted atomic.Bool
+			var borrowerErr error
+			callback := func(context.Context) error {
+				if kind == "held_borrower_close" {
+					borrowerStarted.Store(true)
+					go func() {
+						borrowerErr = i.WithDefinitionReadout("native-root", pid, birth, func() error { close(entered); <-release; actions.Add(1); return nil })
+						close(borrowerDone)
+					}()
+					<-borrowerDone
+					return borrowerErr
+				}
+				if kind == "held_callback_deadline" {
+					close(entered)
+					<-release
+				}
+				return i.WithDefinitionReadout("native-root", pid, birth, func() error { actions.Add(1); return nil })
+			}
+			gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute), ObservedFull: true, Accounting: &operators.SelectedAccountingTarget{Session: "native-root", PID: pid, Birth: birth}, AfterReadout: callback})
+			var original link.Link
+			var replacement link.Link
+			startedStop := false
+			stopReturned := make(chan struct{})
+			t.Cleanup(func() {
+				unblock()
+				safeStop := true
+				if startedStop {
+					select { case <-stopReturned: case <-time.After(5 * time.Second): t.Error("native Stop did not return"); safeStop = false }
+					if borrowerStarted.Load() { select { case <-borrowerDone: case <-time.After(5 * time.Second): t.Error("native borrower did not return"); safeStop = false } }
+					select {
+					case <-i.eventFinalizer.done:
+					case <-time.After(5 * time.Second):
+						t.Error("retain original collection: native callback still active")
+						return
+					}
+				}
+				if !safeStop { return }
+				if i.eventFinalizer != nil {
+					backend, err := i.disposalBackend()
+					if err == nil {
+						select {
+						case <-backend.hold.initDone:
+							backend.hold.stateMu.Lock()
+							if kind == "root_replaced" && original != nil && !backend.hold.closeRequested { i.links = []link.Link{original} }
+							backend.hold.stateMu.Unlock()
+							closeErr := closeEventCollection(i)
+							var pending *eventDisposalPending
+							if closeErr != nil && !errors.As(closeErr, &pending) { t.Error(closeErr) }
+							select {
+							case <-backend.hold.closeDone:
+								backend.hold.stateMu.Lock(); physicalErr := backend.hold.closeErr; backend.hold.stateMu.Unlock()
+								if physicalErr != nil { t.Error(physicalErr) }
+							case <-time.After(5 * time.Second): t.Error("native physical disposal did not finish"); return
+							}
+							if replacement != nil { if err := replacement.Close(); err != nil { t.Error(err) } }
+							return
+						default:
+							t.Error("retain collection: initialization not published")
+							return
+						}
+					}
+					if err != nil { t.Error(err); return }
+				}
+				if i.collection == nil {
+					return
+				}
+				if original == nil && len(i.links) == 1 {
+					original = i.links[0]
+				}
+				if original != nil && (i.eventFinalizer == nil || i.eventFinalizer.definitionRoot == nil || !i.eventFinalizer.definitionRoot.retired) {
+					if err := original.Close(); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+				if replacement != nil {
+					if err := replacement.Close(); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+				for _, tracer := range i.tracers {
+					if tracer.eventDrain == nil || tracer.ringbufReader == nil {
+						continue
+					}
+					select {
+					case <-tracer.eventDrain.done:
+					default:
+						tracer.eventDrain.flushing.Store(true)
+						if err := tracer.ringbufReader.Flush(); err != nil {
+							t.Error(err)
+							return
+						}
+						select {
+						case <-tracer.eventDrain.done:
+						case <-time.After(5 * time.Second):
+							t.Error("retain collection: native reader still active")
+							return
+						}
+					}
+				}
+				joined := make(chan struct{})
+				go func() { i.wg.Wait(); close(joined) }()
+				select {
+				case <-joined:
+					if err := closeEventCollection(i); err != nil {
+						t.Error(err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Error("retain collection: native receiver still active")
+				}
+			})
+			if err := i.Start(gc); err != nil {
+				t.Fatal("actual Start/attach", err)
+			}
+			if i.collectionSpec != nil || i.eventFinalizer.admission == nil {
+				t.Fatal("actual Start must release its admitted spec/BTF before runtime finalization")
+			}
+			if len(i.links) != 1 || i.eventFinalizer.definitionRoot == nil || i.eventFinalizer.definitionRoot.link != i.links[0] {
+				t.Fatal("actual Start did not acquire its original root")
+			}
+			original = i.links[0]
+			info, err := i.collection.Programs["capture_openat"].Info()
+			if err != nil {
+				t.Fatal(err)
+			}
+			programID, ok := info.ID()
+			if !ok || programID != i.eventFinalizer.definitionRoot.programID {
+				t.Fatal("original program metadata not acquired", programID)
+			}
+			originalMap := i.collection.Maps["events"]
+			originalProgram := i.collection.Programs["capture_openat"]
+			mapInfo, err := originalMap.Info()
+			if err != nil { t.Fatal("original map info", err) }
+			mapID, ok := mapInfo.ID()
+			if !ok || mapID == 0 { t.Fatal("original map ID unavailable") }
+			if err := i.WithDefinitionReadout("native-root", pid, birth, func() error { t.Error("early action"); return nil }); err == nil {
+				t.Fatal("live original root authorized early readout")
+			}
+			if kind == "direct_callback" {
+				if err := callback(context.Background()); err == nil || actions.Load() != 0 {
+					t.Fatal("direct callback minted authority", err)
+				}
+			}
+			if kind == "root_replaced" {
+				replacement, err = link.Kprobe("__x64_sys_openat", i.collection.Programs["capture_openat"], nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := replacement.Info(); err != nil {
+					t.Fatal("negative-control live replacement info", err)
+				}
+				i.links = []link.Link{replacement}
+			}
+			startedStop = true
+			done := make(chan error, 1)
+			go func() { defer close(stopReturned); done <- i.Stop(gc) }()
+			if kind == "held_callback_deadline" || kind == "held_borrower_close" {
+				select {
+				case <-entered:
+				case err := <-done:
+					t.Fatal("actual Stop returned before entering its callback", err)
+				case <-time.After(5 * time.Second):
+					t.Fatal("native Join entry exceeded independent watchdog")
+				}
+			}
+			if kind == "held_borrower_close" {
+				backend, err := i.disposalBackend()
+				if err != nil { t.Fatal(err) }
+				closeErr := closeEventCollection(i)
+				var pending *eventDisposalPending
+				if !errors.As(closeErr, &pending) { t.Fatalf("active borrower did not defer disposal: %v", closeErr) }
+				select { case <-backend.hold.closeDone: t.Fatal("physical disposal passed active borrower"); default: }
+				liveMap, err := originalMap.Info()
+				if err != nil { t.Fatal("active original map unavailable", err) }
+				liveMapID, ok := liveMap.ID()
+				if !ok || liveMapID != mapID { t.Fatal("active original map changed", liveMapID) }
+				liveProgram, err := originalProgram.Info()
+				if err != nil { t.Fatal("active original program unavailable", err) }
+				liveProgramID, ok := liveProgram.ID()
+				if !ok || liveProgramID != programID { t.Fatal("active original program changed", liveProgramID) }
+			}
+			select {
+			case err = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("actual Stop exceeded independent watchdog; owner state not inspected")
+			}
+			if kind == "held_callback_deadline" {
+				if !errors.Is(err, context.DeadlineExceeded) || i.collection == nil || actions.Load() != 0 {
+					t.Fatal("active callback lost collection/deadline", err)
+				}
+				unblock()
+				return
+			}
+			if kind == "held_borrower_close" {
+				if !errors.Is(err, context.DeadlineExceeded) { t.Fatal("held borrower did not revoke success", err) }
+				unblock()
+				select { case <-borrowerDone: case <-time.After(5 * time.Second): t.Fatal("borrower did not exit") }
+				if borrowerErr == nil { t.Fatal("revoked borrower returned success") }
+				backend, err := i.disposalBackend()
+				if err != nil { t.Fatal(err) }
+				select { case <-backend.hold.closeDone: case <-time.After(5 * time.Second): t.Fatal("physical disposal did not finish") }
+				backend.hold.stateMu.Lock(); physicalErr := backend.hold.closeErr; backend.hold.stateMu.Unlock()
+				if physicalErr != nil { t.Fatal("physical disposal failed", physicalErr) }
+				return
+			}
+			if kind == "root_replaced" {
+				if err == nil || actions.Load() != 0 {
+					t.Fatal("unowned replacement authorized readout", err)
+				}
+				if _, err := replacement.Info(); err != nil {
+					t.Fatal("refusal closed an unowned replacement", err)
+				}
+				return
+			}
+			if err != nil || actions.Load() != 1 {
+				t.Fatal("actual joined root failed to authorize exactly once", err, actions.Load())
+			}
+			if err := i.Stop(gc); err != nil || actions.Load() != 1 {
+				t.Fatal("actual stop/callback reran", err, actions.Load())
+			}
+			if err := i.WithDefinitionReadout("native-root", pid, birth, func() error { t.Error("late action"); return nil }); err == nil {
+				t.Fatal("native window survived exit")
+			}
+		})
+	}
+}

@@ -312,3 +312,6 @@ It is mutually exclusive with the first-definition-drop fault build.
 fixture and currently fails its generation assertion. The uninstrumented control
 fails the same assertion. The normal patch bundle and defaults remain the same;
 the diagnostic variant must not be used as overhead evidence.
+# Definition accounting retention
+
+The optional symbolizer capability forwards the independently prepared trace-definition binding. Capture retains a copy of the final native rows during the existing readout window. These retained diagnostics do not admit the whole definitions lane or establish complete delivery.

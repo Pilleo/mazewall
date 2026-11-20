@@ -103,4 +103,15 @@ this issue open and the follow-up draft while PR545 remains the unmerged base.
 No merge, publication, CI speed claim or memory-exhaustion guarantee is implied.
 
 ---
+## Repository-review prerequisite/provenance — 2026-11-04
+
+[TEST-01/BUILD-03](../reviews/2026-11-04-repository-review-findings.md#test-01) separately
+owns retired enforcer/profiler package selectors. Correct and inspect the actual mutation
+inventory before interpreting memory/score evidence; preserve floors and existing platform fix.
+[DOCS-05](../reviews/2026-11-04-repository-review-findings.md#docs-05) also found both linked
+approved memory-bounded CI spec/plan files absent, including direct ignored-file inventory.
+Recover actual approval provenance/location; do not recreate an approval or relabel this review
+as execution of that plan. Existing historical measurements retain their stated input scope.
+
+---
 <!-- id: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m  file: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m.md -->

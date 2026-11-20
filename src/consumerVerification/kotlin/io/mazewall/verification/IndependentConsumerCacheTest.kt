@@ -9,12 +9,14 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 @Tag("build-logic")
 class IndependentConsumerCacheTest {
@@ -77,7 +79,9 @@ class IndependentConsumerCacheTest {
         assertEquals("executed\n", Files.readString(project.resolve("build/native-entry.txt")))
     }
 
-    @Test fun `fresh consumer copies reuse compilation and host tests but execute native tasks`() {
+    @Test
+    @Timeout(value = 40, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SAME_THREAD)
+    fun `fresh consumer copies reuse compilation and host tests but execute native tasks`() {
         val effects = Files.createDirectory(root.resolve("effects"))
         val junit = listOf(
             Test::class.java,

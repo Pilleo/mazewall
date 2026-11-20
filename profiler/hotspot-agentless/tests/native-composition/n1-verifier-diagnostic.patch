@@ -1,0 +1,87 @@
+--- a/tracer/definition_accounting_kernel_test.go
++++ b/tracer/definition_accounting_kernel_test.go
+@@ -20,6 +20,7 @@
+ 	"go.opentelemetry.io/ebpf-profiler/support"
+ 	ottimes "go.opentelemetry.io/ebpf-profiler/times"
+ 	"go.opentelemetry.io/ebpf-profiler/tracer/types"
++	"golang.org/x/sys/unix"
+ )
+ 
+ // These isolated C emission controls do not mint a capture lifetime/final receipt.
+@@ -55,6 +56,13 @@
+ 			}
+ 		}
+ 	}
++	if verifyProduction {
++		kprobe := coll.Maps["kprobe_progs"]
++		if kprobe == nil || kprobe.Type != ebpf.ProgramArray {
++			t.Fatal("missing actual production kprobe program array")
++		}
++		subset.Maps["kprobe_progs"] = kprobe
++	}
+ 	owned := map[string]*ebpf.Map{}
+ 	t.Cleanup(func() {
+ 		if t.Failed() {
+@@ -70,14 +78,35 @@
+ 	if err := loadAllMaps(subset, &Config{IncludeTracers: types.AllTracers()}, owned); err != nil {
+ 		t.Fatal(err)
+ 	}
++	if verifyProduction && (owned["perf_progs"] == nil || owned["kprobe_progs"] == nil) {
++		t.Fatal("missing owned production tail-call maps")
++	}
+ 	if err := rewriteMaps(coll, owned); err != nil {
+ 		t.Fatal(err)
+ 	}
+ 	var fixture *ebpf.Program
+ 	for _, name := range names {
++		if verifyProduction && coll.Programs[name].Type == ebpf.Kprobe {
++			for _, ins := range progArrayReferences(owned["perf_progs"].FD(), coll.Programs[name].Instructions) {
++				if err := coll.Programs[name].Instructions[ins].AssociateMap(owned["kprobe_progs"]); err != nil {
++					t.Fatal("rewrite production kprobe tail-call map", name, err)
++				}
++			}
++		}
++		if verifyProduction {
++			spec := coll.Programs[name]
++			perfRefs, kprobeRefs := -1, -1
++			if m := owned["perf_progs"]; m != nil {
++				perfRefs = len(progArrayReferences(m.FD(), spec.Instructions))
++			}
++			if m := owned["kprobe_progs"]; m != nil {
++				kprobeRefs = len(progArrayReferences(m.FD(), spec.Instructions))
++			}
++			t.Logf("native-only verifier diagnostic name=%s section=%q type=%v attach_type=%v attach_to=%q kernel_version=%#x flags=%#x instructions=%d perf_array_refs=%d kprobe_array_refs=%d", name, spec.SectionName, spec.Type, spec.AttachType, spec.AttachTo, spec.KernelVersion, spec.Flags, len(spec.Instructions), perfRefs, kprobeRefs)
++		}
+ 		p, err := ebpf.NewProgram(coll.Programs[name])
+ 		if err != nil {
+-			t.Fatal("actual production/C fixture verifier load", name, err)
++			t.Fatalf("actual production/C fixture verifier load %s error_type=%T: %+v", name, err, err)
+ 		}
+ 		t.Cleanup(func() {
+ 			if err := p.Close(); err != nil {
+@@ -148,8 +177,25 @@
+ 	// Reader-only attribution cannot finalize: config/topology/lifetime are absent.
+ 	tr := &Tracer{ebpfMaps: f.maps, tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}, intervals: ottimes.New(0, time.Millisecond, 0), samplesPerSecond: 20, definitionSource: &traceDefinitionSource{binding: libpf.TraceDefinitionBinding{HostTGID: f.target, PossibleCPUs: f.cpus}}}
+ 	out := make(chan *libpf.EbpfTrace)
++	// Read-only pre-call observations, not an interception of the eventual mmap.
++	pageSize := os.Getpagesize()
++	requestBytes := tr.samplesPerSecond * support.Sizeof_Trace
++	calculatedDataPages := uint64(math.Pow(2, math.Ceil(math.Log2(float64((requestBytes+pageSize-1)/pageSize)))))
++	var memlock unix.Rlimit
++	memlockErr := unix.Getrlimit(unix.RLIMIT_MEMLOCK, &memlock)
++	var capabilityData [2]unix.CapUserData
++	capabilityHeader := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
++	tidBefore := unix.Gettid()
++	capabilityErr := unix.Capget(&capabilityHeader, &capabilityData[0])
++	tidAfter := unix.Gettid()
++	effective := uint64(capabilityData[0].Effective) | uint64(capabilityData[1].Effective)<<32
++	t.Logf("native-only reader boundary=pre_startTraceEventMonitor samples_per_second=%d trace_size=%d page_size_observed=%d page_size_method=os.Getpagesize request_bytes_source_calculated=%d rounded_data_bytes_source_calculated=%d mmap_bytes_source_calculated=%d rounding_reference=cilium_v0.22.0_perfBufferSize possible_cpus=%d memlock_available=%t memlock_soft=%d memlock_hard=%d getrlimit_error=%v capget_available=%t effective_mask=%#x capget_version=%#x capget_pid=%d capget_error=%v tid_before_capget=%d tid_after_capget=%d observation_nonatomic=true actual_mmap_not_intercepted=true", tr.samplesPerSecond, support.Sizeof_Trace, pageSize, requestBytes, calculatedDataPages*uint64(pageSize), (calculatedDataPages+1)*uint64(pageSize), f.cpus, memlockErr == nil, memlock.Cur, memlock.Max, memlockErr, capabilityErr == nil, effective, capabilityHeader.Version, capabilityHeader.Pid, capabilityErr, tidBefore, tidAfter)
++	if memlockErr != nil || capabilityErr != nil {
++		t.Errorf("native-only reader-boundary facts unavailable; observation cannot qualify: getrlimit=%v capget=%v", memlockErr, capabilityErr)
++	}
+ 	if _, err := tr.startTraceEventMonitor(ctx, out); err != nil {
+ 		cancel()
++		t.Logf("native-only production20 reader failure error_type=%T error=%+v; no retry: canonical source failure is sticky, ring errno may be flattened, and no owned reader is returned for closure proof", err, err)
+ 		t.Fatal(err)
+ 	}
+ 	consumerDone := make(chan struct{})

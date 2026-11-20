@@ -1,0 +1,106 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"sync/atomic"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+// ScopeLocalSnapshot is a retained raw freeze projection, not a final receipt.
+type ScopeLocalSnapshot struct {
+	State        libpf.LocalCopyState
+	Observation  libpf.AuxiliaryObservation
+	ErrorPresent bool
+}
+
+type scopeLocalCache struct {
+	ready atomic.Bool
+	value ScopeLocalSnapshot
+}
+
+// publishScopeLocalLocked runs after the final binding write with s.mu held.
+func (s *OwnedScope) publishScopeLocalLocked() {
+	if s.localSnapshot.ready.Load() {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			s.localSnapshot.value = ScopeLocalSnapshot{State: libpf.LocalPanic}
+		}
+		s.localSnapshot.ready.Store(true)
+	}()
+	s.localSnapshot.value = ScopeLocalSnapshot{
+		State: libpf.LocalCopied, Observation: s.snapshot, ErrorPresent: s.err != nil || s.bindingErr != nil,
+	}
+}
+
+// CachedKindsLocal returns only the retained raw copy, not a final receipt.
+func (s *OwnedScope) CachedKindsLocal() (KindsLocalSnapshot, bool) {
+	if s == nil {
+		return KindsLocalSnapshot{}, false
+	}
+	return s.kinds.CachedKindsLocal()
+}
+
+// CachedScopeLocal returns only the retained copy and never reads live resources.
+func (s *OwnedScope) CachedScopeLocal() (ScopeLocalSnapshot, bool) {
+	if s == nil || !s.localSnapshot.ready.Load() {
+		return ScopeLocalSnapshot{}, false
+	}
+	return s.localSnapshot.value, true
+}
+
+// KindLocalSnapshot contains only the frozen row's detached values.
+type KindLocalSnapshot struct {
+	Source       libpf.AuxiliarySource
+	Present      bool
+	Binding      libpf.AuxiliaryBinding
+	Counts       libpf.KindLedger
+	Outcome      libpf.AuxiliaryOutcome
+	HeldWork     bool
+	ErrorPresent bool
+}
+
+// KindsLocalSnapshot is a raw freeze projection, not a final receipt.
+// Kinds[i] describes auxiliary source i+2, including reload at slot 14.
+type KindsLocalSnapshot struct {
+	State libpf.LocalCopyState
+	Kinds [15]KindLocalSnapshot
+}
+
+type kindsLocalCache struct {
+	ready atomic.Bool
+	value KindsLocalSnapshot
+}
+
+// publishKindsLocalLocked runs after the original frozen rows, with b.mu held.
+func (b *KindBook) publishKindsLocalLocked() {
+	if b.localSnapshot.ready.Load() {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			b.localSnapshot.value = KindsLocalSnapshot{State: libpf.LocalPanic}
+		}
+		b.localSnapshot.ready.Store(true)
+	}()
+	b.localSnapshot.value.State = libpf.LocalCopied
+	for i := range b.localSnapshot.value.Kinds {
+		source := libpf.AuxiliarySource(i + 2)
+		row, present := b.snapshots[source]
+		b.localSnapshot.value.Kinds[i] = KindLocalSnapshot{
+			Source: source, Present: present, Binding: row.Binding, Counts: row.Counts,
+			Outcome: row.Outcome, HeldWork: row.HeldWork, ErrorPresent: row.Err != nil,
+		}
+	}
+}
+
+// CachedKindsLocal returns only the retained copy, without observing the book.
+func (b *KindBook) CachedKindsLocal() (KindsLocalSnapshot, bool) {
+	if b == nil || !b.localSnapshot.ready.Load() {
+		return KindsLocalSnapshot{}, false
+	}
+	return b.localSnapshot.value, true
+}

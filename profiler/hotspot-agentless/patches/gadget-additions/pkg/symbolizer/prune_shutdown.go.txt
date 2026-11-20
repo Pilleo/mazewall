@@ -2,9 +2,361 @@
 // SPDX-License-Identifier: Apache-2.0
 package symbolizer
 
-import "context"
+import (
+	"context"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"time"
+	"unicode/utf8"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+// A non-zero-sized marker uniquely identifies this owner's first stop attempt.
+type localStopClaim struct{ marker byte }
+
+func (s *Symbolizer) beginLocalStop(ctx context.Context) *localStopClaim {
+	done := ctx.Done()
+	deadline, hasDeadline := ctx.Deadline()
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+	if s.localStopClaim != nil {
+		return nil
+	}
+	claim := &localStopClaim{marker: 1}
+	s.localStopClaim = claim
+	s.localStopReady = make(chan struct{})
+	s.localDiagnosticMemoReady = make(chan struct{})
+	s.localStopDone, s.localStopDeadline, s.localStopHasDeadline = done, deadline, hasDeadline
+	s.localChildIndex = -1
+	return claim
+}
+
+type cachedOuterChild interface {
+	DefinitionSourceDiagnosticsReady() <-chan struct{}
+	DefinitionSourceDiagnostics() (json.RawMessage, error)
+}
+
+var errOuterDiagnosticPending = errors.New("definition diagnostic pending")
+var errOuterDiagnosticUnavailable = errors.New("definition diagnostic unavailable")
+
+type outerDiagnosticEnvelope struct {
+	Schema int `json:"schema"`
+	Queue json.RawMessage `json:"queue,omitempty"`
+	Processing json.RawMessage `json:"processing,omitempty"`
+	Channel json.RawMessage `json:"channel,omitempty"`
+	Store json.RawMessage `json:"store,omitempty"`
+	Prune json.RawMessage `json:"prune,omitempty"`
+	Missing []string `json:"missing"`
+}
+
+// The child is detached cached data, but each fixed schema field is still checked.
+func validOuterSection(raw json.RawMessage, kind string) bool {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &fields) != nil || fields == nil { return false }
+	for key, value := range fields {
+		typ, nested := "", ""
+		switch kind {
+		case "queue":
+			switch key { case "unit": typ = "unit-queue"; case "outcome": typ = "outcome"; case "requests_owned", "queue_accepted", "admission_held", "refused", "applied", "applied_published", "applied_not_published", "failed", "aborted", "pending", "cleanup_failed": typ = "u64"; case "pending_known", "all_workers_ended", "caller_joined_claim", "scope_joined_witness", "held", "last_unavailable", "last_published", "proof_error_present", "last_apply_error_present", "last_cleanup_error_present": typ = "bool" }
+		case "processing":
+			switch key { case "unit": typ = "unit-processing"; case "outcome": typ = "outcome"; case "last_terminal": typ = "terminal"; case "has_binding", "overflow", "has_last_admitted", "has_last_classified", "reporter_error_present", "proof_error_present", "getter_error_present": typ = "bool"; case "observed_pid": typ = "u32"; case "admitted", "pre_reporter_rejected", "reporter_ok", "reporter_error", "in_flight", "target_bound", "foreign_to_binding", "binding_unknown": typ = "u64"; case "expected_binding": nested = "binding"; case "epoch_target": nested = "target"; case "last_admitted", "last_classified": nested = "trace" }
+		case "binding":
+			switch key { case "source": typ = "u8"; case "session": typ = "session"; case "host_tgid", "counter_map_id", "perf_map_id": typ = "u32"; case "birth", "generation": typ = "u64"; case "possible_cpus": typ = "i64" }
+		case "target":
+			switch key { case "pid": typ = "u32"; case "process_start_ticks", "counter_address", "initial_epoch": typ = "u64" }
+		case "trace", "channel-last":
+			switch key { case "pid", "tid": typ = "u32"; case "cpu", "ktime", "k_time": typ = "i64"; case "origin", "correlation_id": typ = "u64"; case "hotspot_identity": nested = "identity" }
+			if (kind == "trace" && key == "k_time") || (kind == "channel-last" && key == "ktime") { return false }
+			if kind == "trace" && key == "hotspot_identity" { nested = "processing-identity" }
+		case "identity":
+			switch key { case "epoch", "state": typ = "u64"; case "read_error": typ = "i32" }
+		case "processing-identity":
+			switch key { case "epoch": typ = "u64"; case "state": typ = "u8"; case "read_error": typ = "i32" }
+		case "channel":
+			switch key { case "unit": typ = "unit-channel"; case "nil_barrier", "non_nil_to_handle_trace", "close_exit", "cancel_exit": typ = "u64"; case "overflow", "retired": typ = "bool"; case "last": nested = "channel-last" }
+		case "store":
+			switch key { case "unit": typ = "unit-store"; case "inputs", "in_flight", "invalid_identity", "identity_validate", "invalid_checked", "mismatch", "new_distinct", "preserve_checked", "dedup": typ = "u64"; case "overflow", "invalid": typ = "bool"; case "last": nested = "store-last" }
+		case "store-last":
+			switch key { case "id", "terminal": typ = "u64"; case "pid", "tid": typ = "u32"; case "hotspot_identity": nested = "identity" }
+		default: return false
+		}
+		value = bytes.TrimSpace(value)
+		if len(value) == 0 || bytes.Equal(value, []byte("null")) { return false }
+		if nested != "" { if !validOuterSection(value, nested) { return false }; continue }
+		switch typ {
+		case "u64": var x uint64; if json.Unmarshal(value, &x) != nil { return false }
+		case "u32": var x uint32; if json.Unmarshal(value, &x) != nil { return false }
+		case "u8": var x uint8; if json.Unmarshal(value, &x) != nil { return false }
+		case "i64": var x int64; if json.Unmarshal(value, &x) != nil { return false }
+		case "i32": var x int32; if json.Unmarshal(value, &x) != nil { return false }
+		case "bool": var x bool; if json.Unmarshal(value, &x) != nil { return false }
+		case "outcome", "terminal": var x uint8; if json.Unmarshal(value, &x) != nil || x > 3 || (typ == "outcome" && x == 0) { return false }
+		case "session": var x string; if json.Unmarshal(value, &x) != nil || len(x) > 256 { return false }
+		case "unit-queue", "unit-processing", "unit-channel", "unit-store":
+			var x string; if json.Unmarshal(value, &x) != nil { return false }
+			if (typ == "unit-queue" && x != "owned-map-update-request") || (typ == "unit-processing" && x != "handle-trace-input") || (typ == "unit-channel" && x != "completed-receive") || (typ == "unit-store" && x != "store-call") { return false }
+		default: return false
+		}
+	}
+	if kind == "queue" || kind == "processing" || kind == "channel" || kind == "store" { if _, ok := fields["unit"]; !ok { return false } }
+	if kind == "queue" || kind == "processing" { if _, ok := fields["outcome"]; !ok { return false } }
+	return true
+}
+
+func decodeOuterChildDiagnostic(raw json.RawMessage) (outerDiagnosticEnvelope, bool) {
+	var result outerDiagnosticEnvelope
+	if len(raw) == 0 || len(raw) > 32768 { return result, false }
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil { return result, false }
+	for key := range fields { switch key { case "schema", "queue", "processing", "channel", "store", "missing": default: return result, false } }
+	if json.Unmarshal(raw, &result) != nil || result.Schema != 1 || result.Missing == nil || len(result.Missing) > 16 { return result, false }
+	for i, reason := range result.Missing {
+		switch reason { case "queue-binding-absent", "queue-pool-missing", "queue-getter-error", "queue-capability-absent", "processing-source-unverified", "processing-join-unverified", "processing-binding-absent", "epoch-target-absent", "observed-pid-absent", "binding-unrepresentable", "local-snapshot-missing", "child-not-invoked", "child-capability-absent", "child-cache-absent", "child-diagnostic-unknown", "first-caller-closed": default: return result, false }
+		for _, prior := range result.Missing[:i] { if reason == prior { return result, false } }
+	}
+	for _, section := range []struct{ raw json.RawMessage; kind string }{{result.Queue, "queue"}, {result.Processing, "processing"}, {result.Channel, "channel"}, {result.Store, "store"}} {
+		if len(section.raw) != 0 && !validOuterSection(section.raw, section.kind) { return result, false }
+	}
+	result.Queue = append(json.RawMessage(nil), result.Queue...); result.Processing = append(json.RawMessage(nil), result.Processing...)
+	result.Channel = append(json.RawMessage(nil), result.Channel...); result.Store = append(json.RawMessage(nil), result.Store...)
+	return result, true
+}
+
+func outerDiagnosticExpiredAt(done bool, deadline time.Time, hasDeadline bool, now time.Time) bool {
+	return done || (hasDeadline && !now.Before(deadline))
+}
+
+func outerDiagnosticExpired(done <-chan struct{}, deadline time.Time, hasDeadline bool) bool {
+	closed := false
+	select { case <-done: closed = true; default: }
+	return outerDiagnosticExpiredAt(closed, deadline, hasDeadline, time.Now())
+}
+
+func (s *Symbolizer) localDiagnosticChild(invoked bool, index int) cachedOuterChild {
+	if !invoked || index < 0 || index >= len(s.resolvers) { return nil }
+	child, _ := s.resolvers[index].(cachedOuterChild)
+	return child
+}
+
+// A relayed close means child input is ready, not that parent composition is complete.
+func (s *Symbolizer) DefinitionSourceDiagnosticsReady() <-chan struct{} {
+	s.pruneMu.Lock()
+	if s.localStopClaim == nil { s.pruneMu.Unlock(); return nil }
+	local, memo := s.localStopReady, s.localDiagnosticMemoReady
+	if s.localDiagnosticMemo != nil { s.pruneMu.Unlock(); return memo }
+	select { case <-local: default: s.pruneMu.Unlock(); return local }
+	invoked, index := s.localChildInvoked, s.localChildIndex
+	s.pruneMu.Unlock()
+	if child := s.localDiagnosticChild(invoked, index); child != nil {
+		if ready := child.DefinitionSourceDiagnosticsReady(); ready != nil { return ready }
+	}
+	return local
+}
+
+func (s *Symbolizer) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	s.pruneMu.Lock()
+	if s.localDiagnosticMemo != nil { raw := append(json.RawMessage(nil), s.localDiagnosticMemo...); s.pruneMu.Unlock(); return raw, nil }
+	if s.localStopClaim == nil { s.pruneMu.Unlock(); return nil, errOuterDiagnosticUnavailable }
+	select { case <-s.localStopReady: default: s.pruneMu.Unlock(); return nil, errOuterDiagnosticPending }
+	claim := s.localStopClaim
+	local := append(json.RawMessage(nil), s.localPruneDiagnostic...)
+	invoked, index := s.localChildInvoked, s.localChildIndex
+	done, deadline, hasDeadline := s.localStopDone, s.localStopDeadline, s.localStopHasDeadline
+	s.pruneMu.Unlock()
+	base := outerDiagnosticEnvelope{Schema: 1, Prune: local, Missing: []string{}}
+	unknown := base; unknown.Missing = []string{"first-caller-closed"}
+	unknownBytes, _ := json.Marshal(unknown)
+	result := base
+	if outerDiagnosticExpired(done, deadline, hasDeadline) { result = unknown
+	} else if !invoked { result.Missing = append(result.Missing, "child-not-invoked")
+	} else if child := s.localDiagnosticChild(invoked, index); child == nil { result.Missing = append(result.Missing, "child-capability-absent")
+	} else if ready := child.DefinitionSourceDiagnosticsReady(); ready == nil { result.Missing = append(result.Missing, "child-cache-absent")
+	} else {
+		select {
+		case <-ready:
+			if outerDiagnosticExpired(done, deadline, hasDeadline) { result = unknown; break }
+			raw, err := child.DefinitionSourceDiagnostics()
+			childData, ok := decodeOuterChildDiagnostic(raw)
+			if err != nil || !ok { result.Missing = append(result.Missing, "child-diagnostic-unknown") } else {
+				result.Queue, result.Processing, result.Channel, result.Store = childData.Queue, childData.Processing, childData.Channel, childData.Store
+				result.Missing = append(result.Missing, childData.Missing...)
+			}
+		default:
+			if !outerDiagnosticExpired(done, deadline, hasDeadline) { return nil, errOuterDiagnosticPending }
+			result = unknown
+		}
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || len(encoded) > 32768 || len(result.Missing) > 16 { result = base; result.Missing = []string{"child-diagnostic-unknown"}; encoded, _ = json.Marshal(result) }
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+	if s.localDiagnosticMemo != nil { return append(json.RawMessage(nil), s.localDiagnosticMemo...), nil }
+	if s.localStopClaim != claim { return nil, errOuterDiagnosticUnavailable }
+	if outerDiagnosticExpired(done, deadline, hasDeadline) { encoded = unknownBytes }
+	s.localDiagnosticMemo = append([]byte(nil), encoded...)
+	close(s.localDiagnosticMemoReady)
+	return append(json.RawMessage(nil), s.localDiagnosticMemo...), nil
+}
+
+func (s *Symbolizer) finishLocalStop(claim *localStopClaim, state pruneLoopState, invoked bool, index int) {
+	if claim == nil {
+		return
+	}
+	data := s.pruneDiagnosticBytes(state, false)
+	s.pruneMu.Lock()
+	if s.localStopClaim == claim && s.localPruneDiagnostic == nil && !s.localStopPending {
+		s.localChildInvoked, s.localChildIndex = invoked, index
+		if s.pruneFrozenDiagnostic != nil {
+			data = s.pruneFrozenDiagnostic
+		} else if s.pruneFreezeActive != 0 {
+			s.localStopPending = true
+			s.pruneMu.Unlock()
+			return
+		}
+		s.localPruneDiagnostic = append([]byte(nil), data...)
+		close(s.localStopReady)
+	}
+	s.pruneMu.Unlock()
+}
+
+func (s *Symbolizer) pruneDiagnosticBytes(state pruneLoopState, frozen bool) []byte {
+	book := s.options.KindBook
+	var observations [4]libpf.KindObservation
+	var present [4]bool
+	if frozen {
+		sources := [4]libpf.AuxiliarySource{libpf.AuxiliarySourcePruneCycle, libpf.AuxiliarySourcePruneScanOtel, libpf.AuxiliarySourcePruneScanSymtab, libpf.AuxiliarySourcePruneScanDebuginfod}
+		for i, source := range sources {
+			observations[i], _ = book.Observation(source)
+			present[i] = true
+		}
+	}
+	data, _ := json.Marshal(projectPruneDiagnostic(state, book != nil, frozen, observations, present))
+	return data
+}
+
+// Freeze remains on the native stop path; only its detached scalar projection is cached.
+func (s *Symbolizer) freezePruneBook(timeout bool, err error, state pruneLoopState) {
+	book := s.options.KindBook
+	if book == nil {
+		return
+	}
+	s.pruneMu.Lock()
+	if s.pruneFreezeActive != 0 {
+		s.pruneFreezeOverlapped = true
+	}
+	s.pruneFreezeActive++
+	s.pruneMu.Unlock()
+	book.Freeze(timeout, libpf.AuxiliaryBinding{}, err)
+	data := s.pruneDiagnosticBytes(state, true)
+	unknown := s.pruneDiagnosticBytes(pruneLoopUnknown, true)
+	s.pruneMu.Lock()
+	s.pruneFreezeActive--
+	if s.pruneFrozenDiagnostic == nil {
+		if s.pruneFreezeOverlapped {
+			data = unknown
+		}
+		s.pruneFrozenDiagnostic = append([]byte(nil), data...)
+	}
+	if s.localStopPending && s.localPruneDiagnostic == nil {
+		s.localPruneDiagnostic = append([]byte(nil), s.pruneFrozenDiagnostic...)
+		s.localStopPending = false
+		close(s.localStopReady)
+	}
+	s.pruneMu.Unlock()
+}
+
+func (s *Symbolizer) copyLocalPrune() []byte {
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+	return append([]byte(nil), s.localPruneDiagnostic...)
+}
+
+type pruneLoopState uint8
+
+const (
+	pruneLoopUnknown pruneLoopState = iota
+	pruneLoopNotStarted
+	pruneLoopJoined
+	pruneLoopFirstTimeout
+)
+
+type pruneDiagnostic struct {
+	Unit        string `json:"unit"`
+	LoopState   string `json:"loop_state"`
+	BookPresent bool   `json:"book_present"`
+	BookFrozen  bool   `json:"book_frozen"`
+	Rows        [4]pruneDiagnosticRow `json:"rows"`
+}
+
+type pruneDiagnosticRow struct {
+	Source                 uint64 `json:"source"`
+	Observed               bool   `json:"observed"`
+	HasBinding             bool   `json:"has_binding"`
+	BindingUnrepresentable bool   `json:"binding_unrepresentable"`
+	Binding struct {
+		Source     uint64 `json:"source"`
+		Session    string `json:"session"`
+		HostTGID   uint32 `json:"host_tgid"`
+		Birth      uint64 `json:"birth"`
+		Generation uint64 `json:"generation"`
+	} `json:"binding"`
+	Counts struct {
+		Admitted   uint64 `json:"admitted"`
+		Completed  uint64 `json:"completed"`
+		Failed     uint64 `json:"failed"`
+		Aborted    uint64 `json:"aborted"`
+		Skipped    uint64 `json:"skipped"`
+		Incomplete uint64 `json:"incomplete"`
+		InFlight   uint64 `json:"in_flight"`
+		Overflow   bool   `json:"overflow"`
+	} `json:"counts"`
+	Outcome                 uint64 `json:"outcome"`
+	HeldWork                bool   `json:"held_work"`
+	ObservationErrorPresent bool   `json:"observation_error_present"`
+}
+
+// projectPruneDiagnostic only copies observations already obtained from a frozen book.
+func projectPruneDiagnostic(state pruneLoopState, bookPresent, bookFrozen bool, observations [4]libpf.KindObservation, present [4]bool) pruneDiagnostic {
+	d := pruneDiagnostic{Unit: "admitted-prune-callback", LoopState: "unknown", BookPresent: bookPresent, BookFrozen: bookPresent && bookFrozen}
+	switch state {
+	case pruneLoopNotStarted:
+		d.LoopState = "not-started"
+	case pruneLoopJoined:
+		d.LoopState = "joined"
+	case pruneLoopFirstTimeout:
+		d.LoopState = "first-timeout"
+	}
+	sources := [4]libpf.AuxiliarySource{libpf.AuxiliarySourcePruneCycle, libpf.AuxiliarySourcePruneScanOtel, libpf.AuxiliarySourcePruneScanSymtab, libpf.AuxiliarySourcePruneScanDebuginfod}
+	for i, source := range sources {
+		r := &d.Rows[i]
+		r.Source = uint64(source)
+		if !d.BookFrozen || !present[i] { continue }
+		o := observations[i]
+		r.Observed = true
+		if o.Binding != (libpf.AuxiliaryBinding{}) {
+			if len(o.Binding.Session) > 256 || !utf8.ValidString(o.Binding.Session) {
+				r.BindingUnrepresentable = true
+			} else {
+				r.HasBinding = true
+				r.Binding.Source, r.Binding.Session, r.Binding.HostTGID = uint64(o.Binding.Source), o.Binding.Session, o.Binding.HostTGID
+				r.Binding.Birth, r.Binding.Generation = o.Binding.Birth, o.Binding.Generation
+			}
+		}
+		r.Counts.Admitted, r.Counts.Completed, r.Counts.Failed, r.Counts.Aborted = o.Counts.Admitted, o.Counts.Completed, o.Counts.Failed, o.Counts.Aborted
+		r.Counts.Skipped, r.Counts.Incomplete, r.Counts.InFlight, r.Counts.Overflow = o.Counts.Skipped, o.Counts.Incomplete, o.Counts.InFlight, o.Counts.Overflow
+		r.Outcome, r.HeldWork, r.ObservationErrorPresent = uint64(o.Outcome), o.HeldWork, o.Err != nil
+	}
+	return d
+}
 
 func (s *Symbolizer) stopPruning(ctx context.Context) error {
+	err, _ := s.stopPruningState(ctx)
+	return err
+}
+
+func (s *Symbolizer) stopPruningState(ctx context.Context) (error, pruneLoopState) {
 	s.pruneMu.Lock()
 	s.pruneStopped = true
 	s.pruneStopOnce.Do(func() {
@@ -15,17 +367,22 @@ func (s *Symbolizer) stopPruning(ctx context.Context) error {
 	done := s.pruneDone
 	s.pruneMu.Unlock()
 	if done == nil {
-		return nil
+		return nil, pruneLoopNotStarted
 	}
 	select {
 	case <-done:
-		return nil
+		s.freezePruneBook(false, nil, pruneLoopJoined)
+		return nil, pruneLoopJoined
 	default:
 	}
 	select {
 	case <-done:
-		return nil
+		s.freezePruneBook(false, nil, pruneLoopJoined)
+		return nil, pruneLoopJoined
 	case <-ctx.Done():
-		return ctx.Err()
+		if s.options.KindBook != nil {
+			s.freezePruneBook(true, ctx.Err(), pruneLoopFirstTimeout)
+		}
+		return ctx.Err(), pruneLoopFirstTimeout
 	}
 }

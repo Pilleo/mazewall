@@ -351,7 +351,7 @@ class DaemonStartupRollbackTest {
         try {
             method.invoke(receiver, *arguments)
         } catch (failure: java.lang.reflect.InvocationTargetException) {
-            throw checkNotNull(failure.cause)
+            throw failure.cause ?: failure
         }
     }
 }

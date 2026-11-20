@@ -1,0 +1,178 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+type mailboxLocalTestLifetime struct {
+	base *testLifetime
+	mu sync.Mutex
+	calls []string
+	onValidate func()
+	onSession func()
+}
+
+func (l *mailboxLocalTestLifetime) note(s string) { l.mu.Lock(); l.calls = append(l.calls, s); l.mu.Unlock() }
+func (l *mailboxLocalTestLifetime) Validate() error { l.note("validate"); if l.onValidate != nil { l.onValidate() }; return l.base.Validate() }
+func (l *mailboxLocalTestLifetime) Session() string { l.note("session"); if l.onSession != nil { l.onSession() }; return l.base.Session() }
+func (l *mailboxLocalTestLifetime) HostTGID() uint32 { l.note("tgid"); return l.base.HostTGID() }
+func (l *mailboxLocalTestLifetime) Birth() uint64 { l.note("birth"); return l.base.Birth() }
+func (l *mailboxLocalTestLifetime) recorded() []string { l.mu.Lock(); defer l.mu.Unlock(); return append([]string(nil), l.calls...) }
+
+func mailboxLocalFixture(t *testing.T) (*Tracer, *mailboxLocalTestLifetime) {
+	t.Helper()
+	base := &testLifetime{session: "mail-local", hostTGID: 101, birth: 202}
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	lifetime := &mailboxLocalTestLifetime{base: base}
+	expected := PIDMailboxBinding{
+		Session:    "mail-local",
+		HostTGID:   101,
+		Birth:      202,
+		Generation: 1, /* model-only fixture scalar */
+		MapID:      0,
+	}
+	m := &pidMailbox{
+		scope:                   scope,
+		origMap:                 &fakePIDMap{},
+		lifetime:                lifetime,
+		expectedBinding:         expected,
+		outcome:                 PIDMailboxNotSealed,
+		unpolledResidualUnknown: true,
+	}
+	tr := &Tracer{
+		auxiliaryScope: scope,
+		pidEvents:      make(chan libpf.PIDTID, 128),
+		pidMailbox:     m,
+	}
+	if err := scope.AddFinalizer(func() error {
+		return m.seal(tr)
+	}); err != nil {
+		t.Fatalf("failed to register mailbox finalizer: %v", err)
+	}
+	return tr, lifetime
+}
+
+func TestCachedPIDMailboxLocalFinalizerAndCopies(t *testing.T) {
+	tr, lifetime := mailboxLocalFixture(t)
+	key := libpf.PIDTID(encodePIDTID(101, 1))
+	if err := tr.admitPIDEvent(key); err != nil {
+		t.Fatal(err)
+	}
+	tr.recordPIDQueued(key)
+	stopErr := tr.auxiliaryScope.Stop(context.Background())
+	if stopErr == nil || !strings.Contains(stopErr.Error(), "auxiliary stop readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", stopErr)
+	}
+	got, ok := tr.CachedPIDMailboxLocal()
+	if !ok || got.Outcome != PIDMailboxFailed || !got.ErrorPresent || got.InfoReturned || got.LifetimeReturned {
+		t.Fatalf("snapshot: %+v, %v", got, ok)
+	}
+	if got.ExpectedBinding != tr.pidMailbox.expectedBinding {
+		t.Fatalf("expected identity: %+v", got.ExpectedBinding)
+	}
+	if got.Counts.Admitted != 1 || got.Counts.Queued != 1 || got.Counts.TargetAdmitted != 1 || got.Counts.HeldResidual != 0 || got.ScanIncomplete || !got.UnpolledResidualUnknown {
+		t.Fatalf("accounting: %+v", got)
+	}
+	// Zero calls during seal under conservative design
+	if calls := lifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("expected zero calls during seal, got: %v", calls)
+	}
+	want := got
+	got.ExpectedBinding.Session = "changed"
+	again, ok := tr.CachedPIDMailboxLocal()
+	if !ok || again != want {
+		t.Fatalf("retained value changed: %+v, want %+v", again, want)
+	}
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	again, ok = tr.CachedPIDMailboxLocal()
+	if !ok || again != want {
+		t.Fatalf("stop changed retained value: %+v, want %+v", again, want)
+	}
+}
+func TestCachedPIDMailboxLocalParentFailure(t *testing.T) {
+	tr, lifetime := mailboxLocalFixture(t)
+	tr.auxiliaryScope.Fail(errors.New("parent failure"))
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	got, ok := tr.CachedPIDMailboxLocal()
+	if !ok || got.Outcome != PIDMailboxFailed || !got.ErrorPresent || !got.UnpolledResidualUnknown || got.InfoReturned || got.LifetimeReturned { t.Fatalf("parent failure: %+v, %v", got, ok) }
+	if calls := lifetime.recorded(); len(calls) != 0 { t.Fatalf("unexpected queries: %v", calls) }
+}
+
+func TestCachedPIDMailboxLocalUnknownBindingAndInfoError(t *testing.T) {
+	tr, lifetime := mailboxLocalFixture(t)
+	tr.pidMailbox.stickyErr = errors.New("initial sticky error")
+	stopErr := tr.auxiliaryScope.Stop(context.Background())
+	if stopErr == nil {
+		t.Fatal("expected stop error")
+	}
+	got, ok := tr.CachedPIDMailboxLocal()
+	if !ok || got.Outcome != PIDMailboxFailed || !got.ErrorPresent || got.InfoReturned || got.LifetimeReturned {
+		t.Fatalf("unknown/info failure: %+v, %v", got, ok)
+	}
+	if calls := lifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("expected zero calls, got: %v", calls)
+	}
+}
+func TestCachedPIDMailboxLocalSealZeroCallOverrides(t *testing.T) {
+	// R1 zero-call control: install panic/counting overrides AFTER preparation and prove seal
+	// uses only retained expectations and reports unavailable readout without invoking removed queries.
+	tr, lifetime := mailboxLocalFixture(t)
+
+	// Install panic overrides after preparation
+	tr.pidMapInfoOverride = func(pidEventsMapper) (traceDefinitionMapInfo, error) {
+		panic("pidMapInfoOverride must not be called during seal")
+	}
+	lifetime.onValidate = func() {
+		panic("lifetime.Validate must not be called during seal")
+	}
+	lifetime.onSession = func() {
+		panic("lifetime.Session must not be called during seal")
+	}
+
+	stopErr := tr.auxiliaryScope.Stop(context.Background())
+	if stopErr == nil || !strings.Contains(stopErr.Error(), "auxiliary stop readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", stopErr)
+	}
+
+	got, ok := tr.CachedPIDMailboxLocal()
+	if !ok || got.Outcome != PIDMailboxFailed || !got.ErrorPresent || !got.UnpolledResidualUnknown || got.InfoReturned || got.LifetimeReturned {
+		t.Fatalf("unexpected seal readout: %+v, ok=%v", got, ok)
+	}
+
+	// Assert ZERO calls to lifetime methods during seal
+	if calls := lifetime.recorded(); len(calls) != 0 {
+		t.Fatalf("expected zero calls during seal, got: %v", calls)
+	}
+}
+func TestCachedPIDMailboxLocalConcurrentFinalizer(t *testing.T) {
+	tr, _ := mailboxLocalFixture(t)
+	start, done := make(chan struct{}), make(chan struct{})
+	bad := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done(); <-start
+			for {
+				if v, ok := tr.CachedPIDMailboxLocal(); ok {
+					if v.Outcome != PIDMailboxFailed || v.InfoReturned || v.LifetimeReturned || !v.ErrorPresent { bad <- struct{}{} }
+					return
+				}
+				select { case <-done: if _, ok := tr.CachedPIDMailboxLocal(); !ok { bad <- struct{}{}; return }; default: }
+			}
+		}()
+	}
+	close(start)
+	_ = tr.auxiliaryScope.Stop(context.Background())
+	close(done); wg.Wait()
+	select { case <-bad: t.Fatal("incomplete cache publication"); default: }
+}

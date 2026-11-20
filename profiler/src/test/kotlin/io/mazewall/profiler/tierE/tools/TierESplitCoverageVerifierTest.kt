@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.Locale
 
 class TierESplitCoverageVerifierTest {
     private fun faultFixture(): java.nio.file.Path {
@@ -59,7 +60,7 @@ class TierESplitCoverageVerifierTest {
             MessageDigest
                 .getInstance("SHA-256")
             .digest(Files.readAllBytes(file))
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(Locale.ROOT, it) }
         Files.writeString(
             manifest,
             buildJsonObject {
@@ -99,7 +100,7 @@ class TierESplitCoverageVerifierTest {
             val manifestFields = (Json.parseToJsonElement(Files.readString(manifest)) as JsonObject).toMutableMap()
             manifestFields.remove(field)
             manifestFields["terminal_report_sha256"] = JsonPrimitive(
-                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(terminal)).joinToString("") { "%02x".format(it) },
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(terminal)).joinToString("") { "%02x".format(Locale.ROOT, it) },
             )
             Files.writeString(manifest, JsonObject(manifestFields).toString())
             val result = TierESplitCoverageVerifier.verify(dir.resolve("oracle.json"), manifest, terminal)
@@ -254,7 +255,7 @@ class TierESplitCoverageVerifierTest {
             }.toString(),
             )
 
-            fun sha(file: java.nio.file.Path) = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)).joinToString("") { "%02x".format(it) }
+            fun sha(file: java.nio.file.Path) = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)).joinToString("") { "%02x".format(Locale.ROOT, it) }
             Files.writeString(
                 manifest,
                 buildJsonObject {

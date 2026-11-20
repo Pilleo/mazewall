@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.Locale
 
 class TierENativeArtifactPackageTest {
     @Test
@@ -73,5 +74,5 @@ class TierENativeArtifactPackageTest {
         }
     }
 
-    private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+    private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(Locale.ROOT, it) }
 }

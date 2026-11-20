@@ -11,7 +11,6 @@ import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.BpfInstruction.Jmp
 import org.junit.jupiter.api.Test
-import java.util.function.Consumer
 import java.util.function.Function
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,7 +22,7 @@ class BpfBuilderTest {
     fun `jumpIfEqual resolves both forward label offsets`() {
         val builder = BpfProgram
             .builder()
-            .checkArch(Arch.AMD64)
+            .checkArch(Arch.AARCH64)
             .loadSyscallNr()
 
         val label1 = builder.nextLabel("test1")
@@ -33,7 +32,7 @@ class BpfBuilderTest {
         builder.mark(label1)
         builder.loadAbsolute(0)
         builder.mark(label2)
-        val program = builder.ret(0x7fff0000).build()
+        val program = builder.allow().build()
 
         val jump = assertIs<Jmp>(program.instructions[4])
         assertEquals(0, jump.jt)
@@ -54,7 +53,7 @@ class BpfBuilderTest {
             loaded.loadAbsolute(0)
         }
 
-        val terminated = loaded.mark(label1).ret(0x7fff0000)
+        val terminated = loaded.mark(label1).allow()
 
         assertFailsWith<IllegalArgumentException> {
             terminated.build()
@@ -72,7 +71,7 @@ class BpfBuilderTest {
         loaded.mark(label1)
         loaded.loadAbsolute(0)
         loaded.jumpIfEqual(10, jt = label1)
-        val terminated = loaded.ret(0)
+        val terminated = loaded.killThread()
 
         assertFailsWith<IllegalArgumentException> {
             terminated.build()
@@ -88,7 +87,7 @@ class BpfBuilderTest {
 
         val label1 = loaded.nextLabel("never_marked")
         loaded.jumpIfEqual(10, jt = label1)
-        val terminated = loaded.ret(0)
+        val terminated = loaded.killThread()
 
         assertFailsWith<IllegalArgumentException> {
             terminated.build()
@@ -141,11 +140,11 @@ class BpfBuilderTest {
             expect(1) {
                 allow()
             }
-            expect(2, Consumer { it.deny(1) })
+            expect(2, Function { it.deny(1) })
             expect(Syscall.OPEN, Arch.AMD64) {
                 killThread()
             }
-            expect(Syscall.CLOSE, Arch.AMD64, Consumer { it.notifyUser() })
+            expect(Syscall.CLOSE, Arch.AMD64, Function { it.notifyUser() })
 
             jumpIfSet(1, null, null)
             and(1)
@@ -157,8 +156,8 @@ class BpfBuilderTest {
     fun `test dsl Function overload`() {
         BpfProgram.dsl(
             Arch.AMD64,
-            object : Function<BpfBuilder<BpfState.Active>, BpfBuilder<BpfState.Terminated>> {
-            override fun apply(t: BpfBuilder<BpfState.Active>): BpfBuilder<BpfState.Terminated> {
+            object : Function<BpfBuilder.Active, BpfBuilder.Terminated> {
+            override fun apply(t: BpfBuilder.Active): BpfBuilder.Terminated {
                 return t.allow()
             }
         },
@@ -167,7 +166,7 @@ class BpfBuilderTest {
 
     @Test
     fun `test strongly-typed BPF DSL helpers`() {
-        val program = BpfProgram.dsl(Arch.AMD64) {
+        val program = BpfProgram.dsl(Arch.AARCH64) {
             val allowLabel = createLabel("allow")
             val nextLabel = createLabel() // uses default "label" prefix
 

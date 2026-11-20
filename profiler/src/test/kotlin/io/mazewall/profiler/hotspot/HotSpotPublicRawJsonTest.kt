@@ -6,6 +6,7 @@ import io.mazewall.profiler.internal.hotspot.HotSpotCoverageAdapter
 import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceAssembler
 import io.mazewall.profiler.internal.hotspot.HotSpotRawJson
 import io.mazewall.profiler.internal.hotspot.HotSpotReplayLimits
+import io.mazewall.profiler.internal.hotspot.HotSpotRetentionFacts
 import io.mazewall.profiler.internal.hotspot.HotSpotStackEvidence
 import io.mazewall.profiler.internal.hotspot.HotSpotWireReader
 import io.mazewall.profiler.internal.hotspot.HotSpotWireRecord
@@ -145,12 +146,14 @@ class HotSpotPublicRawJsonTest {
                 partial.sessionId,
                 records,
                 partial.summary,
-                partial.discardedOccurrences,
-                partial.retainedBytes,
                 recoveries,
-                partial.discardedRecoveries,
-                partial.finalized,
-                partial.pendingOccurrences,
+                HotSpotRetentionFacts(
+                    discardedOccurrences = partial.discardedOccurrences,
+                    retainedBytes = partial.retainedBytes,
+                    discardedRecoveries = partial.discardedRecoveries,
+                    finalized = partial.finalized,
+                    pendingOccurrences = partial.pendingOccurrences,
+                ),
             )
             frames.clear()
             errors.clear()

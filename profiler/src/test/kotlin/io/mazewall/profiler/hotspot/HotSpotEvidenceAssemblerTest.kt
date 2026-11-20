@@ -1,8 +1,10 @@
 package io.mazewall.profiler.hotspot
 
 import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceAssembler
+import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceDocument
 import io.mazewall.profiler.internal.hotspot.HotSpotProtocolException
 import io.mazewall.profiler.internal.hotspot.HotSpotReplayLimits
+import io.mazewall.profiler.internal.hotspot.HotSpotWireReader
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import kotlin.test.assertEquals
@@ -36,6 +38,105 @@ class HotSpotEvidenceAssemblerTest {
         assertTrue(snapshot.recoveries.isEmpty())
         assertFalse(snapshot.retentionComplete)
         assertEquals(0, snapshot.retainedBytes)
+    }
+
+    @Test
+    fun `valid recovery with non-ASCII and whitespace preserves exact original raw line UTF-8 bytes charge`() {
+        val ev = event(1)
+        val tr = terminal(1)
+        val recovery = """  {"schema_version": 1, "kind": "recovery", "session_id": "$SESSION", "note": "café / 🚀 whitespace", "recovery": {"correlation_id": 1, "invalidated": true}}  """
+        val evBytes = ev.toByteArray(Charsets.UTF_8).size
+        val trBytes = tr.toByteArray(Charsets.UTF_8).size
+        val recBytes = recovery.toByteArray(Charsets.UTF_8).size
+        assertTrue(recBytes > recovery.length, "UTF-8 byte size must differ from String char length for non-ASCII content")
+
+        // 1. Adequate capacity: retain complete pair + recovery; assert exact event+terminal+recovery byte sum and zero discards
+        val snapshotAdequate = replay(ev, recovery, tr, summary(1))
+        assertEquals(1, snapshotAdequate.records.size)
+        assertEquals(listOf(recovery), snapshotAdequate.recoveries)
+        assertEquals(evBytes + trBytes + recBytes, snapshotAdequate.retainedBytes)
+        assertEquals(0uL, snapshotAdequate.discardedOccurrences)
+        assertEquals(0uL, snapshotAdequate.discardedRecoveries)
+        assertTrue(snapshotAdequate.retentionComplete)
+
+        // 2. Recovery capacity exhausted:
+        // Set budget to evBytes + trBytes.
+        // Pad recovery with whitespace to ensure recBytes > trBytes so remaining capacity is exhausted after event.
+        val padding = " ".repeat(trBytes + 16)
+        val paddedRecovery =
+            """  {"schema_version": 1, "kind": "recovery", "session_id": "$SESSION", """ +
+                """"note": "café / 🚀 whitespace$padding", "recovery": {"correlation_id": 1, "invalidated": true}}  """
+        val paddedRecBytes = paddedRecovery.toByteArray(Charsets.UTF_8).size
+        assertTrue(paddedRecBytes > trBytes, "Padded recovery bytes must exceed terminal bytes")
+
+        val snapshotExhausted = replay(ev, paddedRecovery, tr, summary(1), limits = HotSpotReplayLimits(maxRetainedBytes = evBytes + trBytes))
+        assertEquals(1, snapshotExhausted.records.size)
+        assertTrue(snapshotExhausted.recoveries.isEmpty())
+        assertEquals(evBytes + trBytes, snapshotExhausted.retainedBytes)
+        assertEquals(0uL, snapshotExhausted.discardedOccurrences)
+        assertEquals(1uL, snapshotExhausted.discardedRecoveries)
+        assertFalse(snapshotExhausted.retentionComplete)
+        assertTrue(snapshotExhausted.terminalAccountingComplete)
+    }
+
+    @Test
+    fun `terminal arrival evicts previously retained event when pair exceeds budget`() {
+        val ev = event(1)
+        val tr = terminal(1)
+        val sm = summary(1)
+        val evBytes = ev.toByteArray(Charsets.UTF_8).size
+        val trBytes = tr.toByteArray(Charsets.UTF_8).size
+        val budget = evBytes + trBytes - 1
+        assertTrue(evBytes <= budget, "Event alone must fit within budget")
+
+        val limits = HotSpotReplayLimits(maxRetainedBytes = budget)
+        val assembler = HotSpotEvidenceAssembler(limits)
+        val accumulator = assembler.begin()
+        val reader = HotSpotWireReader(limits)
+
+        // 1. Deliver event alone through real reader and observe accumulator: positive retained bytes, zero discards
+        val eventInput = ByteArrayInputStream((ev + "\n").toByteArray(Charsets.UTF_8))
+        reader.read(eventInput, accumulator::accept)
+        val partial = accumulator.snapshot()
+        assertEquals(evBytes, partial.retainedBytes)
+        assertEquals(0uL, partial.discardedOccurrences)
+        assertTrue(partial.records.isEmpty(), "Unpaired event must not produce completed records")
+        assertFalse(partial.finalized)
+
+        // 2. Deliver terminal and summary through real reader
+        val terminalInput = ByteArrayInputStream((tr + "\n" + sm + "\n").toByteArray(Charsets.UTF_8))
+        val receipt = reader.read(terminalInput, accumulator::accept)
+        val finalSnapshot = accumulator.finish(receipt)
+
+        // Assert pair is evicted on terminal charge: kept bytes/records are zero, exactly one occurrence discarded
+        assertEquals(0, finalSnapshot.retainedBytes)
+        assertEquals(0, finalSnapshot.records.size)
+        assertEquals(1uL, finalSnapshot.discardedOccurrences)
+        assertFalse(finalSnapshot.retentionComplete)
+        assertTrue(finalSnapshot.terminalAccountingComplete)
+    }
+
+    @Test
+    fun `retained byte ledger maintains strict consistency between running bytes and reconstructed charges`() {
+        // Under intact hard production limits (maxRetainedBytes <= 33,554,432, maxLineBytes <= 1,048,576, maxTracked <= 32,768),
+        // any charge exceeding maxRetainedBytes is rejected by budget checks in charge() or acceptRecovery().
+        // Consequently, running bytes never exceeds 32 MiB, and Math.addExact defensive overflow on Int in build()
+        // cannot be reached with valid legal input.
+        val ev1 = event(1)
+        val tr1 = terminal(1)
+        val ev2 = event(2)
+        val tr2 = terminal(2)
+        val snapshot = replay(ev1, tr1, ev2, tr2, summary(2))
+        val ev1Bytes = ev1.toByteArray(Charsets.UTF_8).size
+        val tr1Bytes = tr1.toByteArray(Charsets.UTF_8).size
+        val ev2Bytes = ev2.toByteArray(Charsets.UTF_8).size
+        val tr2Bytes = tr2.toByteArray(Charsets.UTF_8).size
+        val expectedTotal = ev1Bytes + tr1Bytes + ev2Bytes + tr2Bytes
+        assertEquals(expectedTotal, snapshot.retainedBytes)
+        assertEquals(2, snapshot.records.size)
+        assertEquals(0uL, snapshot.discardedOccurrences)
+        assertTrue(snapshot.retentionComplete)
+        assertTrue(snapshot.retainedBytes <= 33_554_432)
     }
 
     @Test
@@ -132,6 +233,161 @@ class HotSpotEvidenceAssemblerTest {
             .single()
             .evidence.reason,
         )
+    }
+
+    @Test
+    fun `truncated genuine stream cannot establish final wire delivery`() {
+        val original = checkNotNull(
+            javaClass.getResourceAsStream(
+            "/hotspot/measured-event-projection.jsonl",
+        ),
+        ).use { it.readBytes() }
+        val broken = original.copyOf(original.size / 2)
+        assertTrue(broken.size < original.size)
+        assertFailsWith<HotSpotProtocolException> {
+            HotSpotEvidenceAssembler().read(ByteArrayInputStream(broken))
+        }
+    }
+
+    @Test
+    fun `actual wire bytes conserve immediately discarded and evicted payloads`() {
+        val ev = event(1)
+        val tr = terminal(1)
+        val recovery = """  {"schema_version":1,"kind":"recovery","session_id":"$SESSION","note":"café 🚀","recovery":{"correlation_id":1,"invalidated":true}}  """
+        val repeated = recovery.replace("café", "déjà")
+
+        fun size(line: String) = line.toByteArray(Charsets.UTF_8).size.toLong()
+
+        fun rows(vararg lines: String) =
+            mutableListOf<io.mazewall.profiler.internal.hotspot.HotSpotWireRecord>().also { result ->
+            HotSpotWireReader(HotSpotReplayLimits()).read(
+                ByteArrayInputStream((lines.joinToString("\n") + "\n").toByteArray(Charsets.UTF_8)),
+                result::add,
+            )
+        }
+
+        fun field(
+            acc: Any,
+            name: String,
+        ): Long =
+            acc.javaClass.getDeclaredField(name).let {
+            it.isAccessible = true
+            it.getLong(acc)
+        }
+
+        fun checkLedger(
+            limits: HotSpotReplayLimits,
+            retained: Long,
+            discarded: Long,
+            vararg lines: String,
+        ) {
+            val acc = HotSpotEvidenceAssembler(limits).begin()
+            rows(*lines, summary(1)).forEach(acc::accept)
+            val final = acc.finish()
+            val admitted = field(acc, "admittedPayloadBytes")
+            val dropped = field(acc, "discardedPayloadBytes")
+            assertEquals(lines.sumOf(::size), admitted)
+            assertEquals(discarded, dropped)
+            assertEquals(retained, final.retainedBytes.toLong())
+            assertEquals(admitted, final.retainedBytes.toLong() + dropped)
+        }
+        val all = size(ev) + size(tr) + size(recovery) + size(repeated)
+        checkLedger(HotSpotReplayLimits(maxRetainedBytes = 0), 0, all, ev, recovery, repeated, tr)
+        checkLedger(
+            HotSpotReplayLimits(maxRetainedOccurrences = 0),
+            size(recovery) + size(repeated),
+            size(ev) + size(tr),
+            ev,
+            recovery,
+            repeated,
+            tr,
+        )
+        checkLedger(HotSpotReplayLimits(maxRetainedBytes = size(ev).toInt()), 0, size(ev) + size(tr), ev, tr)
+        checkLedger(HotSpotReplayLimits(maxRetainedBytes = size(ev).toInt()), 0, all, ev, recovery, repeated, tr)
+        checkLedger(HotSpotReplayLimits(maxRetainedBytes = size(tr).toInt()), 0, size(ev) + size(tr), tr, ev)
+        checkLedger(HotSpotReplayLimits(), all, 0, ev, recovery, repeated, tr)
+    }
+
+    @Test
+    fun `byte counter overflow is sticky and does not admit the triggering row`() {
+        val row = mutableListOf<io.mazewall.profiler.internal.hotspot.HotSpotWireRecord>()
+        HotSpotWireReader(HotSpotReplayLimits()).read(
+            ByteArrayInputStream((event(1) + "\n").toByteArray(Charsets.UTF_8)),
+            row::add,
+        )
+        for (name in listOf("admittedPayloadBytes", "discardedPayloadBytes")) {
+            val acc = HotSpotEvidenceAssembler(HotSpotReplayLimits(maxRetainedBytes = 0)).begin()
+            val field = acc.javaClass.getDeclaredField(name).apply { isAccessible = true }
+            field.setLong(acc, Long.MAX_VALUE)
+            assertFailsWith<HotSpotProtocolException> { acc.accept(row.single()) }
+            assertEquals(Long.MAX_VALUE, field.getLong(acc))
+            assertFalse(acc.hasSession)
+            assertFailsWith<HotSpotProtocolException> { acc.accept(row.single()) }
+            assertFailsWith<HotSpotProtocolException> { acc.snapshot() }
+            assertFailsWith<HotSpotProtocolException> { acc.finish() }
+        }
+    }
+
+    @Test
+    fun `actual detached receipts survive finalized zero retention and nonfinal snapshots`() {
+        val ev = event(1)
+        val tr = terminal(1)
+        val recovery = """  {"schema_version":1,"kind":"recovery","session_id":"$SESSION","note":"café 🚀","recovery":{"correlation_id":1,"invalidated":true}}  """
+        val input = listOf(ev, recovery, tr, summary(1)).joinToString("\n", postfix = "\n")
+        val zero = HotSpotEvidenceAssembler(HotSpotReplayLimits(maxRetainedBytes = 0)).read(
+            ByteArrayInputStream(input.toByteArray(Charsets.UTF_8)),
+        )
+        val receipt = checkNotNull(zero.collectionReceipt)
+        val wire = checkNotNull(receipt.wireReceipt)
+        val expectedPayload = listOf(ev, recovery, tr).sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() }
+        assertTrue(wire.validEof)
+        assertEquals(3uL, wire.records)
+        assertEquals(listOf(ev, recovery, tr).sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() + 1L }.toULong(), wire.bytes)
+        val prefix = listOf(ev, recovery, tr).joinToString("\n", postfix = "\n").toByteArray(Charsets.UTF_8)
+        val digest = java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(prefix)
+            .joinToString("") { "%02x".format(it) }
+        assertEquals(digest, wire.sha256)
+        assertEquals(expectedPayload, receipt.counts.admittedPayloadBytes)
+        assertEquals(expectedPayload, receipt.counts.discardedPayloadBytes)
+        assertEquals(0, receipt.counts.retainedBytes)
+        val roundTrip = HotSpotEvidenceDocument.decode(HotSpotEvidenceDocument.encode(zero))
+        assertEquals(receipt, roundTrip.collectionReceipt)
+        assertFalse(roundTrip.collectionLossComplete)
+        assertTrue(roundTrip.collectionAccounting is io.mazewall.profiler.internal.hotspot.HotSpotCollectionOutcome.Unknown)
+
+        val evicted = HotSpotEvidenceAssembler(HotSpotReplayLimits(maxRetainedBytes = ev.toByteArray(Charsets.UTF_8).size)).read(
+            ByteArrayInputStream(input.toByteArray(Charsets.UTF_8)),
+        )
+        val evictionReceipt = checkNotNull(evicted.collectionReceipt)
+        assertEquals(expectedPayload, evictionReceipt.counts.discardedPayloadBytes)
+        assertEquals(0, evictionReceipt.counts.retainedBytes)
+        assertEquals(evictionReceipt, HotSpotEvidenceDocument.decode(HotSpotEvidenceDocument.encode(evicted)).collectionReceipt)
+
+        val rows = mutableListOf<io.mazewall.profiler.internal.hotspot.HotSpotWireRecord>()
+        HotSpotWireReader(HotSpotReplayLimits()).read(ByteArrayInputStream(input.toByteArray(Charsets.UTF_8)), rows::add)
+        val accumulator = HotSpotEvidenceAssembler().begin()
+        accumulator.accept(rows.first())
+        val pending = accumulator.snapshot()
+        val frozen = checkNotNull(pending.collectionReceipt)
+        assertEquals(null, frozen.wireReceipt)
+        assertFalse(pending.finalized)
+        assertEquals(1uL, pending.pendingOccurrences)
+        assertEquals(frozen, HotSpotEvidenceDocument.decode(HotSpotEvidenceDocument.encode(pending)).collectionReceipt)
+        accumulator.accept(rows[1])
+        accumulator.accept(rows[2])
+        assertEquals(frozen, pending.collectionReceipt)
+        assertTrue(checkNotNull(accumulator.snapshot().collectionReceipt).counts.admittedPayloadBytes > frozen.counts.admittedPayloadBytes)
+        accumulator.accept(rows[3])
+        val noEof = accumulator.finish(
+            io.mazewall.profiler.internal.hotspot
+            .HotSpotWireReceipt(3uL, 10uL, "a".repeat(64), false),
+        )
+        val decoded = HotSpotEvidenceDocument.decode(HotSpotEvidenceDocument.encode(noEof))
+        assertEquals(noEof.collectionReceipt, decoded.collectionReceipt)
+        assertFalse(checkNotNull(checkNotNull(decoded.collectionReceipt).wireReceipt).validEof)
+        assertFalse(decoded.collectionLossComplete)
     }
 
     companion object {

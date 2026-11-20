@@ -1,0 +1,66 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package otel
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+)
+
+type NativeCompositionResolver struct {
+	resolver *otelResolverInstance
+	Tracer   *tracer.NativeCompositionTracer
+}
+
+func NativeCompositionOriginalResolver(s *symbolizer.Symbolizer) (*NativeCompositionResolver, error) {
+	var selected *otelResolverInstance
+	for _, r := range symbolizer.NativeCompositionResolvers(s) {
+		if o, ok := r.(*otelResolverInstance); ok {
+			if selected != nil {
+				return nil, fmt.Errorf("multiple native resolvers")
+			}
+			selected = o
+		}
+	}
+	if selected == nil || selected.consumerDone == nil || selected.options.TraceDefinitionLifetime == nil {
+		return nil, fmt.Errorf("native control requires Run's actual accounted resolver")
+	}
+	t, err := tracer.NativeCompositionOriginalTracer(selected.trc)
+	if err != nil {
+		return nil, err
+	}
+	return &NativeCompositionResolver{resolver: selected, Tracer: t}, nil
+}
+
+func (c *NativeCompositionResolver) Lifetime() libpf.TraceDefinitionLifetime {
+	return c.resolver.options.TraceDefinitionLifetime
+}
+
+// Hold the existing reporter mutex, not a replacement consumer or acknowledgment.
+func (c *NativeCompositionResolver) HoldConsumer() func() {
+	c.resolver.mu.Lock()
+	var once sync.Once
+	return func() { once.Do(c.resolver.mu.Unlock) }
+}
+
+func (c *NativeCompositionResolver) JoinConsumer(ctx context.Context) error {
+	return (resolverDefinitionDrainBackend{resolver: c.resolver}).JoinConsumer(ctx)
+}
+
+func (c *NativeCompositionResolver) Published() (symbolizer.DefinitionStopObservation, error) {
+	o := c.resolver.ownedDefinitionDrain()
+	if o == nil {
+		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("real drain not started")
+	}
+	select {
+	case <-o.done:
+		return o.result()
+	default:
+		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("real drain still pending")
+	}
+}

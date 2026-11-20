@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
 class TierEBenchmarkBundleBuilderTest {
@@ -59,7 +60,7 @@ class TierEBenchmarkBundleBuilderTest {
                             MessageDigest
                                 .getInstance("SHA-256")
                             .digest(Files.readAllBytes(file))
-                                .joinToString("") { "%02x".format(it) },
+                                .joinToString("") { "%02x".format(Locale.ROOT, it) },
                         )
                     }
                 },

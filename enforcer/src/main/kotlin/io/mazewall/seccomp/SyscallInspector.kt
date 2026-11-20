@@ -47,7 +47,7 @@ internal interface SyscallInspector {
      * Used for syscalls that don't fit the standard ArgCheck model (e.g. clone3).
      */
     fun emitSpecial(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>,
@@ -61,14 +61,14 @@ internal interface SyscallInspector {
  */
 internal class Clone3Inspector : SyscallInspector {
     override fun emitSpecial(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         arch: Arch,
         context: InspectionContext,
         handledNrs: MutableSet<Int>,
     ) {
         if (arch.clone3 >= 0) {
-            val enosysAction = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.ENOSYS
-            handledNrs.add(arch.clone3)
+            val enosysAction = SeccompAction.ACT_ERRNO(NativeConstants.ENOSYS)
+            require(handledNrs.add(arch.clone3)) { "Duplicate inspection for syscall ${arch.clone3}" }
             builder.expect(arch.clone3) {
                 ret(enosysAction)
             }
@@ -92,7 +92,7 @@ internal class MmapExecInspector : SyscallInspector {
             .map { nr ->
                 SyscallInspection(
                     syscallNumber = nr,
-                    argIndex = 2, // PROT flag is usually the 3rd argument
+                    argument = SyscallArgument.THIRD,
                     check = ArgCheck.MaskEquals(PROT_EXEC, 0x00L),
                     ifMatched = context.resolveEffectiveAction(nr),
                     ifNotMatched = SeccompAction.ACT_ERRNO(),
@@ -130,7 +130,7 @@ internal class ThreadCloneInspector : SyscallInspector {
         return listOf(
             SyscallInspection(
                 syscallNumber = nr,
-                argIndex = 0, // clone flags are the 1st argument
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.MaskEquals(CLONE_THREAD, CLONE_THREAD),
                 ifMatched = SeccompAction.ACT_ALLOW, // Bypass supervisor for JVM threads
                 ifNotMatched = context.resolveEffectiveAction(nr),
@@ -164,9 +164,9 @@ internal class UnsafePrctlInspector : SyscallInspector {
         return listOf(
             SyscallInspection(
                 syscallNumber = nr,
-                argIndex = 0, // prctl option is the 1st argument
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.EqualsAny32(SAFE_PRCTL_OPTIONS),
-                ifMatched = context.resolveEffectiveAction(nr),
+                ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
@@ -212,8 +212,8 @@ internal class SocketAddressFamilyInspector : SyscallInspector {
         return listOf(
             SyscallInspection(
                 syscallNumber = socketNr,
-                argIndex = 0, // domain (Address Family) is the 1st argument
-                check = ArgCheck.EqualsAny32(listOf(AF_UNIX.toInt())),
+                argument = SyscallArgument.FIRST,
+                check = ArgCheck.EqualsAny32(listOf(AF_UNIX)),
                 ifMatched = SeccompAction.ACT_ALLOW, // Preserve local Unix Domain Sockets (AF_UNIX)
                 ifNotMatched = effectiveAction,
             ),

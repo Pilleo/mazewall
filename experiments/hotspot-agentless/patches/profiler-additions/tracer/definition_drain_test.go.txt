@@ -5,6 +5,7 @@ package tracer
 import (
 	"context"
 	"errors"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"golang.org/x/sys/unix"
 	"testing"
 	"time"
@@ -14,6 +15,26 @@ type definitionPerfFixture struct {
 	flushErr       error
 	flushRequested chan struct{}
 	closed         bool
+}
+
+func TestDefinitionAccountingCloseAbandonsSourceBeforeFinalSample(t *testing.T) {
+	tr := &Tracer{definitionSource: &traceDefinitionSource{}, processManager: &processmanager.ProcessManager{}}
+	tr.Close()
+	tr.Close()
+	if _, err := tr.TraceDefinitionFinal(context.Background()); !errors.Is(err, errTraceDefinitionSourceClosed) {
+		t.Fatal("closed source reached map sampling or became final", err)
+	}
+}
+
+func TestDefinitionAccountingSourceFailureCannotUpgrade(t *testing.T) {
+	failure := errors.New("producer overflow already observed")
+	tr := &Tracer{definitionSource: &traceDefinitionSource{}}
+	tr.definitionSource.fail(failure)
+	for range 2 {
+		if _, err := tr.TraceDefinitionFinal(context.Background()); !errors.Is(err, failure) {
+			t.Fatal("sticky source failure replaced or promoted", err)
+		}
+	}
 }
 
 func (f *definitionPerfFixture) Flush() error {

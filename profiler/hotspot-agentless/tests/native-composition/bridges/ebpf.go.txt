@@ -1,0 +1,103 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package ebpfoperator
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+)
+
+type NativeCompositionEvents struct {
+	instance *ebpfInstance
+	context  operators.GadgetContext
+}
+
+func NativeCompositionOriginalEvents(gc operators.GadgetContext) (*NativeCompositionEvents, error) {
+	raw, ok := gc.GetVar("ebpfInstance")
+	i, typed := raw.(*ebpfInstance)
+	if !ok || !typed || i.eventFinalizer == nil {
+		return nil, fmt.Errorf("native control requires actual Start's event owner")
+	}
+	return &NativeCompositionEvents{instance: i, context: gc}, nil
+}
+
+func (c *NativeCompositionEvents) Root() (program uint32, retired, active bool, err error) {
+	o := c.instance.eventFinalizer
+	// Zero program means the real owner is busy, never permission to inspect it.
+	if !o.mu.TryLock() {
+		return 0, false, false, nil
+	}
+	defer o.mu.Unlock()
+	if o.definitionRoot == nil || o.definitionRoot.link == nil || o.definitionRoot.programID == 0 {
+		return 0, false, false, fmt.Errorf("actual original root was not retained")
+	}
+	return uint32(o.definitionRoot.programID), o.definitionRoot.retired, o.definitionWindow == definitionReadoutActive, o.err
+}
+
+func (c *NativeCompositionEvents) Stop() error { return c.instance.Stop(c.context) }
+
+// Select a bounded context on the same once-only real owner; no stage is assigned.
+func (c *NativeCompositionEvents) StopWithDeadline(ctx context.Context) error {
+	_, err := c.instance.eventFinalizer.stop(ctx)
+	return err
+}
+
+func (c *NativeCompositionEvents) Observation() operators.EventFinalizationObservation {
+	return c.instance.eventFinalizer.snapshot()
+}
+
+func (c *NativeCompositionEvents) RetainedResources(ctx context.Context) error {
+	select {
+	case <-c.instance.eventFinalizer.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if c.instance.collection == nil {
+		return fmt.Errorf("collection retired under held callback")
+	}
+	for name, program := range c.instance.collection.Programs {
+		if _, err := program.Info(); err != nil {
+			return fmt.Errorf("retained program %s: %w", name, err)
+		}
+	}
+	for name, m := range c.instance.collection.Maps {
+		if _, err := m.Info(); err != nil {
+			return fmt.Errorf("retained map %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Fixture cleanup only after actual owner, readers and callbacks have joined.
+// It does not clear the failed outcome or pretend normal retirement succeeded.
+func (c *NativeCompositionEvents) CleanupFailed(ctx context.Context) error {
+	select {
+	case <-c.instance.eventFinalizer.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if c.Observation().ResourcesRetired {
+		return nil
+	}
+	for _, tracer := range c.instance.tracers {
+		select {
+		case <-tracer.eventDrain.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	joined := make(chan struct{})
+	go func() { c.instance.wg.Wait(); close(joined) }()
+	select {
+	case <-joined:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	_, retired, _, _ := c.Root()
+	if !retired {
+		return fmt.Errorf("fixture cleanup refuses live original root")
+	}
+	return (nativeEventStopBackend{instance: c.instance}).Retire()
+}

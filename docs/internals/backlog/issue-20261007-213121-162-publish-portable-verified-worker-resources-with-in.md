@@ -30,4 +30,15 @@ Approved P4 requires packaged host artifacts to resolve opaque verified worker b
 - This establishes portable package resolution and closure, not the remaining P3 required-generation handshake or P5/R0 external generated-service native consumer. Those remain separate release acceptance evidence.
 
 ---
+## Repository-review expansion — 2026-11-04
+
+[PCG-08](../reviews/2026-11-04-repository-review-findings.md#pcg-08) adds a concrete
+cache-contract defect: workerJars uses @Classpath while the action observes raw ZIP bytes and
+basenames. Renaming/repacking equivalent classpath JARs changed actual bundle output. Use raw,
+basename-sensitive input normalization; preserve relocation and signed bytes. Real TestKit
+rename/repack/relocation checks must prove invalidation and byte-identical restoration; the
+review invoked the actual action but did not execute a Gradle cache hit. Coordinate PCG-09/P02
+producer entry/byte limits with the runtime's unchanged intrinsic bounds.
+
+---
 <!-- id: issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in  file: issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in.md -->

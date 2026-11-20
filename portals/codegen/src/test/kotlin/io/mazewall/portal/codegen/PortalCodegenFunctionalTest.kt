@@ -82,7 +82,7 @@ class PortalCodegenFunctionalTest {
             .split(java.io.File.pathSeparatorChar)
             .map { Path.of(it).fileName.toString() }
             .filter { it.startsWith("kotlin-reflect-") && it.endsWith(".jar") }
-        assertEquals(listOf("kotlin-reflect-2.4.20-Beta1.jar"), jars)
+        assertEquals(listOf("kotlin-reflect-2.4.21.jar"), jars)
     }
 
     @Test
@@ -576,7 +576,7 @@ class PortalCodegenFunctionalTest {
         projectDir.resolve("build.gradle.kts").writeText(
             """
             plugins {
-                ${if (applyKotlinPlugin) "kotlin(\"jvm\") version \"2.4.20-Beta1\"" else "java"}
+                ${if (applyKotlinPlugin) "kotlin(\"jvm\") version \"2.4.21\"" else "java"}
                 id("io.mazewall.portal.codegen")
             }
             repositories { mavenCentral() }

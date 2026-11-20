@@ -7,6 +7,7 @@ package tracer
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -51,7 +52,9 @@ func TestKernelDefinitionPerfDrainAcknowledgesQueuedTail(t *testing.T) {
 			defer cancel()
 			tr := &Tracer{ebpfMaps: map[string]*ebpf.Map{"trace_events": events}, tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}, intervals: ottimes.New(0, time.Second, 0), samplesPerSecond: 128}
 			out := make(chan *libpf.EbpfTrace)
-			tr.startTraceEventMonitor(ctx, out)
+			if _, err := tr.startTraceEventMonitor(ctx, out); err != nil {
+				t.Fatal(err)
+			}
 			first, release, consumerDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }
@@ -92,20 +95,22 @@ func TestKernelDefinitionPerfDrainAcknowledgesQueuedTail(t *testing.T) {
 			if err := tr.QuiesceDefinitionSources(stopCtx); err != nil {
 				t.Fatal(err)
 			}
-			drainDone := make(chan error, 1)
-			go func() { drainDone <- tr.DrainTraceReader(stopCtx) }()
-			select {
-			case err := <-drainDone:
-				t.Fatal("final callback acknowledgment invented", err)
-			default:
+			heldCtx, heldCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			heldErr := tr.DrainTraceReader(heldCtx)
+			heldExpired := heldCtx.Err()
+			heldCancel()
+			if !errors.Is(heldErr, context.DeadlineExceeded) || !errors.Is(heldExpired, context.DeadlineExceeded) {
+				t.Fatal("held final consumer did not prevent drain completion", heldErr)
 			}
 			unblock()
-			if err := <-drainDone; err != nil {
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), time.Second)
+			defer retryCancel()
+			if err := tr.DrainTraceReader(retryCtx); err != nil {
 				t.Fatal(err)
 			}
 			select {
 			case <-consumerDone:
-			case <-stopCtx.Done():
+			case <-retryCtx.Done():
 				t.Fatal("definition consumer did not see terminal handoff")
 			}
 			seen := map[uint64]bool{}

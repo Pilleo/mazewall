@@ -5,19 +5,19 @@ package otel
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 )
+
+func (o *otelResolverInstance) nativeStopAuxiliaryFinal(ctx context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+	if o.trc == nil { return tracer.DefinitionAuxiliaryObservation{}, fmt.Errorf("owned HotSpot auxiliary owner unavailable") }
+	return o.trc.StopAuxiliaryFinal(ctx)
+}
 
 func (o *otelResolverInstance) StopAuxiliary(ctx context.Context) error {
 	if o.trc == nil || (o.options.HotSpotEpochTarget.PID == 0 && o.options.HotSpotObservedPID == 0) {
 		return fmt.Errorf("owned HotSpot auxiliary owner unavailable")
 	}
-	if err := o.trc.StopAuxiliary(ctx); err != nil {
-		return err
-	}
-	if owner := o.ownedDefinitionDrain(); owner != nil {
-		owner.mu.Lock()
-		owner.observation.AuxiliaryStopped = true
-		owner.mu.Unlock()
-	}
-	return nil
+	owner := o.getOrCreateDefinitionDrain()
+	backend := resolverDefinitionDrainBackend{resolver: o}
+	return owner.stopAuxiliaryFinal(ctx, backend.stopAuxiliaryFinal)
 }

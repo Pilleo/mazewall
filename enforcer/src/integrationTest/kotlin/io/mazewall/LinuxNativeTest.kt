@@ -33,16 +33,16 @@ class LinuxNativeTest : BaseIntegrationTest() {
     @Test
     fun testBpfInstructionJmpBoundsValidation() {
         assertFailsWith<IllegalArgumentException> {
-            BpfInstruction.Jmp(0, 256.toShort(), 0.toShort(), 0)
+            BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 256.toShort(), 0.toShort(), 0)
         }
         assertFailsWith<IllegalArgumentException> {
-            BpfInstruction.Jmp(0, (-1).toShort(), 0.toShort(), 0)
+            BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, (-1).toShort(), 0.toShort(), 0)
         }
         assertFailsWith<IllegalArgumentException> {
-            BpfInstruction.Jmp(0, 0.toShort(), 256.toShort(), 0)
+            BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 0.toShort(), 256.toShort(), 0)
         }
         // Valid bounds should not throw
-        BpfInstruction.Jmp(0, 0.toShort(), 255.toShort(), 0)
+        BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 0.toShort(), 255.toShort(), 0)
     }
 
     @Test

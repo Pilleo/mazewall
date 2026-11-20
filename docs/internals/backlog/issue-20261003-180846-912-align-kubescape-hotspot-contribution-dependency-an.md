@@ -110,5 +110,72 @@ This issue and all six review issues remain open; exact-source SDK release revie
 actual SDK/storage publication and consumer pins, released-graph/native qualification
 and default-branch merge gates remain blocked.
 
+**Current source/release checkpoint (2026-10-23):**
+The [four-lane runtime qualification handoff](../reviews/2026-10-23-hotspot-runtime-qualification.md)
+supersedes the earlier local missing-schema/aggregation descriptions, not their
+dated history or outstanding release/runtime obligations. Bridge v0.2.0 is now
+published and unchanged; it does not release storage or qualify the node graph.
+
+Actual33-path storage review found three Important defects in this same contract:
+persisted Create response-read failure suppressed Added notifications; unrestricted
+legacy keys could collide with typed-frame keys and lose a path; decoded bools
+could not detect missing explicit-false fields in original JSON API responses.
+Five uncommitted code/test corrections and permanent RED/GREEN regressions are
+scoped-review accepted (3 addressed,0 new Critical/Important). Notifications now
+precede the fallible response read without hiding EACCES; private tagged,
+byte-length-prefixed path identities preserve typed/legacy bytes and old equality;
+original JSON false-key proof retains acquired-UID cleanup and protobuf checks.
+Owning race, actual tagged helper/gogo and ordinary `make test` receipts pass at
+the source hashes recorded in that handoff; no new API/runtime pass is claimed.
+
+The separately authorized two-page publication-doc correction labels the retained
+2026-10-19 local API pass as historical and its environment as retired. Excluded
+receipt paths are nonpublic operator-custody references, not publication links.
+Dates, first failures, retirement/custody obligations and no-release limitations
+remain; protected outputs/resources were not reopened or revalidated. The new
+docs delta awaits controller review. S identity is live HEAD
+`4c2e1cf1b64b6169b02b7a9b0ceacafd985aad5f` **plus the five code/test and two docs
+corrections**, not HEAD alone. New33-path hashes/full patch and updated sequential
+proposal are retained in the handoff's fresh Task8 package; all31 nondocument paths
+match accepted fix1. Four IgnoreRule paths then32 stack paths overlap in three
+generated files (33 unique); the proposal/intermediate is not approved publication
+or a tested intermediate release. No schema/generated/module/fixture was changed.
+
+Keep **open**: publication owner/repository/target/base/action, explicit IgnoreRule
+acceptance and package grant, actual remote `STORAGE_REVISION`/resolver provenance,
+matching server/image, Task2 standalone graph/builds and Tasks4–7 current inputs/
+permissions/custody/case grants remain missing. Task3 host-source retention/proof
+is complete/review-clean after its small cause/suppressed correction, but native
+acceptance is not run. Historical strict-eight FAILED/INCOMPLETE and separate
+full-quality/Detekt gates remain unchanged. No issue archive or runtime authority
+follows from host evidence or this checkpoint.
+
+**Partial persisted-profile checkpoint (2026-10-24):**
+The [current partial handoff](../reviews/2026-10-24-hotspot-persisted-profile-acceptance.md)
+supersedes the then-missing publication/remote-consumer/source-request gates above,
+not their dated evidence. The operator selected a temporary fork after upstream
+discussion455. Exact33-path source is actually published at
+[Pilleo/storage6815ab7d489114310ecb8e22b45909f8c86e944f](https://github.com/Pilleo/storage/commit/6815ab7d489114310ecb8e22b45909f8c86e944f),
+with full source readback and clean scoped review; canonical main remains untouched
+and canonical upstream acceptance/release pending. Actual remote replacement
+`github.com/Pilleo/storage v0.0.0-20261024002608-6815ab7d4891`, resolver Origin/sums,
+all33 source hashes and preservation of the1136-module graph are verified.
+Three standalone builds, two race commands and vet exit0; the SYSLOG-only opt-in
+runner correction and host regressions are reviewed clean. These are fork-backed
+source/host results, not images or effective container capabilities.
+
+Attempt4's bounded public-native evidence is independently accepted, with standalone
+native exit null and global completeness/policy false. Task5 safe preparation is
+reviewed, but actual matching images/dedicated direct-node UID1000 authority/
+initial-proc provenance/original trust inputs remain **BLOCKED**; compiler/runtime
+bases, normal tracer archive and qualified builder caches are missing. Current
+Task6 API and Task7 persisted positive/recreation/controls are **NOT_RUN**, exits
+null. This checkpoint's single offline `:profiler:detektTest` actually exited1 with
+16 current errors and520 warnings; separate issue528 maintenance and issue752
+retirement obligations are not waived by the prior configured228-task build.
+Keep **open**: final Task8/integration/release review, canonical acceptance, broader
+strict/dense qualification and historical unknown-owner limits remain incomplete.
+No native replay, live grant, issue archive or status/count change follows.
+
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

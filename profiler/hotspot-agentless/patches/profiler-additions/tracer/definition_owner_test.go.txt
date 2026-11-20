@@ -1,0 +1,896 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"golang.org/x/sys/unix"
+)
+
+type mockRetainerLifetime struct {
+	session       string
+	tgid          uint32
+	birth         uint64
+	validateCalls atomic.Uint32
+	validateErr   error
+	released      atomic.Bool
+	holds         atomic.Int32
+}
+
+type sealModelLifetime struct {
+	*mockRetainerLifetime
+	releaseCalls atomic.Int32
+}
+
+func (m *sealModelLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	held, release, err := m.mockRetainerLifetime.RetainDefinitionLifetime()
+	if err != nil {
+		return nil, nil, err
+	}
+	return held, func() error {
+		m.releaseCalls.Add(1)
+		return release()
+	}, nil
+}
+
+func (m *mockRetainerLifetime) Session() string  { return m.session }
+func (m *mockRetainerLifetime) HostTGID() uint32 { return m.tgid }
+func (m *mockRetainerLifetime) Birth() uint64    { return m.birth }
+func (m *mockRetainerLifetime) Validate() error {
+	m.validateCalls.Add(1)
+	return m.validateErr
+}
+
+type mockRetainedViewLifetime struct {
+	inner    *mockRetainerLifetime
+	released atomic.Bool
+}
+
+func (v *mockRetainedViewLifetime) Session() string {
+	if v.released.Load() {
+		return ""
+	}
+	return v.inner.Session()
+}
+func (v *mockRetainedViewLifetime) HostTGID() uint32 {
+	if v.released.Load() {
+		return 0
+	}
+	return v.inner.HostTGID()
+}
+func (v *mockRetainedViewLifetime) Birth() uint64 {
+	if v.released.Load() {
+		return 0
+	}
+	return v.inner.Birth()
+}
+func (v *mockRetainedViewLifetime) Validate() error {
+	if v.released.Load() {
+		return errors.New("view released")
+	}
+	return v.inner.Validate()
+}
+func (v *mockRetainedViewLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	if v.released.Load() {
+		return nil, nil, errors.New("retained view released")
+	}
+	return v.inner.RetainDefinitionLifetime()
+}
+
+func (m *mockRetainerLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	m.holds.Add(1)
+	view := &mockRetainedViewLifetime{inner: m}
+	var relOnce sync.Once
+	release := func() error {
+		relOnce.Do(func() {
+			view.released.Store(true)
+			m.released.Store(true)
+			m.holds.Add(-1)
+		})
+		return nil
+	}
+	return view, release, nil
+}
+
+type nonRetainerLifetime struct {
+	session       string
+	tgid          uint32
+	birth         uint64
+	validateCalls atomic.Uint32
+}
+
+func (n *nonRetainerLifetime) Session() string  { return n.session }
+func (n *nonRetainerLifetime) HostTGID() uint32 { return n.tgid }
+func (n *nonRetainerLifetime) Birth() uint64    { return n.birth }
+func (n *nonRetainerLifetime) Validate() error {
+	n.validateCalls.Add(1)
+	return nil
+}
+
+func TestDefinitionOwnerAcquireMissingRetainer(t *testing.T) {
+	// Case 1: nil lifetime
+	owner, err := acquireDefinitionOwner(context.Background(), nil, nil)
+	if err != nil || owner != nil {
+		t.Fatal("nil lifetime should return nil owner and nil error")
+	}
+
+	// Case 2: non-nil lifetime missing retainer capability (must fail closed with zero queries)
+	nonRetainer := &nonRetainerLifetime{session: "no-retain", tgid: 42, birth: 99}
+	owner, err = acquireDefinitionOwner(context.Background(), nonRetainer, nil)
+	if err == nil || owner != nil {
+		t.Fatal("non-nil lifetime missing retainer capability should fail closed")
+	}
+	if nonRetainer.validateCalls.Load() != 0 {
+		t.Fatal("non-retained lifetime was queried before capability rejection")
+	}
+}
+
+func TestDefinitionOwnerCloseWithEnteredReadoutBlocks(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "test-sess", tgid: 100, birth: 200}
+	heldLifetime, release, _ := mock.RetainDefinitionLifetime()
+	owner := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		lifetime:     heldLifetime,
+		release:      release,
+	}
+
+	entered := make(chan struct{})
+	continueReadout := make(chan struct{})
+	readoutDone := make(chan struct{})
+	closeWorkerDone := make(chan struct{})
+	var closeErr error
+	var closeStarted bool
+
+	defer func() {
+		select {
+		case <-continueReadout:
+		default:
+			close(continueReadout)
+		}
+		select {
+		case <-readoutDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("cleanup timed out waiting for readoutDone")
+		}
+		if closeStarted {
+			select {
+			case <-closeWorkerDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("cleanup timed out waiting for closeWorkerDone")
+			}
+		}
+	}()
+
+	go func() {
+		defer close(readoutDone)
+		_ = owner.WithCoveredReadout(func() error {
+			close(entered)
+			<-continueReadout
+			return nil
+		})
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for readout entry")
+	}
+
+	closeEntered := make(chan struct{})
+	owner.closeEntered = closeEntered
+
+	closeStarted = true
+	go func() {
+		defer close(closeWorkerDone)
+		closeErr = owner.Close()
+	}()
+
+	select {
+	case <-closeEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for close entry")
+	}
+
+	// Verify owner is closing
+	owner.mu.Lock()
+	state := owner.state
+	owner.mu.Unlock()
+	if state != definitionOwnerClosing {
+		t.Fatalf("expected closing state, got %d", state)
+	}
+
+	close(continueReadout)
+	select {
+	case <-readoutDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for readout return")
+	}
+
+	select {
+	case <-closeWorkerDone:
+		if closeErr != nil {
+			t.Fatal("close failed:", closeErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("owner close timed out waiting for readout return")
+	}
+
+	if !owner.Closed() {
+		t.Fatal("owner was not closed after readout returned")
+	}
+}
+
+type reentrantMatcherErr struct {
+	owner       *definitionOwner
+	invocations *atomic.Int32
+	sentinel    error
+}
+
+func (r reentrantMatcherErr) Error() string { return "reentrant matcher error" }
+
+func (r reentrantMatcherErr) Is(target error) bool {
+	if r.invocations != nil {
+		r.invocations.Add(1)
+	}
+	if r.owner != nil {
+		// Reenter owner methods during Is matching - must not deadlock
+		_ = r.owner.Closed()
+		_ = r.owner.CloseErr()
+	}
+	return target == r.sentinel
+}
+
+func TestDefinitionOwnerReentrantErrorMatching(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "reentrant-matching", tgid: 100, birth: 200}
+	heldLifetime, release, _ := mock.RetainDefinitionLifetime()
+	_ = release
+
+	var owner *definitionOwner
+	var invocations atomic.Int32
+	sentinelTarget := errors.New("custom sentinel target")
+	reentrantErr := reentrantMatcherErr{
+		owner:       nil,
+		invocations: &invocations,
+		sentinel:    sentinelTarget,
+	}
+
+	sentinelJoin := errors.New("sentinel joined cause")
+
+	owner = &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		lifetime:     heldLifetime,
+	}
+	reentrantErr.owner = owner
+
+	// The release callback reenters real closeWithContext(expiredCtx) while owner is in Finalizing state!
+	owner.release = func() error {
+		expiredCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		nestedCloseErr := owner.closeWithContext(expiredCtx)
+		// Return diag direct AND fmt wrap, joined with sentinel, custom reentrant matcher, and EACCES
+		return errors.Join(
+			nestedCloseErr,
+			fmt.Errorf("wrapped diagnostic: %w", nestedCloseErr),
+			reentrantErr,
+			sentinelJoin,
+			unix.EACCES,
+		)
+	}
+
+	closeDone := make(chan struct{})
+	var closeErr error
+	done1 := make(chan struct{})
+	done2 := make(chan struct{})
+	var matched1, matched2 bool
+	var closeStarted, match1Started, match2Started bool
+	defer func() {
+		if closeStarted {
+			select {
+			case <-closeDone:
+				if closeErr == nil {
+					t.Error("cleanup: expected close error")
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("cleanup timed out waiting for owner Close")
+			}
+		}
+		if match1Started {
+			select {
+			case <-done1:
+				if matched1 {
+					t.Error("cleanup: unexpected absent error match")
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("cleanup timed out waiting for absent error matcher")
+			}
+		}
+		if match2Started {
+			select {
+			case <-done2:
+				if !matched2 {
+					t.Error("cleanup: expected sentinel error match")
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("cleanup timed out waiting for sentinel error matcher")
+			}
+		}
+	}()
+	closeStarted = true
+	go func() {
+		defer close(closeDone)
+		closeErr = owner.Close()
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("owner Close timed out")
+	}
+
+	if closeErr == nil {
+		t.Fatal("expected Close to return error containing release causes")
+	}
+
+	// 1. Cycle-aware matching terminates on absent errno without deadlock or infinite recursion
+	absentErr := unix.ENOENT
+	match1Started = true
+	go func() {
+		defer close(done1)
+		matched1 = errors.Is(closeErr, absentErr)
+	}()
+	select {
+	case <-done1:
+		if matched1 {
+			t.Fatal("unexpected match on absent error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("matching absent error timed out / deadlocked in cycle")
+	}
+
+	// 2. Custom matcher in stored error chain was actually invoked and matches its sentinel
+	match2Started = true
+	go func() {
+		defer close(done2)
+		matched2 = errors.Is(closeErr, sentinelTarget)
+	}()
+	select {
+	case <-done2:
+		if !matched2 {
+			t.Fatal("expected match on sentinelTarget via reentrant matcher")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("matching sentinelTarget timed out")
+	}
+	if invocations.Load() == 0 {
+		t.Fatal("reentrant matcher was not invoked during traversal")
+	}
+
+	// 3. Independent EACCES is discoverable through join/diagnostic wrap
+	if !errors.Is(closeErr, unix.EACCES) {
+		t.Fatal("expected EACCES to be discoverable in joined error")
+	}
+
+	// 4. Joined sentinel is discoverable
+	if !errors.Is(closeErr, sentinelJoin) {
+		t.Fatal("expected sentinelJoin to be discoverable")
+	}
+
+	// 5. Expired context error from nested diagnostic is discoverable
+	if !errors.Is(closeErr, context.Canceled) {
+		t.Fatal("expected context.Canceled from nested diagnostic to be discoverable")
+	}
+}
+
+func TestDefinitionOwnerReentrantRelease(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "reentrant", tgid: 10, birth: 20}
+	heldLifetime, _, _ := mock.RetainDefinitionLifetime()
+	var owner *definitionOwner
+	reentrantRelease := func() error {
+		// Reenter owner getters during release - must not deadlock
+		if owner.Closed() {
+			return errors.New("owner closed prematurely during release")
+		}
+		if owner.HeldLifetime() == nil {
+			return errors.New("held lifetime unavailable during release")
+		}
+		_ = owner.CountsMap()
+		return nil
+	}
+	owner = &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		lifetime:     heldLifetime,
+		release:      reentrantRelease,
+	}
+
+	if err := owner.Close(); err != nil {
+		t.Fatalf("close with reentrant release failed: %v", err)
+	}
+	if !owner.Closed() {
+		t.Fatal("owner not closed after reentrant release")
+	}
+}
+
+func TestDefinitionOwnerTimerVsFinalReturnOrder(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "race-order", tgid: 10, birth: 20}
+	heldLifetime, _, _ := mock.RetainDefinitionLifetime()
+
+	releaseBlock := make(chan struct{})
+	releaseEntered := make(chan struct{})
+
+	blockingRelease := func() error {
+		select {
+		case <-releaseEntered:
+		default:
+			close(releaseEntered)
+		}
+		<-releaseBlock
+		return nil
+	}
+
+	owner := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		lifetime:     heldLifetime,
+		release:      blockingRelease,
+	}
+
+	defer func() {
+		select {
+		case <-releaseBlock:
+		default:
+			close(releaseBlock)
+		}
+		select {
+		case <-owner.closeReqDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("cleanup timed out waiting for finalizer completion")
+		}
+	}()
+
+	// 1. Caller with short timeout calls closeWithContext while release is blocked
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := owner.closeWithContext(ctx)
+	if err == nil {
+		t.Fatal("expected closeWithContext to return timeout error when release is blocked")
+	}
+	if !owner.Quarantined() {
+		t.Fatal("owner not marked quarantined when caller context timed out")
+	}
+
+	// Wait for release to have entered so finalizer is actively blocked
+	select {
+	case <-releaseEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for release to enter")
+	}
+
+	// 2. Unblock release so finalizer completes
+	close(releaseBlock)
+
+	// Wait for finalization completion
+	select {
+	case <-owner.closeReqDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for finalizer to complete after unblocking")
+	}
+
+	if !owner.Closed() {
+		t.Fatal("owner not marked closed after finalizer completion")
+	}
+
+	// 3. Subsequent close with cancelled context must never overwrite Closed with Quarantined
+	expiredCtx, cancelExpired := context.WithCancel(context.Background())
+	cancelExpired()
+	if err := owner.closeWithContext(expiredCtx); err != nil {
+		t.Fatalf("close on already closed owner returned error: %v", err)
+	}
+	if !owner.Closed() {
+		t.Fatal("owner state changed from closed")
+	}
+}
+
+func TestDefinitionOwnerExpiredInitiatingContextOnOpenOwner(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "expired-init", tgid: 11, birth: 22}
+	heldLifetime, release, _ := mock.RetainDefinitionLifetime()
+	owner := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		lifetime:     heldLifetime,
+		release:      release,
+	}
+	defer func() {
+		_ = owner.Close()
+	}()
+
+	expiredCtx, cancel := context.WithCancel(context.Background())
+	cancel() // expired before initiating call
+
+	err := owner.closeWithContext(expiredCtx)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error on expired initiating context, got %v", err)
+	}
+	if !owner.Quarantined() {
+		t.Fatal("open owner not marked quarantined when initiating context expired")
+	}
+}
+
+func TestDefinitionOwnerInfoPermissionFailure(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "perm-fail", tgid: 10, birth: 20}
+	oldInfo := traceDefinitionInfoFn
+	defer func() { traceDefinitionInfoFn = oldInfo }()
+
+	traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+		return traceDefinitionMapInfo{}, fmt.Errorf("simulated: %w", unix.EACCES)
+	}
+
+	dummyMap := &cebpf.Map{}
+	maps := map[string]*cebpf.Map{
+		traceDefinitionCounterMap: dummyMap,
+		traceDefinitionConfigMap:  dummyMap,
+		"trace_events":             dummyMap,
+		"pid_events":               dummyMap,
+	}
+
+	owner, err := acquireDefinitionOwner(context.Background(), mock, maps)
+	if err == nil || owner != nil {
+		t.Fatal("expected failure on EACCES info error")
+	}
+	if !errors.Is(err, unix.EACCES) {
+		t.Fatalf("expected wrapped EACCES error, got: %v", err)
+	}
+	if mock.holds.Load() != 0 {
+		t.Fatal("held lifetime not unwound on acquire failure")
+	}
+}
+
+func TestDefinitionOwnerModelCaptureHoldMapOwnershipEnrollment(t *testing.T) {
+	mock := &mockRetainerLifetime{session: "model-session", tgid: 1234, birth: 5678}
+
+	oldInfo := traceDefinitionInfoFn
+	oldCloner := traceDefinitionMapCloner
+	oldCloser := traceDefinitionMapCloser
+	defer func() {
+		traceDefinitionInfoFn = oldInfo
+		traceDefinitionMapCloner = oldCloner
+		traceDefinitionMapCloser = oldCloser
+	}()
+
+	closedClones := make(map[*cebpf.Map]bool)
+	traceDefinitionMapCloser = func(m *cebpf.Map) error {
+		closedClones[m] = true
+		return nil
+	}
+
+	countsOrig := &cebpf.Map{}
+	configOrig := &cebpf.Map{}
+	perfOrig := &cebpf.Map{}
+	pidOrig := &cebpf.Map{}
+
+	traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+		if m == countsOrig {
+			return traceDefinitionMapInfo{Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101}, nil
+		}
+		if m == configOrig {
+			return traceDefinitionMapInfo{Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102}, nil
+		}
+		if m == perfOrig {
+			return traceDefinitionMapInfo{Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 1, ID: 103}, nil
+		}
+		if m == pidOrig {
+			return traceDefinitionMapInfo{Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104}, nil
+		}
+		return traceDefinitionMapInfo{}, unix.EINVAL
+	}
+
+	cloneMapInfo := make(map[*cebpf.Map]traceDefinitionMapInfo)
+	baseInfoFn := traceDefinitionInfoFn
+	traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+		if info, ok := cloneMapInfo[m]; ok {
+			return info, nil
+		}
+		return baseInfoFn(m)
+	}
+
+	traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+		origInfo, err := baseInfoFn(m)
+		if err != nil {
+			return nil, err
+		}
+		clone := &cebpf.Map{}
+		cloneMapInfo[clone] = origInfo
+		return clone, nil
+	}
+
+	maps := map[string]*cebpf.Map{
+		traceDefinitionCounterMap: countsOrig,
+		traceDefinitionConfigMap:  configOrig,
+		"trace_events":             perfOrig,
+		"pid_events":               pidOrig,
+	}
+
+	var owner *definitionOwner
+	var scope *periodiccaller.OwnedScope
+	defer func() {
+		if scope != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := scope.Stop(stopCtx)
+			stopCancel()
+			if err != nil {
+				t.Errorf("deferred scope stop: %v", err)
+			}
+		}
+		if owner != nil {
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := owner.closeWithContext(closeCtx)
+			closeCancel()
+			if err != nil {
+				t.Errorf("deferred owner close: %v", err)
+			}
+			select {
+			case <-owner.closeReqDone:
+			case <-time.After(2 * time.Second):
+				t.Error("deferred owner cleanup timed out waiting for physical completion")
+			}
+			if !owner.Closed() {
+				t.Error("deferred owner cleanup did not complete finalization")
+			}
+		}
+	}()
+
+	var err error
+	owner, err = acquireDefinitionOwner(context.Background(), mock, maps)
+	if err != nil {
+		t.Fatalf("model owner acquisition failed: %v", err)
+	}
+
+	// Verify clone-only ownership: owner must hold cloned maps, never originals
+	if owner.countsMap == countsOrig || owner.configMap == configOrig || owner.perfMap == perfOrig || owner.pidMap == pidOrig {
+		t.Fatal("owner held original map instead of clone")
+	}
+	if len(cloneMapInfo) != 4 {
+		t.Fatalf("expected 4 distinct clones, got %d", len(cloneMapInfo))
+	}
+
+	scope = periodiccaller.NewOwnedScope(context.Background(), nil)
+
+	if err := scope.BindLifetime(owner.HeldLifetime()); err != nil {
+		t.Fatalf("model enrollment failed: %v", err)
+	}
+
+	// Two capture holds: one by owner, one by scope enrollment
+	if mock.holds.Load() != 2 {
+		t.Fatalf("expected 2 active holds after acquisition and enrollment, got %d", mock.holds.Load())
+	}
+
+	binding, err := scope.AuxiliaryBinding()
+	if err != nil {
+		t.Fatalf("read auxiliary binding: %v", err)
+	}
+	if binding.Session != "model-session" || binding.HostTGID != 1234 || binding.Birth != 5678 {
+		t.Fatalf("bound identity mismatch: %+v", binding)
+	}
+
+	// Stop scope -> releases second hold (2 -> 1)
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	stopErr := scope.Stop(stopCtx)
+	stopCancel()
+	if stopErr != nil {
+		t.Fatal(stopErr)
+	}
+	if mock.holds.Load() != 1 {
+		t.Fatalf("expected 1 hold after scope stop, got %d", mock.holds.Load())
+	}
+
+	// Close owner -> releases initial hold (1 -> 0) and closes all 4 clones
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if mock.holds.Load() != 0 {
+		t.Fatalf("expected 0 holds after owner close, got %d", mock.holds.Load())
+	}
+	if len(closedClones) != 4 {
+		t.Fatalf("expected 4 closed clones, got %d", len(closedClones))
+	}
+
+	// Partial unwind: failure on 3rd map clone unwinds earlier clones and drops hold
+	{
+		unwindClonesClosed := 0
+		traceDefinitionMapCloser = func(m *cebpf.Map) error {
+			unwindClonesClosed++
+			return nil
+		}
+		simErr := errors.New("simulated 3rd clone failure")
+		origCloner := traceDefinitionMapCloner
+		traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+			if m == perfOrig {
+				return nil, simErr
+			}
+			return origCloner(m)
+		}
+		failedOwner, err := acquireDefinitionOwner(context.Background(), mock, maps)
+		if failedOwner != nil || !errors.Is(err, simErr) {
+			t.Fatalf("expected partial unwind failure %v, got %v", simErr, err)
+		}
+		if mock.holds.Load() != 0 {
+			t.Fatalf("expected 0 holds after partial unwind, got %d", mock.holds.Load())
+		}
+		if unwindClonesClosed != 2 {
+			t.Fatalf("expected 2 clone maps unwound and closed, got %d", unwindClonesClosed)
+		}
+	}
+}
+
+func TestDefinitionOwnerModelSealReadout(t *testing.T) {
+	for _, entered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("entered=%t", entered), func(t *testing.T) {
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "seal-model", tgid: 1234, birth: 5678}}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf:   {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 1, ID: 103},
+				pid:    {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var closeMu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				info, ok := infos[m]
+				if !ok {
+					return traceDefinitionMapInfo{}, unix.EINVAL
+				}
+				return info, nil
+			}
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+				info, ok := infos[m]
+				if !ok {
+					return nil, unix.EINVAL
+				}
+				clone := &cebpf.Map{}
+				infos[clone] = info
+				return clone, nil
+			}
+			traceDefinitionMapCloser = func(m *cebpf.Map) error {
+				closeMu.Lock()
+				closed[m]++
+				closeMu.Unlock()
+				return nil
+			}
+
+			var owner *definitionOwner
+			started, done, unblock := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var unblockOnce sync.Once
+			launched := false
+			var callbackErr error
+			t.Cleanup(func() {
+				unblockOnce.Do(func() { close(unblock) })
+				joined := true
+				if launched {
+					select {
+					case <-done:
+					case <-time.After(2 * time.Second):
+						t.Error("callback cleanup timed out")
+						joined = false
+					}
+				}
+				if owner != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					err := owner.closeWithContext(ctx)
+					cancel()
+					if err != nil {
+						t.Errorf("owner cleanup: %v", err)
+					}
+					select {
+					case <-owner.closeReqDone:
+					case <-time.After(2 * time.Second):
+						t.Error("physical owner cleanup timed out")
+						return
+					}
+				}
+				if !joined {
+					return
+				}
+				traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser
+			})
+
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(context.Background(), mock, maps)
+			if err != nil {
+				var pending *traceDefinitionOwnerError
+				if errors.As(err, &pending) && pending.PendingOwner() != nil {
+					owner = pending.PendingOwner()
+				}
+				t.Fatalf("acquire model owner: %v", err)
+			}
+			clones := []*cebpf.Map{owner.countsMap, owner.configMap, owner.perfMap, owner.pidMap}
+			if len(infos) != 8 || mock.holds.Load() != 1 {
+				t.Fatal("owner did not acquire four clones and one hold")
+			}
+			if entered {
+				launched = true
+				go func() {
+					callbackErr = owner.WithCoveredReadout(func() error {
+						close(started)
+						<-unblock
+						return nil
+					})
+					close(done)
+				}()
+				select {
+				case <-started:
+				case <-time.After(2 * time.Second):
+					t.Fatal("readout did not enter")
+				}
+			}
+			owner.sealReadoutAdmission()
+			owner.sealReadoutAdmission()
+			calls := 0
+			if err := owner.WithCoveredReadout(func() error { calls++; return nil }); err == nil || calls != 0 {
+				t.Fatalf("sealed readout admitted: err=%v calls=%d", err, calls)
+			}
+			assertHeld := func() {
+				t.Helper()
+				closeMu.Lock()
+				n := len(closed)
+				closeMu.Unlock()
+				if n != 0 || mock.holds.Load() != 1 || mock.releaseCalls.Load() != 0 || owner.Closing() || owner.Quarantined() || owner.Closed() {
+					t.Fatal("seal changed physical owner state or released resources")
+				}
+			}
+			assertHeld()
+			if entered {
+				select {
+				case <-done:
+					t.Fatal("blocked readout returned before release")
+				default:
+				}
+				unblockOnce.Do(func() { close(unblock) })
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("readout did not return")
+				}
+				if callbackErr == nil {
+					t.Fatal("sealed readout committed success")
+				}
+				assertHeld()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = owner.closeWithContext(ctx)
+			cancel()
+			if err != nil {
+				t.Fatalf("explicit owner close: %v", err)
+			}
+			select {
+			case <-owner.closeReqDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("physical owner close did not complete")
+			}
+			closeMu.Lock()
+			valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0
+			for _, clone := range clones {
+				valid = valid && closed[clone] == 1
+			}
+			closeMu.Unlock()
+			if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 {
+				t.Fatal("explicit close did not release exactly the owned clones and hold")
+			}
+		})
+	}
+}

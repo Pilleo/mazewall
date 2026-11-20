@@ -1,28 +1,123 @@
 package io.mazewall.ffi.internal
 
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemon
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
+import io.mazewall.platform.process.ProcessLauncher
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class OwnedStackScopingPackagedAccessTest {
+    @Test
+    fun `shutdown hook illegal state is swallowed while assertion error gate timeout propagates`() {
+        val swallowedProcess = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val swallowedLauncher = object : MockProcessLauncher(swallowedProcess) {
+            override fun removeShutdownHook(hook: Thread) {
+                super.removeShutdownHook(hook)
+                throw IllegalStateException("simulated check timeout")
+            }
+        }
+        val swallowedManager = SupervisorDaemonManager(MockNativeEngine(), MockSocketManager(), swallowedLauncher)
+        swallowedManager.onUnexpectedExit = {}
+        val swallowedContext = swallowedManager.getOrSpawnSharedDaemon()
+        swallowedManager.stop()
+        assertFalse(swallowedContext.daemonProcess.isAlive)
+
+        val secondaryCleanup = IllegalStateException("secondary destroy failure")
+        val gatedProcess = object : MockProcess(556, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n") {
+            override fun destroyForcibly(): Process {
+                setAlive(false)
+                throw secondaryCleanup
+            }
+        }
+        val originalLauncher = MockProcessLauncher(gatedProcess)
+        val manager = SupervisorDaemonManager(MockNativeEngine(), MockSocketManager(), originalLauncher)
+        manager.onUnexpectedExit = {}
+        manager.getOrSpawnSharedDaemon()
+        val managerLauncherField = manager.javaClass
+            .getDeclaredField("processLauncher")
+            .apply { isAccessible = true }
+        val ownedResources = manager.javaClass
+            .getDeclaredField("ownedResources")
+            .apply { isAccessible = true }
+            .get(manager)!!
+        val resourcesLauncherField = ownedResources.javaClass
+            .getDeclaredField("launcher")
+            .apply { isAccessible = true }
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val stops = AtomicInteger()
+        val gateFailure = AtomicReference<Throwable?>()
+        val forwardingLauncher = object : ProcessLauncher by originalLauncher {
+            override fun removeShutdownHook(hook: Thread) {
+                if (stops.incrementAndGet() == 1) {
+                    entered.countDown()
+                    if (!release.await(20, TimeUnit.MILLISECONDS)) {
+                        val failure = AssertionError("history helper stop release timed out")
+                        gateFailure.compareAndSet(null, failure)
+                        throw failure
+                    }
+                }
+                originalLauncher.removeShutdownHook(hook)
+            }
+        }
+        managerLauncherField.set(manager, forwardingLauncher)
+        resourcesLauncherField.set(ownedResources, forwardingLauncher)
+        val stopperFailure = AtomicReference<Throwable?>()
+        val stopThread = Thread.ofPlatform().unstarted {
+            try {
+                manager.stop()
+            } catch (failure: Throwable) {
+                stopperFailure.set(failure)
+            }
+        }
+        try {
+            stopThread.start()
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            stopThread.join(5000)
+            assertFalse(stopThread.isAlive)
+        } finally {
+            release.countDown()
+            stopThread.join(5000)
+        }
+        val expected = requireNotNull(gateFailure.get())
+        assertTrue(expected is AssertionError)
+        assertSame(expected, stopperFailure.get())
+        assertTrue(expected.suppressed.contains(secondaryCleanup))
+        assertEquals(1, stops.get())
+    }
+
     @Test
     fun `helper fixture arguments require exact canonical inputs`() {
         val directory = Files.createTempDirectory("helper-arguments").toRealPath()
         val manifest = Files.createFile(directory.resolve("support.tsv"))
         try {
-            val mode = "protected-canonical-helper"
-            val parsed = OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString()))
-            assertEquals(manifest, parsed.manifest)
-            assertEquals(directory, parsed.applicationRoot)
-            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode)) }
-            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString(), "extra")) }
-            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, "relative", directory.toString())) }
-            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, directory.resolve("missing").toString(), directory.toString())) }
-            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), manifest.toString())) }
+            for (mode in listOf("protected-canonical-helper", "t4-history-helper")) {
+                val parsed = OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString()))
+                assertEquals(manifest, parsed.manifest)
+                assertEquals(directory, parsed.applicationRoot)
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode)) }
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString(), "extra")) }
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, "relative", directory.toString())) }
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, directory.resolve("missing").toString(), directory.toString())) }
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), manifest.toString())) }
+                assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.run(arrayOf(mode)) }
+            }
+            assertThrows<IllegalArgumentException> {
+                OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf("unknown-helper-mode", manifest.toString(), directory.toString()))
+            }
         } finally {
             Files.delete(manifest)
             Files.delete(directory)
@@ -68,6 +163,37 @@ class OwnedStackScopingPackagedAccessTest {
         println(output)
         assertTrue(output.contains("MANAGED_T4_OPENAT_PREPARED"), output)
         assertTrue(output.contains("MANAGED_T4_ACTUAL_LEASE_RETIRED"), output)
+        assertTrue(output.contains("MANAGED_T4_PIPE_RECEIPT"), output)
+        auditLoadedDefinitions(output, definitions)
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mazewall.managed.t4.fixture.classpath", matches = ".+")
+    fun `managed t4 fixture preserves checked helper history retirement`() {
+        val classpath = requireNotNull(System.getProperty("mazewall.managed.t4.fixture.classpath")).split(java.io.File.pathSeparator)
+        assertEquals(7, classpath.size)
+        val definitions = assertUniqueEffectiveDefinitions(classpath)
+        val supportManifest = java.nio.file.Path
+            .of(requireNotNull(System.getProperty("mazewall.managed.t4.fixture.supportManifest")) { "mazewall.managed.t4.fixture.supportManifest required" })
+            .toRealPath()
+        val applicationRoot = java.nio.file.Path
+            .of(requireNotNull(System.getProperty("mazewall.managed.t4.fixture.applicationRoot")) { "mazewall.managed.t4.fixture.applicationRoot required" })
+            .toRealPath()
+        val output = runChild(
+            classpath,
+            "t4-history-helper",
+            childArgs = listOf(supportManifest.toString(), applicationRoot.toString()),
+        )
+        println(output)
+        assertTrue(output.contains("MANAGED_T4_OPENAT_PREPARED"), output)
+        assertTrue(output.contains("PROTECTED_MAIN_PRODUCER_COUNTED_READY"), output)
+        assertTrue(output.contains("PROTECTED_HELPER_SESSION_RETIRED_WORKER_JOINED"), output)
+        assertTrue(output.contains("PROTECTED_MAIN_PRODUCER_B6_REFUSED_ORIGINAL_RETIRED"), output)
+        assertTrue(output.contains("T4_HISTORY_FIRST_UNKNOWN"), output)
+        assertTrue(output.contains("T4_HISTORY_CONCURRENT_UNKNOWN_OK"), output)
+        assertTrue(output.contains("T4_HISTORY_HELPER_RETIRED_OK"), output)
+        assertTrue(output.contains("PROTECTED_ORIGINAL_HELPER_STOP_ATTEMPTED:true"), output)
+        assertTrue(output.contains("PROTECTED_ORIGINAL_HELPER_PHYSICALLY_RETIRED"), output)
         assertTrue(output.contains("MANAGED_T4_PIPE_RECEIPT"), output)
         auditLoadedDefinitions(output, definitions)
     }
@@ -479,6 +605,7 @@ class OwnedStackScopingPackagedAccessTest {
         alternateLoader: Boolean = false,
         expectedOverride: String? = null,
         argumentsOverride: String? = null,
+        childArgs: List<String> = emptyList(),
     ): String {
         val command = mutableListOf(
             java.nio.file.Path
@@ -506,6 +633,7 @@ class OwnedStackScopingPackagedAccessTest {
         if (mode == "producer") command.add("--enable-native-access=ALL-UNNAMED")
         command.addAll(listOf("-cp", classpath.joinToString(java.io.File.pathSeparator), "io.mazewall.ffi.internal.OwnedStackScopingPackagedFixture"))
         if (mode != "valid") command.add(mode)
+        command.addAll(childArgs)
         val child = ProcessBuilder(command).redirectErrorStream(true).start()
         val output = StringBuilder()
         val overflow = java.util.concurrent.atomic

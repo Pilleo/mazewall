@@ -16,6 +16,12 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.api.extension.ExtensionContext
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
+import java.lang.reflect.Method
+import java.lang.reflect.Proxy
+import java.util.Optional
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -23,6 +29,14 @@ import kotlin.test.assertTrue
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class GlobalTestStateExtensionTest {
+    @Execution(ExecutionMode.CONCURRENT)
+    private class ConcurrentProbeFixture {
+        fun concurrentByClass() = Unit
+
+        @Execution(ExecutionMode.SAME_THREAD)
+        fun sameThreadOverride() = Unit
+    }
+
     @Test
     @Order(1)
     fun `test may mutate reversible global seams`() {
@@ -40,6 +54,37 @@ class GlobalTestStateExtensionTest {
         assertEquals(0, MazewallEvents.registeredCount())
         assertFalse(MazewallEvents.failOnListenerError)
     }
+
+    @Test
+    @Order(3)
+    fun `concurrent execution skips global reset while same-thread override still resets`() {
+        val extension = ResetGlobalsExtension()
+        LinuxNative.setEngine(MockNativeEngine())
+        assertFalse(LinuxNative.isRealEngineActive())
+
+        val concurrentMethod = ConcurrentProbeFixture::class.java.getDeclaredMethod("concurrentByClass")
+        extension.afterEach(contextFor(ConcurrentProbeFixture::class.java, concurrentMethod))
+        assertFalse(LinuxNative.isRealEngineActive())
+
+        val sameThreadMethod = ConcurrentProbeFixture::class.java.getDeclaredMethod("sameThreadOverride")
+        extension.afterEach(contextFor(ConcurrentProbeFixture::class.java, sameThreadMethod))
+        assertTrue(LinuxNative.isRealEngineActive())
+    }
+
+    private fun contextFor(
+        testClass: Class<*>,
+        testMethod: Method,
+    ): ExtensionContext =
+        Proxy.newProxyInstance(
+            ExtensionContext::class.java.classLoader,
+            arrayOf(ExtensionContext::class.java),
+        ) { _, method, _ ->
+            when (method.name) {
+                "getTestClass" -> Optional.of(testClass)
+                "getTestMethod" -> Optional.of(testMethod)
+                else -> throw UnsupportedOperationException("Unexpected ExtensionContext call: ${method.name}")
+            }
+        } as ExtensionContext
 
     companion object {
         @JvmStatic

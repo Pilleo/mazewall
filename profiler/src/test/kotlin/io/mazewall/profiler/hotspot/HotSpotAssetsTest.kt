@@ -1,8 +1,11 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.profiler.api.HotSpotObservationTarget
 import io.mazewall.profiler.internal.hotspot.HotSpotAssetDigest
 import io.mazewall.profiler.internal.hotspot.HotSpotAssetTimings
 import io.mazewall.profiler.internal.hotspot.HotSpotAssets
+import io.mazewall.profiler.internal.hotspot.HotSpotCaptureExpectation
 import io.mazewall.profiler.internal.hotspot.HotSpotFileDigest
 import io.mazewall.profiler.internal.hotspot.JavaHotSpotAssetDigest
 import org.junit.jupiter.api.Test
@@ -19,6 +22,22 @@ import kotlin.test.assertTrue
 class HotSpotAssetsTest {
     @TempDir
     lateinit var directory: Path
+
+    @Test
+    fun `observed manifest requires explicit observed admission`() {
+        fixture(observed = true)
+        val expected = HotSpotCaptureExpectation.Observed(HotSpotObservationTarget(Pid(123), 456uL, 789uL, 42uL))
+        assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory) }
+        assertEquals(directory.resolve("mw-hotspot-collector"), HotSpotAssets.load(directory, expected).collector)
+        val manifest = directory.resolve("manifest.json")
+        for ((from, to) in listOf("\"collector_version\":\"3\"" to "\"collector_version\":\"2\"", "\"wire_schema\":3" to "\"wire_schema\":2")) {
+            fixture(observed = true)
+            Files.writeString(manifest, Files.readString(manifest).replace(from, to))
+            assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory, expected) }
+        }
+        fixture()
+        assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory, expected) }
+    }
 
     @Test
     fun `every admission rehashes bytes and preserves the original provider failure`() {
@@ -263,7 +282,7 @@ class HotSpotAssetsTest {
         assertEquals(installed.resolve("oci"), assets.store)
     }
 
-    private fun fixture() {
+    internal fun fixture(observed: Boolean = false) {
         val contents = mapOf(
             "mw-hotspot-collector" to "collector fixture",
             "oci/oci-layout" to "{\"imageLayoutVersion\":\"1.0.0\"}",
@@ -283,10 +302,10 @@ class HotSpotAssetsTest {
         Files.writeString(
             directory.resolve("manifest.json"),
             """
-            {"schema_version":1,"collector_version":"2","capture_abi":2,"wire_schema":2,
+            {"schema_version":1,"collector_version":"${if (observed) 3 else 2}","capture_abi":2,"wire_schema":${if (observed) 3 else 2},
              "platform":"linux-amd64","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
              "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-             "patch_sha256":"b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3",
+             "patch_sha256":"22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035",
              "gadget_digest":"sha256:$blobHash","files":{$files}}
         """.trimIndent(),
         )

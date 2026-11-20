@@ -3,9 +3,182 @@
 package tracer
 
 import (
+	"bytes"
+	"errors"
 	"sync"
 	"testing"
+	"unsafe"
+
+	"github.com/cilium/ebpf/perf"
+	"go.opentelemetry.io/ebpf-profiler/support"
 )
+
+func reportControlSignalClosed(ch <-chan struct{}) bool {
+	select { case <-ch: return true; default: return false }
+}
+
+func TestReportReaderControlActualBodyReturn(t *testing.T) {
+	p := &reportProducerSource{}
+	c := p.reserveReportReader()
+	if c == nil || p.reserveReportReader() != nil { t.Fatal("reader reservation was not exclusive") }
+	reader := &perf.Reader{} // Identity only; no native method is called.
+	c.bind(reader)
+	if c.reader != reader { t.Fatal("actual reader identity was not bound") }
+	readEntered, readRelease := make(chan struct{}), make(chan struct{})
+	callbackEntered, callbackRelease := make(chan struct{}), make(chan struct{})
+	workerDone := make(chan struct{})
+	var releaseRead, releaseCallback sync.Once
+	t.Cleanup(func() {
+		releaseRead.Do(func() { close(readRelease) })
+		releaseCallback.Do(func() { close(callbackRelease) })
+		<-workerDone
+	})
+	go func() {
+		defer close(workerDone)
+		c.loopStart()
+		defer c.loopReturn(reportReaderCanceled)
+		_ = readReportRecord(c.accounting, func(*perf.Record) error { close(readEntered); <-readRelease; return nil }, &perf.Record{})
+		invokeReportCallback(c.accounting, func([]byte) { close(callbackEntered); <-callbackRelease }, nil)
+	}()
+	<-c.startedOrRejected
+	<-readEntered
+	if !c.started || c.rejected || !c.accounting.readout().readInFlight || reportControlSignalClosed(c.bodyReturned) { t.Fatal("read return signaled early") }
+	releaseRead.Do(func() { close(readRelease) })
+	<-callbackEntered
+	if c.accounting.readout().callbackInFlight != 1 || reportControlSignalClosed(c.bodyReturned) { t.Fatal("callback return signaled early") }
+	releaseCallback.Do(func() { close(callbackRelease) })
+	<-c.bodyReturned
+	if r := c.accounting.readout(); r.returned != reportReaderCanceled || r.readInFlight || r.callbackInFlight != 0 || r.callbackReturned != 1 { t.Fatal("body signal preceded ledger return") }
+}
+
+func TestReportReaderControlReadUnwindDoesNotSignalReturn(t *testing.T) {
+	p := &reportProducerSource{}
+	c := p.reserveReportReader()
+	c.loopStart()
+	func() {
+		defer func() { _ = recover() }()
+		defer c.loopReturn(reportReaderReadError)
+		_ = readReportRecord(c.accounting, func(*perf.Record) error { panic("read unwind") }, &perf.Record{})
+	}()
+	if !c.accounting.readout().readInFlight || reportControlSignalClosed(c.bodyReturned) { t.Fatal("unreturned read was signaled as returned") }
+}
+
+func TestReportReaderControlRejectedStart(t *testing.T) {
+	p := &reportProducerSource{}
+	c := p.reserveReportReader()
+	c.rejectStart()
+	<-c.startedOrRejected
+	if c.started || !c.rejected || reportControlSignalClosed(c.bodyReturned) || c.accounting.readout().started { t.Fatal("rejected start appeared to return a loop") }
+}
+
+func reportEventFixture(kind uint32) []byte {
+	event := support.Event{Type: kind}
+	size := int(unsafe.Sizeof(event))
+	result := make([]byte, size)
+	copy(result, unsafe.Slice((*byte)(unsafe.Pointer(&event)), size))
+	return result
+}
+
+func TestReportEventClassificationAndDispatch(t *testing.T) {
+	a := &reportReaderAccounting{}
+	a.start()
+	knownPID := reportEventFixture(support.EventTypeGenericPID)
+	knownReload := append(reportEventFixture(support.EventTypeReloadKallsyms), 0xaa)
+	unknown := reportEventFixture(^uint32(0))
+	cases := []struct { raw []byte; want reportReaderRecord; callback bool }{
+		{nil, reportRecordEmpty, false},
+		{knownPID[:len(knownPID)-1], reportRecordMalformed, false},
+		{knownPID, reportRecordValid, true},
+		{knownReload, reportRecordValid, true},
+		{unknown, reportRecordUnknown, true},
+	}
+	calls := 0
+	for _, tc := range cases {
+		before := calls
+		kind := dispatchReportRecord(a, func(data []byte) { calls++; if !bytes.Equal(data, tc.raw) { t.Fatal("payload changed") } }, tc.raw)
+		if kind != tc.want || (calls != before) != tc.callback { t.Fatal("unexpected class or dispatch") }
+	}
+	func() { defer func() { _ = recover() }(); dispatchReportRecord(a, func([]byte) { panic("abort") }, knownPID) }()
+	r := a.readout()
+	if r.received != 6 || r.empty != 1 || r.malformed != 1 || r.valid != 3 || r.unknown != 1 || r.callbackReturned != 3 || r.callbackAborted != 1 || r.callbackInFlight != 0 || !r.invalid {
+		t.Fatalf("incorrect record or callback accounting: %+v", r)
+	}
+	if dispatchReportRecord(nil, func([]byte) { t.Fatal("short input dispatched") }, knownPID[:1]) != reportRecordMalformed { t.Fatal("nil accounting bypassed safety") }
+}
+
+func TestReportReaderEffectHooks(t *testing.T) {
+	a := &reportReaderAccounting{}
+	a.start()
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }); <-done })
+	readErr := errors.New("read failed")
+	go func() {
+		defer close(done)
+		_ = readReportRecord(a, func(*perf.Record) error { close(entered); <-release; return readErr }, &perf.Record{})
+	}()
+	<-entered
+	if !a.readout().readInFlight { t.Fatal("read was not held across actual effect") }
+	releaseOnce.Do(func() { close(release) })
+	<-done
+	if a.readout().readInFlight { t.Fatal("read remained in flight after return") }
+	a.noteUnexpectedRead(readErr)
+	a.recordSample(reportRecordUnknown)
+	callbackEntered, callbackRelease, callbackDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var callbackOnce sync.Once
+	t.Cleanup(func() { callbackOnce.Do(func() { close(callbackRelease) }); <-callbackDone })
+	go func() { defer close(callbackDone); invokeReportCallback(a, func([]byte) { close(callbackEntered); <-callbackRelease }, []byte{1}) }()
+	<-callbackEntered
+	if a.readout().callbackInFlight != 1 { t.Fatal("callback was not held across actual effect") }
+	callbackOnce.Do(func() { close(callbackRelease) })
+	<-callbackDone
+	if r := a.readout(); r.callbackInFlight != 0 || r.callbackReturned != 1 || r.unknown != 1 || r.valid != 0 { t.Fatalf("unexpected callback or raw classification: %+v", r) }
+	func() { defer func() { _ = recover() }(); invokeReportCallback(a, func([]byte) { panic("abort") }, nil) }()
+	if r := a.readout(); !r.invalid || r.callbackAborted != 1 { t.Fatal("unwind was not sticky") }
+	a.requestFlush(func() error { return nil })
+	a.observeFlushed()
+	a.loopReturned(reportReaderFlushed)
+	if a.readout().status == reportReaderDrained { t.Fatal("failed read was laundered into drained") }
+}
+
+func TestReportReaderExpectedFlushRead(t *testing.T) {
+	a := &reportReaderAccounting{}
+	a.start()
+	a.requestFlush(func() error { a.noteUnexpectedRead(perf.ErrFlushed); return nil })
+	if a.readout().invalid { t.Fatal("requested flush was marked unexpected") }
+}
+
+func TestReportReaderReadFailureIsSticky(t *testing.T) {
+	a := &reportReaderAccounting{}
+	a.start()
+	err := readReportRecord(a, func(*perf.Record) error { return errors.New("read failure") }, &perf.Record{})
+	a.noteUnexpectedRead(err)
+	a.requestFlush(func() error { return nil })
+	a.observeFlushed()
+	a.loopReturned(reportReaderFlushed)
+	if r := a.readout(); !r.invalid || r.status == reportReaderDrained { t.Fatal("read failure lost after flush") }
+}
+
+func TestReportReaderAccountingActualReturns(t *testing.T) {
+	a := &reportReaderAccounting{}; a.start(); a.beginRead(); a.endRead(); a.recordSample(reportRecordValid); a.recordSample(reportRecordEmpty); a.recordSample(reportRecordMalformed); a.recordSample(reportRecordUnknown); a.recordLoss(7); a.beginCallback(); calls := 0
+	if !a.requestFlush(func() error { calls++; if a.readout().flush != reportFlushInFlight { t.Fatal("flush not reserved") }; if a.requestFlush(func() error { calls++; return nil }) { t.Fatal("duplicate flush admitted") }; return nil }) { t.Fatal("flush not called") }
+	r := a.readout(); if calls != 1 || r.status != reportReaderHeld || r.received != 4 || r.valid != 1 || r.empty != 1 || r.malformed != 1 || r.unknown != 1 || r.lossRecords != 1 || r.lostSamples != 7 || r.callbackInFlight != 1 || r.flush != reportFlushSucceeded { t.Fatalf("unexpected counts after flush: %+v", r) }
+	a.observeFlushed(); if a.readout().status != reportReaderHeld { t.Fatal("EOF treated as loop return") }; a.loopReturned(reportReaderFlushed); if a.readout().status != reportReaderHeld { t.Fatal("held callback treated as returned") }; a.returnCallback(); r = a.readout(); if r.status != reportReaderDrained || r.callbackInFlight != 0 || r.callbackReturned != 1 { t.Fatalf("actual returns missing: %+v", r) }; if a.requestFlush(func() error { calls++; return nil }) || calls != 1 { t.Fatal("flush repeated") }
+}
+
+func TestReportReaderUnexpectedFlushedCannotBeLaundered(t *testing.T) {
+	a := &reportReaderAccounting{}; a.start(); a.recordSample(reportRecordValid); a.beginCallback(); a.observeFlushed(); if r := a.readout(); !r.sawFlushed || !r.invalid || r.status != reportReaderHeld { t.Fatalf("unexpected EOF not invalid: %+v", r) }; a.observeFlushed(); calls := 0; if !a.requestFlush(func() error { calls++; return nil }) { t.Fatal("flush not attempted") }; a.loopReturned(reportReaderFlushed); a.returnCallback(); if r := a.readout(); calls != 1 || !r.invalid || r.flush != reportFlushSucceeded || r.status != reportReaderPartial || r.callbackReturned != 1 { t.Fatalf("unexpected EOF became drained: %+v", r) }
+}
+
+func TestReportReaderFlushedWhileRequestInFlight(t *testing.T) {
+	a := &reportReaderAccounting{}; a.start(); a.beginCallback(); if !a.requestFlush(func() error { a.observeFlushed(); a.loopReturned(reportReaderFlushed); a.returnCallback(); if r := a.readout(); r.invalid || r.status != reportReaderHeld || r.flush != reportFlushInFlight { t.Fatalf("in-flight flush misclassified: %+v", r) }; return nil }) { t.Fatal("flush not attempted") }; if r := a.readout(); r.invalid || r.status != reportReaderDrained || r.flush != reportFlushSucceeded || r.callbackReturned != 1 { t.Fatalf("actual flush return not recognized: %+v", r) }; a.observeFlushed(); if r := a.readout(); !r.invalid || r.status == reportReaderDrained { t.Fatal("duplicate EOF not sticky-invalid") }
+}
+
+func TestReportReaderAccountingPartialAndOverflow(t *testing.T) {
+	for _, reason := range []reportReaderReturn{reportReaderClosed, reportReaderCanceled, reportReaderDeadline, reportReaderReadError} { a := &reportReaderAccounting{}; a.start(); a.loopReturned(reason); if r := a.readout(); r.status != reportReaderPartial || r.sawFlushed { t.Fatalf("return %d classified as drained: %+v", reason, r) } }
+	a := &reportReaderAccounting{}; a.start(); if !a.requestFlush(func() error { return errors.New("fake failure") }) { t.Fatal("flush not attempted") }; a.loopReturned(reportReaderReadError); if r := a.readout(); r.flush != reportFlushFailed || r.status != reportReaderPartial { t.Fatal("failed flush completed") }
+	b := &reportReaderAccounting{}; b.start(); b.recordLoss(^uint64(0)); b.recordLoss(1); b.returnCallback(); b.beginCallback(); b.abortCallback(); b.loopReturned(reportReaderReadError); r := b.readout(); if !r.overflow || !r.invalid || r.lostSamples != ^uint64(0) || r.callbackInFlight != 0 || r.callbackAborted != 1 || r.status != reportReaderPartial { t.Fatalf("overflow or invalid lost: %+v", r) }
+}
 
 func TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned(t *testing.T) {
 	a, b := &Tracer{}, &Tracer{}

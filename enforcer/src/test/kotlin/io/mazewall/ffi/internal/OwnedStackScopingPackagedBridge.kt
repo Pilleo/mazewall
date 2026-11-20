@@ -30,7 +30,10 @@ internal object OwnedStackScopingPackagedBridge {
     )
 
     internal fun parseHelperArguments(args: Array<String>): HelperArguments {
-        require(args.size == 3 && args[0] == "protected-canonical-helper") { "Expected helper mode, manifest and application root" }
+        val mode = args.firstOrNull()
+        require(args.size == 3 && (mode == "protected-canonical-helper" || mode == "t4-history-helper")) {
+            "Expected helper mode, manifest and application root"
+        }
         val manifest = Path.of(args[1])
         val applicationRoot = Path.of(args[2])
         require(manifest.isAbsolute && manifest == manifest.normalize() && Files.isRegularFile(manifest) && manifest.toRealPath() == manifest) {
@@ -68,8 +71,14 @@ internal object OwnedStackScopingPackagedBridge {
 
     @JvmStatic
     fun run(args: Array<String>) {
-        val helperArguments = if (args.firstOrNull() == "protected-canonical-helper") parseHelperArguments(args) else null
-        val mode = if (helperArguments != null) "protected-canonical-helper" else args.singleOrNull() ?: "valid"
+        val requestedMode = args.firstOrNull()
+        val helperArguments =
+            if (requestedMode == "protected-canonical-helper" || requestedMode == "t4-history-helper") {
+                parseHelperArguments(args)
+            } else {
+                null
+            }
+        val mode = if (helperArguments != null) checkNotNull(requestedMode) else args.singleOrNull() ?: "valid"
         if (mode == "canonical-request-validation") {
             canonicalRequestValidation()
             return
@@ -83,6 +92,10 @@ internal object OwnedStackScopingPackagedBridge {
                 mode.startsWith("protected-reject-")
         ) {
             protectedOwner(mode)
+            return
+        }
+        if (mode == "t4-history-helper") {
+            t4HistoryHelper(checkNotNull(helperArguments))
             return
         }
         if (mode == "t4" || mode.startsWith("t4-reject-")) {
@@ -377,9 +390,10 @@ internal object OwnedStackScopingPackagedBridge {
         }
     }
 
-    private fun checkedFixture(mode: String) {
-        println("MANAGED_T4_CHILD_READY")
-        check(System.`in`.read() == 71) { "missing parent handoff" }
+    private fun buildCheckedFixtureIdentity(
+        routeSubset: List<Int>,
+        mode: String,
+    ): LiveStackBootstrap.LiveDeploymentIdentity {
         val expectedPath = java.nio.file.Path
             .of(requireNotNull(System.getProperty("mazewall.fixture.expected")))
             .toRealPath()
@@ -396,7 +410,7 @@ internal object OwnedStackScopingPackagedBridge {
             .toRealPath()
         val frozenArguments = java.nio.file.Files
             .readAllLines(argumentsPath)
-        val identity = LiveStackBootstrap.LiveDeploymentIdentity(
+        return LiveStackBootstrap.LiveDeploymentIdentity(
             LiveStackBootstrap.Profile.CLOSED_V1,
             LiveStackBootstrap.Variant.ONLY,
             checkNotNull(byRole["helper"]).sourceBuildEvidenceId(),
@@ -417,9 +431,326 @@ internal object OwnedStackScopingPackagedBridge {
                 LiveStackBootstrap.DependencyTarget("libjvm", 0x178cb88, "libjvm", 0xb0f040),
                 LiveStackBootstrap.DependencyTarget("libjvm", 0x178cba8, "libjvm", 0xb05e90),
             ),
-            listOf(2),
+            routeSubset,
             Optional.empty(),
         )
+    }
+
+    private fun t4HistoryHelper(helperArguments: HelperArguments) {
+        val support = parseHelperSupport(Files.readAllLines(helperArguments.manifest))
+        val appRoot = helperArguments.applicationRoot
+        require(Files.isDirectory(appRoot))
+        println("MANAGED_T4_CHILD_READY")
+        check(System.`in`.read() == 71) { "missing parent handoff" }
+        val argument = java.lang.management.ManagementFactory
+            .getRuntimeMXBean()
+            .inputArguments
+            .single { it.startsWith("-agentpath:") && it.endsWith("=live-stack=only") }
+        val vmAgent = java.nio.file.Path
+            .of(argument.removePrefix("-agentpath:").removeSuffix("=live-stack=only"))
+            .toRealPath()
+        val actualClasspath = System.getProperty("java.class.path").split(java.io.File.pathSeparator)
+        check(actualClasspath.size == 7)
+        val identity = buildCheckedFixtureIdentity(listOf(2, 257), "t4-history-helper")
+        val byRole = identity.artifacts().associateBy { it.role() }
+        val agent = Path
+            .of(checkNotNull(byRole["agent"]).canonicalPath())
+            .toRealPath()
+        check(agent == vmAgent) { "manifest agent does not match -agentpath: $agent vs $vmAgent" }
+        val producer = Class.forName("io.mazewall.ffi.internal.OwnedStackScopingBootstrapKt", false, ClassLoader.getSystemClassLoader())
+        val producerCodeSource = producer.protectionDomain.codeSource.location
+        check(
+            Path
+                .of(producerCodeSource.toURI())
+                .toRealPath() ==
+                Path
+                    .of(actualClasspath[1])
+                    .toRealPath(),
+        )
+        val expectedClasspath = identity.orderedClasspath().map { Path.of(it).toRealPath() }
+        val actualPaths = actualClasspath.map { Path.of(it).toRealPath() }
+        check(expectedClasspath == actualPaths)
+        val owner = newCheckedRuntimeOwner(
+            agent,
+            identity,
+            TrustedHelperSupport.reviewed(support, io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters),
+        )
+        prepareOpenatFixture()
+        val profile = io.mazewall.enforcer.api.RuntimeProfile.HOTSPOT_JIT
+        val workloadLocation = OwnedStackScopingPackagedWorkload::class.java.protectionDomain.codeSource.location
+        val artifactPath = Path
+            .of(workloadLocation.toURI())
+            .toRealPath()
+        val policyBuilder = io.mazewall.enforcer.api.WorkerPolicyBuilder
+            .denyList(profile)
+            .allowFsRead(artifactPath)
+            .allowFsRead(appRoot)
+        support.forEach { policyBuilder.allowFsRead(it.path) }
+        val policy = policyBuilder.build()
+        val resources = io.mazewall.enforcer.api.execution.PreparedOperationResources
+            .resolve(profile, policy, OwnedStackScopingPackagedWorkload::class.java, emptySet())
+        var transferred = false
+        var producerEntered = false
+        var drainAttempted = false
+        var settled = false
+        var completedHistoryCheck = false
+        var runtime: ManagedRuntime? = null
+        var originalHelper: OriginalHelperObservation? = null
+        var stopper: Thread? = null
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val stops = AtomicInteger()
+        val gateFailure = AtomicReference<Throwable?>()
+        var primary: Throwable? = null
+        val timeout = Duration.ofSeconds(10)
+        try {
+            val binding = io.mazewall.enforcer.api.OperationBinding(
+                "packaged",
+                io.mazewall.enforcer.api.OperationAdapter.CALLABLE,
+                resources.implementationSha256,
+                resources.resourceGeneration,
+                mapOf("entryPoint" to "call()I"),
+            )
+            val document = io.mazewall.enforcer.api.OperationPolicyDocument(
+                binding,
+                io.mazewall.enforcer.api.CanonicalPolicyArtifact
+                    .worker(profile, policy),
+                emptySet(),
+                emptyMap(),
+            )
+            val digest = document.sha256()
+            val review = io.mazewall.enforcer.api
+                .TrustedPolicyReview("test", digest, emptySet())
+            val reviewed = ReviewedOperationArtifact.load(document.toJson(), review, binding)
+            val actualRuntime = owner.start(timeout, timeout)
+            runtime = actualRuntime
+            check(owner.ownsRuntime(actualRuntime))
+            val helper = captureOriginalHelper(owner)
+            originalHelper = helper
+            val managerLauncherField = helper.manager.javaClass
+                .getDeclaredField("processLauncher")
+                .apply { isAccessible = true }
+            val originalLauncher = managerLauncherField.get(helper.manager) as io.mazewall.platform.process.ProcessLauncher
+            val ownedResources = observedField(helper.manager, "ownedResources")
+            val resourcesLauncherField = ownedResources.javaClass.getDeclaredField("launcher").apply { isAccessible = true }
+            check(resourcesLauncherField.get(ownedResources) === originalLauncher)
+            val forwardingLauncher = object : io.mazewall.platform.process.ProcessLauncher by originalLauncher {
+                override fun removeShutdownHook(hook: Thread) {
+                    val call = stops.incrementAndGet()
+                    if (call == 1) {
+                        entered.countDown()
+                        if (!release.await(10, TimeUnit.SECONDS)) {
+                            val timeoutFailure = AssertionError("history helper stop release timed out")
+                            gateFailure.compareAndSet(null, timeoutFailure)
+                            throw timeoutFailure
+                        }
+                    }
+                    originalLauncher.removeShutdownHook(hook)
+                }
+            }
+            managerLauncherField.set(helper.manager, forwardingLauncher)
+            resourcesLauncherField.set(ownedResources, forwardingLauncher)
+            check(managerLauncherField.get(helper.manager) === forwardingLauncher)
+            check(resourcesLauncherField.get(ownedResources) === forwardingLauncher)
+            val entry = OwnedStackScopingPackagedWorkload::class.java.getMethod("call")
+            val dispatcher = Class.forName("sun.nio.fs.UnixNativeDispatcher")
+            val open = dispatcher.getDeclaredMethod("open0", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            val openat = dispatcher.getDeclaredMethod("openat0", Int::class.javaPrimitiveType, Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            val limits = DomainLimits(1, 1)
+            producerEntered = true
+            val wrapper = requireReady(
+                "history helper producer",
+                prepareOwnedStackScoping(
+                    actualRuntime,
+                    reviewed,
+                    limits,
+                    resources,
+                    agent,
+                    identity,
+                    listOf(entry.declaringClass, dispatcher),
+                    listOf(entry, open, openat),
+                    listOf(listOf(open, entry), listOf(openat, entry)),
+                ),
+            )
+            transferred = true
+            val bootstrap = observedField(wrapper, "bootstrap")
+            val staging = observedField(bootstrap, "staging")
+            val enrollment = observedField(bootstrap, "enrollment")
+            val sealed = observedField(bootstrap, "sealed")
+            check(observedField(bootstrap, "runtime") === actualRuntime)
+            check(observedField(bootstrap, "inputs").let { observedField(it, "resources") } === resources)
+            check(observedField(bootstrap, "helperContext") === helper.context)
+            println("PROTECTED_MAIN_PRODUCER_COUNTED_READY")
+            val refusal = try {
+                actualRuntime.prepare(policy, limits, wrapper)
+                error("Live dispatcher unexpectedly accepted")
+            } catch (failure: UnsupportedOperationException) {
+                check(failure.message == "Live stack scoping dispatcher is not available")
+                check(failure.stackTrace.any { it.className == "io.mazewall.enforcer.internal.execution.OwnedDomainKt" && it.methodName == "requireSupportedScopingStart" })
+                failure
+            }
+            drainAttempted = true
+            val report = actualRuntime.drain(timeout)
+            check(report is io.mazewall.enforcer.api.execution.DrainReport.Incomplete)
+            check(report.unfinishedInvocations == 0 && report.liveWorkers == 0)
+            check(containsOriginalFailure(report.cleanupFailure, refusal))
+            val shared = observedField(actualRuntime, "shared")
+            val preparation = observedField(shared, "scopingPreparation")
+            val state = observedField(preparation, "state")
+            check(state.javaClass.simpleName == "TransferredSettled")
+            val domain = observedField(state, "domain")
+            check(observedField(domain, "preparedOperation") === resources)
+            val scoping = observedField(domain, "scoping")
+            check(observedField(scoping, "bootstrap") === bootstrap)
+            check(observedField(bootstrap, "staging") === staging && observedField(bootstrap, "enrollment") === enrollment && observedField(bootstrap, "sealed") === sealed)
+            val session = observedField(domain, "helperSession")
+            check(observedField(domain, "liveHelperContext") === helper.context)
+            check(observedField(session, "context") === helper.context)
+            check(observedField(session, "plan") === observedField(domain, "helperPlan"))
+            check(observedField(session, "phase").toString() == "Retired") { "Original helper session did not retire" }
+            val receipt = observedField(session, "receipt") as ConfinedHelperProtocol.Frame.Retired
+            val helperIdentity = checkNotNull(helper.context.confinedHelper).identity
+            check(receipt.helperPid == helperIdentity.pid && receipt.helperStartTicks == helperIdentity.startTimeTicks)
+            val workers = observedField(domain, "liveWorkers")
+            val slots = observedField(workers, "slots") as List<*>
+            val slot = checkNotNull(slots.single())
+            val workerThread = observedField(slot, "thread") as Thread
+            check(!workerThread.isAlive) { "Original worker is still alive" }
+            check(observedField(slot, "registrationReserved") == true && observedField(slot, "registrationAttempted") == true)
+            check(observedField(slot, "receipt") is io.mazewall.platform.native.WorkerRegistrationReceipt)
+            check(observedField(slot, "worker") is io.mazewall.platform.native.WorkerOwner)
+            check(observedField(slot, "retirementAttempted") == true)
+            check(observedField(slot, "retirement") is io.mazewall.platform.native.LiveCompletion.Complete)
+            check((observedField(domain, "admitted") as AtomicLong).get() == 0L)
+            println("PROTECTED_HELPER_SESSION_RETIRED_WORKER_JOINED")
+            println("PROTECTED_HELPER_READY_AND_NO_BEGIN_SOURCE_CONTROL_FLOW_INFERENCE")
+            val liveRelease = observedField(domain, "liveRelease")
+            check(observedField(liveRelease, "pass").toString() == "Retained")
+            listOf("invalidate", "installation", "landlock", "resources").forEach { check(observedField(liveRelease, it).toString() == "Complete") }
+            check(observedNullableField(liveRelease, "nativeOutcome") == null && observedNullableField(liveRelease, "failure") == null)
+            settled = true
+            println("PROTECTED_MAIN_PRODUCER_B6_REFUSED_ORIGINAL_RETIRED")
+            val firstHistory = owner.retire(timeout) as ManagedRuntimeAcquisitionStatus.Unknown
+            check(containsOriginalFailure(firstHistory.history, refusal))
+            check(stops.get() == 0)
+            println("T4_HISTORY_FIRST_UNKNOWN")
+            val stopped = AtomicReference<ManagedRuntimeAcquisitionStatus?>()
+            val stopperFailure = AtomicReference<Throwable?>()
+            val stopThread = Thread.ofPlatform().unstarted {
+                try {
+                    stopped.set(owner.retire(timeout))
+                } catch (failure: Throwable) {
+                    stopperFailure.set(failure)
+                } finally {
+                    entered.countDown()
+                }
+            }
+            stopper = stopThread
+            stopThread.start()
+            var raceFailure: Throwable? = null
+            try {
+                if (!entered.await(10, TimeUnit.SECONDS)) throw AssertionError("history helper stop did not enter")
+                gateFailure.get()?.let { throw it }
+                stopperFailure.get()?.let { throw it }
+                if (!stopThread.isAlive || stopped.get() != null) {
+                    throw AssertionError("history helper stopper did not remain blocked before concurrent check (alive=${stopThread.isAlive}, stopped=${stopped.get()})")
+                }
+                val concurrent = owner.retire(timeout) as ManagedRuntimeAcquisitionStatus.Unknown
+                check(concurrent.history === firstHistory.history)
+                check(stops.get() == 1)
+                gateFailure.get()?.let { throw it }
+                stopperFailure.get()?.let { throw it }
+                if (!stopThread.isAlive || stopped.get() != null) {
+                    throw AssertionError("history helper stopper completed before gate release (alive=${stopThread.isAlive}, stopped=${stopped.get()})")
+                }
+                println("T4_HISTORY_CONCURRENT_UNKNOWN_OK")
+            } catch (failure: Throwable) {
+                raceFailure = failure
+                throw failure
+            } finally {
+                release.countDown()
+                stopThread.join(10_000)
+                if (stopThread.isAlive) {
+                    val aliveFailure = AssertionError("history helper stopper thread still alive")
+                    if (raceFailure == null) throw aliveFailure else raceFailure.addSuppressed(aliveFailure)
+                }
+            }
+            gateFailure.get()?.let { throw it }
+            stopperFailure.get()?.let { throw it }
+            val stoppedStatus = (stopped.get() ?: throw AssertionError("history helper stopper returned null")) as ManagedRuntimeAcquisitionStatus.Unknown
+            check(stoppedStatus.history === firstHistory.history)
+            check(stops.get() == 1)
+            val repeated = owner.retire(timeout) as ManagedRuntimeAcquisitionStatus.Unknown
+            check(repeated.history === firstHistory.history)
+            check(stops.get() == 1)
+            reportOriginalHelper(helper)
+            check(observedField(helper.protocol, "helperStarted") == false)
+            check(!helper.context.daemonProcess.isAlive)
+            completedHistoryCheck = true
+            println("T4_HISTORY_HELPER_RETIRED_OK")
+        } catch (failure: Throwable) {
+            primary = failure
+            throw failure
+        } finally {
+            entered.countDown()
+            release.countDown()
+            var retirementFailure: Throwable? = null
+            var resourceFailure: Throwable? = null
+            var outcome: ManagedRuntimeAcquisitionStatus? = null
+            try {
+                stopper?.let { thread ->
+                    if (thread.isAlive) {
+                        thread.join(5000)
+                        check(!thread.isAlive) { "history helper stopper thread still alive in teardown" }
+                    }
+                }
+                if (!completedHistoryCheck) {
+                    check(!drainAttempted || settled) { "Original drain outcome remains unresolved; no retirement replay" }
+                    outcome = owner.retire(timeout)
+                }
+            } catch (failure: Throwable) {
+                retirementFailure = failure
+            }
+            try {
+                if (!transferred) {
+                    val callerOwned = if (!producerEntered) {
+                        true
+                    } else {
+                        val state = runtime
+                            ?.let { observedNullableField(observedField(it, "shared"), "scopingPreparation") }
+                            ?.let { observedField(it, "state") }
+                        outcome is ManagedRuntimeAcquisitionStatus.Complete &&
+                            (state == null || state.javaClass.simpleName == "PreparedSettled")
+                    }
+                    check(callerOwned) { "Resource ownership remains unresolved: $outcome" }
+                    val phase = observedField(resources, "phase").toString()
+                    if (phase == "AVAILABLE") resources.close() else check(phase == "CLOSED")
+                }
+            } catch (failure: Throwable) {
+                resourceFailure = failure
+            }
+            val failures = listOfNotNull(primary, retirementFailure, resourceFailure)
+            if (failures.any { it is InterruptedException }) Thread.currentThread().interrupt()
+            val fatal = failures.firstOrNull { it is Error }
+            var selected = fatal ?: failures.firstOrNull()
+            for (failure in failures) {
+                if (failure !== selected) {
+                    try {
+                        selected?.addSuppressed(failure)
+                    } catch (metadata: Throwable) {
+                        if (selected !is Error && metadata is Error) selected = metadata
+                    }
+                }
+            }
+            if (selected != null && selected !== primary) throw selected
+        }
+    }
+
+    private fun checkedFixture(mode: String) {
+        println("MANAGED_T4_CHILD_READY")
+        check(System.`in`.read() == 71) { "missing parent handoff" }
+        val identity = buildCheckedFixtureIdentity(listOf(2), mode)
+        val byRole = identity.artifacts().associateBy { it.role() }
         if (mode != "t4-reject-absent-binding") prepareOpenatFixture()
         val contexts = RealNativeStackContexts.bootstrap(
             java.nio.file.Path

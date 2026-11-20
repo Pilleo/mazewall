@@ -13,14 +13,12 @@ private const val MAX_ASSET_FILES = 256
 private const val MAX_ASSET_BYTES = 512L * 1024 * 1024
 private const val ASSET_SCHEMA = 1
 private const val CAPTURE_ABI = 2
-private const val WIRE_SCHEMA = 2
-private const val COLLECTOR_VERSION = "2"
 private const val MAX_OCI_JSON_DEPTH = 16
 private const val MAX_MANIFEST_JSON_DEPTH = 2
 private const val OCI_SCHEMA = 2
 private const val GADGET_REVISION = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 private const val PROFILER_REVISION = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-private const val PATCH_SHA256 = "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"
+private const val PATCH_SHA256 = "22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035"
 private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
 
 /** Local integrity/version admission. The operator supplies a trusted manifest and owns installation. */
@@ -30,17 +28,22 @@ internal data class HotSpotAssets private constructor(
     val image: String,
 ) {
     companion object {
-        fun load(directory: Path): HotSpotAssets = load(directory, null)
+        fun load(
+            directory: Path,
+            expectation: HotSpotCaptureExpectation = HotSpotCaptureExpectation.Strict,
+        ): HotSpotAssets = load(directory, null, JavaHotSpotAssetDigest, expectation)
 
         fun load(
             directory: Path,
             timings: HotSpotAssetTimings?,
-        ): HotSpotAssets = load(directory, timings, JavaHotSpotAssetDigest)
+            expectation: HotSpotCaptureExpectation = HotSpotCaptureExpectation.Strict,
+        ): HotSpotAssets = load(directory, timings, JavaHotSpotAssetDigest, expectation)
 
         fun load(
             directory: Path,
             timings: HotSpotAssetTimings?,
             digest: HotSpotAssetDigest,
+            expectation: HotSpotCaptureExpectation = HotSpotCaptureExpectation.Strict,
         ): HotSpotAssets {
             val root = directory.toAbsolutePath().normalize()
             val manifest = measuredAssetPhase(timings, "manifest") {
@@ -50,7 +53,7 @@ internal data class HotSpotAssets private constructor(
             val text = bytes.toString(Charsets.UTF_8)
             checkAssetJsonDepth(text, MAX_MANIFEST_JSON_DEPTH)
             val manifest = Json.decodeFromString<HotSpotAssetManifest>(text)
-            manifest.validate()
+            manifest.validate(expectation)
                 manifest
             }
             measuredAssetPhase(timings, "checksums") {
@@ -92,9 +95,9 @@ private data class HotSpotAssetManifest(
     @SerialName("gadget_digest") val gadgetDigest: String,
     val files: Map<String, String>,
 ) {
-    fun validate() {
-        require(schemaVersion == ASSET_SCHEMA && collectorVersion == COLLECTOR_VERSION) { "Unsupported HotSpot asset version" }
-        require(captureAbi == CAPTURE_ABI && wireSchema == WIRE_SCHEMA) { "Unsupported HotSpot asset ABI/schema" }
+    fun validate(expectation: HotSpotCaptureExpectation) {
+        require(schemaVersion == ASSET_SCHEMA && collectorVersion == expectation.schema.toString()) { "Unsupported HotSpot asset version" }
+        require(captureAbi == CAPTURE_ABI && wireSchema.toULong() == expectation.schema) { "Unsupported HotSpot asset ABI/schema" }
         require(platform == "linux-amd64") { "Unsupported HotSpot asset platform" }
         require(gadgetRevision == GADGET_REVISION && profilerRevision == PROFILER_REVISION && patchSha256 == PATCH_SHA256) { "Unsupported HotSpot engine provenance" }
         require(gadgetDigest.startsWith("sha256:") && SHA256_PATTERN.matches(gadgetDigest.removePrefix("sha256:"))) { "Invalid gadget digest" }

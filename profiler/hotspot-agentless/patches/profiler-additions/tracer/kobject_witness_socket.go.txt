@@ -1,0 +1,603 @@
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unsafe"
+
+	"github.com/mdlayher/kobject"
+	"golang.org/x/sys/unix"
+)
+
+func kwSocketContextError(ctx context.Context) error {
+	if ctx == nil { return errors.New("nil socket context") }
+	if err := ctx.Err(); err != nil { return err }
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) { return context.DeadlineExceeded }
+	return nil
+}
+
+type kwSocketCalls struct {
+	socket func(int, int, int) (int, error)
+	close func(int) error
+	bind func(int, unix.Sockaddr) error
+	getsockname func(int) (unix.Sockaddr, error)
+	getsockoptUint64 func(int, int, int) (uint64, uint32, error)
+	getsockoptInt func(int, int, int) (int32, uint32, error)
+	setsockoptInt func(int, int, int, int) error
+	recvmsg func(int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error)
+	poll func([]unix.PollFd, int) (int, error)
+}
+
+// The public uint64 helper discards the kernel's returned option length.
+func kwGetsockoptUint64(fd, level, option int) (uint64, uint32, error) {
+	var value uint64
+	length := uint32(8)
+	_, _, errno := unix.Syscall6(unix.SYS_GETSOCKOPT, uintptr(fd), uintptr(level), uintptr(option), uintptr(unsafe.Pointer(&value)), uintptr(unsafe.Pointer(&length)), 0)
+	runtime.KeepAlive(&value)
+	runtime.KeepAlive(&length)
+	if errno != 0 { return 0, length, fmt.Errorf("getsockopt uint64: %w", errno) }
+	return value, length, nil
+}
+
+// The int helper also discards the returned length; retain the C int width.
+func kwGetsockoptInt(fd, level, option int) (int32, uint32, error) {
+	var value int32
+	length := uint32(4)
+	_, _, errno := unix.Syscall6(unix.SYS_GETSOCKOPT, uintptr(fd), uintptr(level), uintptr(option), uintptr(unsafe.Pointer(&value)), uintptr(unsafe.Pointer(&length)), 0)
+	runtime.KeepAlive(&value)
+	runtime.KeepAlive(&length)
+	if errno != 0 { return 0, length, fmt.Errorf("getsockopt int: %w", errno) }
+	return value, length, nil
+}
+
+type kwSocketPhase uint8
+
+const (
+	kwSocketUnjoined kwSocketPhase = iota
+	kwSocketJoined
+	kwSocketCut
+	kwSocketQuarantined
+	kwSocketRetired
+)
+
+type kwUnjoinedSocket struct {
+	mu sync.Mutex
+	fd int
+	facts kobjectSocketBinding
+	closeFD func(int) error
+	setsockoptInt func(int, int, int, int) error
+	recvmsg func(int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error)
+	poll func([]unix.PollFd, int) (int, error)
+	phase kwSocketPhase
+	joinReturn kwActualReturn
+	cutReturn kwActualReturn
+	closed bool
+	closeErr error
+	readErr error
+	readerOwned bool
+	reader *kwSocketReader
+}
+
+func kwGuardAcquisitionCalls(raw kwSocketCalls, eligible func() error) kwSocketCalls {
+	check := func() error { if eligible == nil { return errors.New("missing acquisition eligibility") }; return eligible() }
+	calls := raw
+	if raw.socket != nil { calls.socket = func(a,b,c int)(int,error) {
+		if err := check(); err != nil { return -1,err }; fd,err := raw.socket(a,b,c); return fd,errors.Join(err,check())
+	} }
+	if raw.bind != nil { calls.bind = func(fd int, addr unix.Sockaddr) error {
+		if err := check(); err != nil { return err }; err := raw.bind(fd,addr); return errors.Join(err,check())
+	} }
+	if raw.getsockname != nil { calls.getsockname = func(fd int)(unix.Sockaddr,error) {
+		if err := check(); err != nil { return nil,err }; addr,err := raw.getsockname(fd); return addr,errors.Join(err,check())
+	} }
+	if raw.getsockoptUint64 != nil { calls.getsockoptUint64 = func(fd,level,opt int)(uint64,uint32,error) {
+		if err := check(); err != nil { return 0,0,err }; value,n,err := raw.getsockoptUint64(fd,level,opt); return value,n,errors.Join(err,check())
+	} }
+	if raw.getsockoptInt != nil { calls.getsockoptInt = func(fd,level,opt int)(int32,uint32,error) {
+		if err := check(); err != nil { return 0,0,err }; value,n,err := raw.getsockoptInt(fd,level,opt); return value,n,errors.Join(err,check())
+	} }
+	if raw.setsockoptInt != nil { calls.setsockoptInt = func(fd,level,opt,value int) error {
+		if err := check(); err != nil { return err }; err := raw.setsockoptInt(fd,level,opt,value); return errors.Join(err,check())
+	} }
+	return calls
+}
+
+func kwDefaultSocketCalls() kwSocketCalls {
+	return kwSocketCalls{socket: unix.Socket, close: unix.Close, bind: unix.Bind, getsockname: unix.Getsockname, getsockoptUint64: kwGetsockoptUint64, getsockoptInt: kwGetsockoptInt, setsockoptInt: unix.SetsockoptInt, recvmsg: unix.Recvmsg, poll: unix.Poll}
+}
+
+func acquireKobjectSocket(ctx context.Context, generation uint64) (*kwUnjoinedSocket, error) {
+	return acquireKobjectSocketWithCalls(ctx, generation, kwDefaultSocketCalls())
+}
+
+// The caller must retain the acquisition borrow until this function actually returns.
+func acquireKobjectSocketWithCalls(ctx context.Context, generation uint64, calls kwSocketCalls) (*kwUnjoinedSocket, error) {
+	if ctx == nil || generation == 0 || calls.socket == nil || calls.close == nil || calls.bind == nil || calls.getsockname == nil || calls.getsockoptUint64 == nil || calls.getsockoptInt == nil || calls.setsockoptInt == nil || calls.recvmsg == nil || calls.poll == nil {
+		return nil, errors.New("invalid kobject socket acquisition arguments")
+	}
+	step := func(call func() error) error {
+		if err := kwSocketContextError(ctx); err != nil { return err }
+		return errors.Join(call(), kwSocketContextError(ctx))
+	}
+	fd := -1
+	err := step(func() error { var err error; fd, err = calls.socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.NETLINK_KOBJECT_UEVENT); return err })
+	if fd < 0 {
+		if err == nil { err = errors.New("socket returned negative fd") }
+		return nil, err
+	}
+	s := &kwUnjoinedSocket{fd: fd, closeFD: calls.close, setsockoptInt: calls.setsockoptInt, recvmsg: calls.recvmsg, poll: calls.poll, phase: kwSocketUnjoined}
+	fail := func(err error) (*kwUnjoinedSocket, error) { return nil, errors.Join(err, ctx.Err(), s.close(), ctx.Err()) }
+	if err != nil { return fail(err) }
+	if err := step(func() error { return calls.setsockoptInt(fd, unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil { return fail(err) }
+	if err := step(func() error { return calls.bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}) }); err != nil { return fail(err) }
+	var name unix.Sockaddr
+	if err := step(func() error { var err error; name, err = calls.getsockname(fd); return err }); err != nil { return fail(err) }
+	addr, ok := name.(*unix.SockaddrNetlink)
+	if !ok || addr == nil || addr.Family != unix.AF_NETLINK || addr.Pid == 0 || addr.Groups != 0 { return fail(errors.New("invalid unjoined socket address")) }
+	var cookie uint64
+	var length uint32
+	if err := step(func() error { var err error; cookie, length, err = calls.getsockoptUint64(fd, unix.SOL_SOCKET, unix.SO_COOKIE); return err }); err != nil { return fail(err) }
+	if cookie == 0 || length != 8 { return fail(errors.New("invalid socket cookie")) }
+	var nsid int32
+	if err := step(func() error { var err error; nsid, length, err = calls.getsockoptInt(fd, unix.SOL_NETLINK, unix.NETLINK_LISTEN_ALL_NSID); return err }); err != nil { return fail(err) }
+	if length != 4 || nsid != 0 { return fail(errors.New("unsupported netlink NSID domain")) }
+	if err := kwSocketContextError(ctx); err != nil { return fail(err) }
+	s.facts = kobjectSocketBinding{cookie: cookie, portID: addr.Pid, generation: generation}
+	return s, nil
+}
+
+func (s *kwUnjoinedSocket) binding() (kobjectSocketBinding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readErr != nil { return kobjectSocketBinding{}, s.readErr }
+	if s.closed || (s.phase != kwSocketUnjoined && s.phase != kwSocketJoined && s.phase != kwSocketCut) { return kobjectSocketBinding{}, errors.New("socket unavailable") }
+	return s.facts, nil
+}
+
+// Membership calls may block; the owner must retain the fd borrow until actual return.
+func (s *kwUnjoinedSocket) restoreRuntimeCalls(raw kwSocketCalls) error {
+	s.mu.Lock(); defer s.mu.Unlock()
+	if s.closed || s.readerOwned || s.phase != kwSocketUnjoined || s.readErr != nil || s.facts.cookie == 0 || s.facts.portID == 0 || s.facts.generation == 0 || raw.close == nil || raw.setsockoptInt == nil || raw.recvmsg == nil || raw.poll == nil { return errors.New("invalid socket runtime restoration") }
+	s.setsockoptInt = raw.setsockoptInt; s.recvmsg = raw.recvmsg; s.poll = raw.poll
+	return nil
+}
+
+func (s *kwUnjoinedSocket) join(ctx context.Context) error {
+	return s.membership(ctx, kwSocketUnjoined, kwSocketJoined, unix.NETLINK_ADD_MEMBERSHIP, &s.joinReturn)
+}
+
+func (s *kwUnjoinedSocket) cut(ctx context.Context) error {
+	return s.membership(ctx, kwSocketJoined, kwSocketCut, unix.NETLINK_DROP_MEMBERSHIP, &s.cutReturn)
+}
+
+func (s *kwUnjoinedSocket) membership(ctx context.Context, from, to kwSocketPhase, option int, result *kwActualReturn) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readErr != nil { return s.readErr }
+	if s.closed || s.phase == kwSocketRetired { return errors.New("socket retired") }
+	if s.phase != from || ctx == nil || s.setsockoptInt == nil {
+		s.phase = kwSocketQuarantined
+		return errors.New("invalid socket membership state")
+	}
+	s.phase = kwSocketQuarantined
+	if err := kwSocketContextError(ctx); err != nil { return err }
+	if err := s.readerClockError(false); err != nil { return err }
+	if err := kwSocketContextError(ctx); err != nil { return err }
+	*result = kwReturnPending
+	err := s.setsockoptInt(s.fd, unix.SOL_NETLINK, option, 1)
+	if err != nil {
+		*result = kwReturnFailed
+		return errors.Join(fmt.Errorf("socket membership: %w", err), kwSocketContextError(ctx), s.readerClockError(false))
+	}
+	*result = kwReturnSucceeded
+	if err := errors.Join(kwSocketContextError(ctx), s.readerClockError(false)); err != nil { return err }
+	s.phase = to
+	return nil
+}
+
+type kwReceiveOutcome uint8
+const (
+	kwReceiveNoDatagram kwReceiveOutcome = iota
+	kwReceiveDatagram
+	kwReceiveFailed
+)
+type kwRawReceive struct {
+	outcome kwReceiveOutcome
+	n, oobN, flags int
+	from unix.Sockaddr
+}
+
+// Called with the socket mutex held; close remains an independent cleanup result.
+func (s *kwUnjoinedSocket) quarantineRead(err error) error {
+	s.readErr = errors.Join(s.readErr, err)
+	s.phase = kwSocketQuarantined
+	return s.readErr
+}
+
+// The caller retains the borrow through actual return; only its reader accounts consumption.
+func (s *kwUnjoinedSocket) receive(ctx context.Context, raw, oob []byte) (kwRawReceive, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := kwRawReceive{outcome: kwReceiveFailed, n: -1}
+	if s.readErr != nil { return r, s.readErr }
+	if ctx == nil || len(raw) == 0 || len(oob) == 0 || s.recvmsg == nil || s.closed || (s.phase != kwSocketJoined && s.phase != kwSocketCut) { return r, errors.New("invalid receive state or buffers") }
+	if err := kwSocketContextError(ctx); err != nil { return r, s.quarantineRead(err) }
+	if err := s.readerClockError(true); err != nil { return r, s.quarantineRead(err) }
+	if err := kwSocketContextError(ctx); err != nil { return r, s.quarantineRead(err) }
+	n, oobN, flags, from, err := s.recvmsg(s.fd, raw, oob, 0)
+	r.n, r.oobN, r.flags = n, oobN, flags
+	// unix.Recvmsg may fail decoding the sender after a successful, consuming syscall.
+	if n >= 0 {
+		r.outcome = kwReceiveDatagram
+		var invalid error
+		if addr, ok := from.(*unix.SockaddrNetlink); ok && addr != nil { copy := *addr; r.from = &copy } else { invalid = errors.New("unknown datagram sender") }
+		if n > len(raw) || oobN < 0 || oobN > len(oob) { invalid = errors.Join(invalid, errors.New("invalid datagram lengths")) }
+		terminal := errors.Join(err, invalid, kwSocketContextError(ctx))
+		if terminal != nil { return r, s.quarantineRead(terminal) }
+		return r, nil
+	}
+	if err == nil { return r, s.quarantineRead(errors.Join(errors.New("negative receive length"), kwSocketContextError(ctx))) }
+	if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EINTR) { r.outcome = kwReceiveNoDatagram; if canceled := kwSocketContextError(ctx); canceled != nil { return r, s.quarantineRead(errors.Join(err, canceled)) }; return r, nil }
+	return r, s.quarantineRead(errors.Join(fmt.Errorf("recvmsg: %w", err), kwSocketContextError(ctx)))
+}
+
+// A poll timeout is not evidence that the selected source is complete.
+func (s *kwUnjoinedSocket) waitReadable(ctx context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readErr != nil { return false, s.readErr }
+	if ctx == nil || s.poll == nil || s.closed || (s.phase != kwSocketJoined && s.phase != kwSocketCut) || s.fd < 0 || uint64(s.fd) > uint64(1<<31-1) { return false, errors.New("invalid poll state") }
+	if err := kwSocketContextError(ctx); err != nil { return false, s.quarantineRead(err) }
+	timeout := 25
+	if deadline, ok := ctx.Deadline(); ok {
+		left := time.Until(deadline)
+		if left <= 0 { return false, s.quarantineRead(context.DeadlineExceeded) }
+		if left < 25*time.Millisecond { timeout = int((left + time.Millisecond - 1) / time.Millisecond) }
+	}
+	fds := []unix.PollFd{{Fd: int32(s.fd), Events: unix.POLLIN}}
+	if err := s.readerClockError(true); err != nil { return false, s.quarantineRead(err) }
+	if err := kwSocketContextError(ctx); err != nil { return false, s.quarantineRead(err) }
+	n, err := s.poll(fds, timeout)
+	if err != nil {
+		if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) { if canceled := kwSocketContextError(ctx); canceled != nil { return false, s.quarantineRead(errors.Join(err, canceled)) }; return false, nil }
+		return false, s.quarantineRead(errors.Join(fmt.Errorf("poll: %w", err), kwSocketContextError(ctx)))
+	}
+	if n < 0 || n > 1 || (n == 0 && fds[0].Revents != 0) || (n == 1 && fds[0].Revents != unix.POLLIN) {
+		return false, s.quarantineRead(errors.Join(errors.New("invalid poll result"), kwSocketContextError(ctx)))
+	}
+	if err := kwSocketContextError(ctx); err != nil { return false, s.quarantineRead(err) }
+	return n == 1, nil
+}
+
+// The future owner must not close while setup or another syscall borrows the fd.
+func (s *kwUnjoinedSocket) close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed { s.closed = true; s.phase = kwSocketRetired; s.closeErr = s.closeFD(s.fd) }
+	return s.closeErr
+}
+
+type kwReaderPhase uint8
+const (
+	kwReaderFresh kwReaderPhase = iota
+	kwReaderJoining
+	kwReaderJoined
+	kwReaderDraining
+	kwReaderQuarantined
+	kwReaderRetiring
+	kwReaderRetired
+)
+
+var errKobjectReaderDrained = io.EOF
+var errKobjectReaderPending = errors.New("kobject reader has pending work")
+
+type kwSocketReader struct {
+	mu sync.Mutex
+	transport *kwUnjoinedSocket
+	binding kobjectSocketBinding
+	startup, worker, readCtx context.Context
+	cancel context.CancelFunc
+	phase kwReaderPhase
+	err error
+	facts kwReaderFacts
+	progress chan struct{}
+	active, stopReads, drained, joinPending bool
+	cutDone chan struct{}
+	cutContext context.Context
+	cutErr, cutResult error
+	cutFinal bool
+	goalSet bool
+	goal uint64
+	drainSuccess bool
+	drainContext context.Context
+	cleanupErr error
+}
+
+var _ kobjectSocket = (*kwSocketReader)(nil)
+
+func newKobjectSocketReader(startupCtx, workerCtx context.Context, transport *kwUnjoinedSocket) (*kwSocketReader, error) {
+	if startupCtx == nil || workerCtx == nil || transport == nil { return nil, errors.New("invalid reader arguments") }
+	if err := errors.Join(kwSocketContextError(startupCtx), kwSocketContextError(workerCtx)); err != nil { return nil, err }
+	readCtx, cancel := context.WithCancel(workerCtx)
+	r := &kwSocketReader{transport: transport, startup: startupCtx, worker: workerCtx, readCtx: readCtx, cancel: cancel, progress: make(chan struct{})}
+	transport.mu.Lock()
+	valid := !transport.closed && !transport.readerOwned && transport.phase == kwSocketUnjoined && transport.readErr == nil && transport.facts.cookie != 0 && transport.facts.portID != 0 && transport.facts.generation != 0
+	facts := transport.facts
+	if valid { transport.readerOwned = true; transport.reader = r; r.binding = facts }
+	transport.mu.Unlock()
+	if !valid { cancel(); return nil, errors.New("invalid unjoined transport") }
+	return r, nil
+}
+
+// Called under the transport lock; no reader lock is held during native effects.
+func (s *kwUnjoinedSocket) readerClockError(read bool) error {
+	r := s.reader; if r == nil { return nil }
+	r.mu.Lock(); defer r.mu.Unlock()
+	err := errors.Join(r.err, kwSocketContextError(r.worker))
+	if read && r.drainContext != nil { err = errors.Join(err, kwSocketContextError(r.drainContext)) }
+	return err
+}
+
+func (r *kwSocketReader) signal() { close(r.progress); r.progress = make(chan struct{}) }
+func (r *kwSocketReader) poison(err error) error {
+	if err == nil { err = errors.New("reader failed") }
+	if r.err == nil || errors.Is(err, r.err) { r.err = err } else if !errors.Is(r.err, err) { r.err = errors.Join(r.err, err) }
+	if r.phase != kwReaderRetiring && r.phase != kwReaderRetired { r.phase = kwReaderQuarantined }
+	r.signal()
+	return r.err
+}
+func (r *kwSocketReader) readerFacts() (kwReaderFacts, error) { r.mu.Lock(); defer r.mu.Unlock(); return r.facts, r.err }
+
+func (r *kwSocketReader) Binding() (kobjectSocketBinding, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	if r.err != nil { return kobjectSocketBinding{}, r.err }
+	if err := kwSocketContextError(r.worker); err != nil { return kobjectSocketBinding{}, r.poison(err) }
+	if r.phase != kwReaderFresh && r.phase != kwReaderJoined && r.phase != kwReaderDraining { return kobjectSocketBinding{}, errors.New("reader unavailable") }
+	return r.binding, nil
+}
+
+func (r *kwSocketReader) Join() error {
+	r.mu.Lock()
+	if r.err != nil { defer r.mu.Unlock(); return r.err }
+	if r.phase != kwReaderFresh { err := r.poison(errors.New("invalid reader join")); r.mu.Unlock(); return err }
+	if err := errors.Join(kwSocketContextError(r.startup), kwSocketContextError(r.worker)); err != nil { err = r.poison(err); r.mu.Unlock(); return err }
+	r.phase = kwReaderJoining; r.joinPending = true
+	r.mu.Unlock()
+	err := kwSocketContextError(r.worker)
+	joined := err == nil
+	if joined { err = r.transport.join(r.startup) }
+	r.mu.Lock(); defer r.mu.Unlock()
+	r.joinPending = false; r.signal()
+	startupErr := kwSocketContextError(r.startup); if joined { r.startup = nil }
+	if err = errors.Join(err, startupErr, kwSocketContextError(r.worker)); err != nil { return r.poison(err) }
+	if r.err != nil { return r.err }
+	if r.stopReads { return r.poison(errors.New("reader retirement requested during join")) }
+	r.phase = kwReaderJoined; r.signal(); return nil
+}
+
+type kwReaderEOFError struct { cause error }
+func (e kwReaderEOFError) Error() string { return e.cause.Error() }
+func (e kwReaderEOFError) Is(target error) bool { return target != io.EOF && errors.Is(e.cause, target) }
+
+func (r *kwSocketReader) Receive() (event *kobject.Event, recvErr error) {
+	normalDrain := false
+	defer func(){ if recvErr != nil && !normalDrain && errors.Is(recvErr,io.EOF) { recvErr=kwReaderEOFError{cause:recvErr} } }()
+	r.mu.Lock()
+	if r.drainContext != nil { if err := kwSocketContextError(r.drainContext); err != nil { r.poison(err) } }
+	if r.err != nil { defer r.mu.Unlock(); return nil, r.err }
+	if r.phase != kwReaderJoined && r.phase != kwReaderDraining { r.mu.Unlock(); return nil, errors.New("reader not joined") }
+	if err := kwSocketContextError(r.worker); err != nil { err = r.poison(err); r.mu.Unlock(); return nil, err }
+	if r.active || r.facts.pending != 0 { r.mu.Unlock(); return nil, errKobjectReaderPending }
+	if r.stopReads { drained:=r.drained; r.mu.Unlock(); if drained { normalDrain=true; return nil,io.EOF }; return nil,errKobjectReaderPending }
+	r.active = true; r.signal(); r.mu.Unlock()
+	defer func(){ r.mu.Lock(); r.active = false; r.signal(); r.mu.Unlock() }()
+	raw, oob := make([]byte, 64*1024), make([]byte, unix.CmsgSpace(unix.SizeofUcred))
+	for {
+		r.mu.Lock()
+		if r.drainContext != nil { if err := kwSocketContextError(r.drainContext); err != nil { r.poison(err) } }
+		if r.err != nil { err:=r.err; r.mu.Unlock(); return nil,err }
+		if err:=kwSocketContextError(r.worker); err!=nil { err=r.poison(err); r.mu.Unlock(); return nil,err }
+		if r.stopReads { drained:=r.drained; r.mu.Unlock(); if drained { normalDrain=true; return nil,io.EOF }; return nil,errKobjectReaderPending }
+		r.mu.Unlock()
+		got, err := r.transport.receive(r.readCtx, raw, oob)
+		r.mu.Lock(); if r.drainContext != nil { err = errors.Join(err, kwSocketContextError(r.drainContext)) }; err = errors.Join(err, kwSocketContextError(r.worker)); r.mu.Unlock()
+		switch got.outcome {
+		case kwReceiveNoDatagram:
+			if err == nil {
+				r.mu.Lock(); if r.drainContext != nil { err = kwSocketContextError(r.drainContext) }; err = errors.Join(err, kwSocketContextError(r.worker)); r.mu.Unlock()
+				if err == nil {
+					_,err = r.transport.waitReadable(r.readCtx)
+					r.mu.Lock(); if r.drainContext != nil { err = errors.Join(err, kwSocketContextError(r.drainContext)) }; err = errors.Join(err, kwSocketContextError(r.worker)); r.mu.Unlock()
+				}
+			}
+			if err != nil { r.mu.Lock(); err=r.poison(err); r.mu.Unlock(); return nil,err }
+			continue
+		case kwReceiveFailed:
+			r.mu.Lock(); err=r.poison(err); r.mu.Unlock(); return nil,err
+		case kwReceiveDatagram:
+			r.mu.Lock()
+			if r.facts.consumed == ^uint64(0) { err=r.poison(errors.New("reader consumed overflow")); r.mu.Unlock(); return nil,err }
+			r.facts.consumed++; r.signal()
+			if r.drainContext != nil { if drainErr := kwSocketContextError(r.drainContext); drainErr != nil { r.poison(drainErr) } }
+			err = errors.Join(err, kwSocketContextError(r.worker))
+			if err == nil && (got.n < 0 || got.n > len(raw) || got.oobN < 0 || got.oobN > len(oob)) { err=errors.New("invalid receive lengths") }
+			if err == nil && r.err != nil { err=r.err }
+			if err == nil && r.goalSet && r.facts.consumed > r.goal { err=errors.New("reader exceeded drain goal") }
+			if err != nil { if r.facts.aborted == ^uint64(0) { err=r.poison(errors.Join(err,errors.New("reader aborted overflow"))); r.mu.Unlock(); return nil,err }; r.facts.aborted++; r.signal(); err=r.poison(err); r.mu.Unlock(); return nil,err }
+			event, _, decodeErr := decodeKobjectDatagram(raw[:got.n], got.from, got.flags, oob[:got.oobN])
+			if decodeErr != nil { if r.facts.rejected == ^uint64(0) { err=r.poison(errors.Join(decodeErr,errors.New("reader rejected overflow"))); r.mu.Unlock(); return nil,err }; r.facts.rejected++; r.signal(); err=r.poison(decodeErr); r.mu.Unlock(); return nil,err }
+			r.facts.pending=1; r.signal(); r.mu.Unlock(); return event,nil
+		default:
+			r.mu.Lock(); err=r.poison(errors.New("unknown receive outcome")); r.mu.Unlock(); return nil,err
+		}
+	}
+}
+
+func (r *kwSocketReader) Acknowledge(cause error) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	var drainErr error
+	if r.drainContext != nil { drainErr = kwSocketContextError(r.drainContext) }
+	if r.facts.pending != 1 { return r.poison(errors.Join(drainErr, cause, errors.New("invalid acknowledgement"))) }
+	terminal := errors.Join(drainErr, cause, r.err, kwSocketContextError(r.worker))
+	if cause != nil && r.facts.aborted == ^uint64(0) || cause == nil && r.facts.dispatched == ^uint64(0) { return r.poison(errors.Join(terminal,errors.New("reader acknowledgement overflow"))) }
+	r.facts.pending=0
+	if cause != nil { r.facts.aborted++ } else { r.facts.dispatched++ }
+	r.signal(); if terminal != nil { return r.poison(terminal) }; return nil
+}
+
+func kwSocketWait(progress <-chan struct{}, first, worker context.Context) {
+	var deadline time.Time
+	for _, ctx := range []context.Context{first, worker} {
+		if d, ok := ctx.Deadline(); ok && (deadline.IsZero() || d.Before(deadline)) { deadline = d }
+	}
+	var timer *time.Timer
+	var wake <-chan time.Time
+	if !deadline.IsZero() { timer = time.NewTimer(time.Until(deadline)); wake = timer.C; defer timer.Stop() }
+	select { case <-progress: case <-first.Done(): case <-worker.Done(): case <-wake: }
+}
+
+func (r *kwSocketReader) Cut(ctx context.Context) error {
+	r.mu.Lock()
+	if r.cutFinal { defer r.mu.Unlock(); return r.cutResult }
+	if r.cutDone == nil {
+		if r.err != nil { defer r.mu.Unlock(); return r.err }
+		if ctx == nil || r.phase != kwReaderJoined { err:=r.poison(errors.New("invalid reader cut")); r.mu.Unlock(); return err }
+		if err := errors.Join(kwSocketContextError(ctx), kwSocketContextError(r.worker)); err != nil { err = r.poison(err); r.mu.Unlock(); return err }
+		r.phase=kwReaderDraining; r.cutContext=ctx; r.cutDone=make(chan struct{}); done:=r.cutDone; r.signal()
+		go func(){ err:=kwSocketContextError(r.worker); if err==nil { err=r.transport.cut(ctx) }; r.mu.Lock(); r.cutErr=err; close(done); r.signal(); r.mu.Unlock() }()
+	}
+	done, first := r.cutDone, r.cutContext
+	r.mu.Unlock()
+	for {
+		kwSocketWait(done, first, r.worker)
+		r.mu.Lock()
+		if r.cutFinal { defer r.mu.Unlock(); return r.cutResult }
+		var actual error; returned := false
+		select { case <-done: actual=r.cutErr; returned=true; default: }
+		result:=errors.Join(actual,kwSocketContextError(first),kwSocketContextError(r.worker),r.err)
+		if result != nil { result=r.poison(result) }
+		if returned || result != nil { r.cutResult=result; r.cutFinal=true; r.signal(); r.mu.Unlock(); return result }
+		r.mu.Unlock()
+	}
+}
+
+func (r *kwSocketReader) DrainTo(ctx context.Context, goal uint64) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	if r.drainSuccess { if goal != r.goal { return errors.New("drain goal changed") }; return nil }
+	if r.drainContext != nil { if err := kwSocketContextError(r.drainContext); err != nil { r.poison(err) } }
+	if r.err != nil { return r.err }
+	if ctx == nil { return errors.New("nil drain context") }
+	if r.phase != kwReaderDraining || !r.cutFinal || r.cutResult != nil { return r.poison(errors.New("cut not complete")) }
+	if r.goalSet && r.goal != goal { return r.poison(errors.New("drain goal changed")) }
+	if !r.goalSet { r.goalSet=true; r.goal=goal; r.drainContext=ctx }
+	for {
+		if r.err != nil { return r.err }
+		if r.phase != kwReaderDraining { return errors.New("reader no longer draining") }
+		if err:=errors.Join(kwSocketContextError(r.drainContext),kwSocketContextError(r.worker)); err!=nil { return r.poison(err) }
+		if r.facts.consumed > goal { return r.poison(errors.New("reader exceeded drain goal")) }
+		if r.facts.consumed == goal && r.facts.pending == 0 {
+			if err:=errors.Join(kwSocketContextError(r.drainContext),kwSocketContextError(r.worker)); err!=nil { return r.poison(err) }
+			r.stopReads=true; r.drained=true; r.signal()
+			if !r.active { if err:=errors.Join(kwSocketContextError(r.drainContext),kwSocketContextError(r.worker)); err!=nil { return r.poison(err) }; r.drainSuccess=true; return nil }
+		}
+		progress:=r.progress; r.mu.Unlock()
+		kwSocketWait(progress, r.drainContext, r.worker)
+		r.mu.Lock()
+	}
+}
+
+func (r *kwSocketReader) Retire() error {
+	r.mu.Lock()
+	if r.phase == kwReaderRetired { defer r.mu.Unlock(); return r.cleanupErr }
+	r.cancel(); r.stopReads=true; r.signal()
+	if r.joinPending || r.phase == kwReaderRetiring || r.active || r.facts.pending != 0 { r.mu.Unlock(); return errKobjectReaderPending }
+	if r.cutDone != nil { select { case <-r.cutDone: default: r.mu.Unlock(); return errKobjectReaderPending } }
+	r.phase=kwReaderRetiring; r.mu.Unlock()
+	err:=r.transport.close()
+	r.mu.Lock(); defer r.mu.Unlock(); r.cleanupErr=err; r.phase=kwReaderRetired; r.signal(); return err
+}
+
+type kwDatagramMetadata struct {
+	senderPort uint32
+	groups     uint32
+	pid        int32
+	uid        uint32
+	gid        uint32
+}
+
+// The future receiver must enable SO_PASSCRED before joining and decode every consumed skb once.
+func decodeKobjectDatagram(raw []byte, from unix.Sockaddr, flags int, oob []byte) (*kobject.Event, kwDatagramMetadata, error) {
+	var meta kwDatagramMetadata
+	fail := func(reason string) (*kobject.Event, kwDatagramMetadata, error) {
+		return nil, kwDatagramMetadata{}, fmt.Errorf("invalid kobject datagram: %s", reason)
+	}
+	addr, ok := from.(*unix.SockaddrNetlink)
+	if !ok || addr == nil || addr.Family != unix.AF_NETLINK || addr.Pid != 0 || addr.Groups != 1 {
+		return fail("sender")
+	}
+	if flags & ^unix.MSG_EOR != 0 {
+		return fail("receive flags")
+	}
+	// ParseSocketControlMessage ignores a short trailing fragment; require exactly one complete cmsg.
+	if len(oob) != unix.CmsgLen(unix.SizeofUcred) && len(oob) != unix.CmsgSpace(unix.SizeofUcred) {
+		return fail("control length")
+	}
+	msgs, err := unix.ParseSocketControlMessage(oob)
+	if err != nil || len(msgs) != 1 || msgs[0].Header.Level != unix.SOL_SOCKET || msgs[0].Header.Type != unix.SCM_CREDENTIALS || len(msgs[0].Data) != unix.SizeofUcred {
+		return fail("control message")
+	}
+	cred, err := unix.ParseUnixCredentials(&msgs[0])
+	if err != nil || cred.Pid < 0 {
+		return fail("credentials")
+	}
+	// Kernel-mediated Relay preserves original userspace credentials; they are evidence, not authority.
+	meta = kwDatagramMetadata{senderPort: addr.Pid, groups: addr.Groups, pid: cred.Pid, uid: cred.Uid, gid: cred.Gid}
+	if len(raw) == 0 || raw[len(raw)-1] != 0 {
+		return fail("unterminated payload")
+	}
+	fields := strings.Split(string(raw[:len(raw)-1]), "\x00")
+	action, path, ok := strings.Cut(fields[0], "@")
+	if !ok || action == "" || path == "" || path[0] != '/' {
+		return fail("header")
+	}
+	values := make(map[string]string, len(fields)-1)
+	for _, field := range fields[1:] {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || key == "" {
+			return fail("environment field")
+		}
+		if _, exists := values[key]; exists {
+			return fail("duplicate environment key")
+		}
+		values[key] = value
+	}
+	if values["ACTION"] != action || values["DEVPATH"] != path || values["SUBSYSTEM"] == "" {
+		return fail("required fields")
+	}
+	seq := values["SEQNUM"]
+	if seq == "" {
+		return fail("sequence")
+	}
+	for i := range seq {
+		if seq[i] < '0' || seq[i] > '9' {
+			return fail("sequence")
+		}
+	}
+	n, err := strconv.ParseUint(seq, 10, 64)
+	if err != nil || n == 0 || n > uint64(^uint(0)>>1) {
+		return fail("unsupported sequence")
+	}
+	event := &kobject.Event{Action: kobject.Action(action), DevicePath: path, Subsystem: values["SUBSYSTEM"], Sequence: int(n), Values: values}
+	delete(values, "ACTION")
+	delete(values, "DEVPATH")
+	delete(values, "SUBSYSTEM")
+	delete(values, "SEQNUM")
+	return event, meta, nil
+}

@@ -4,16 +4,19 @@ package ebpf
 
 import (
 	"context"
+
 	cebpf "github.com/cilium/ebpf"
 	"go.opentelemetry.io/ebpf-profiler/internal/log"
 	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
 )
 
-func closeRejectedInner(ctx context.Context, inner *cebpf.Map) {
+func closeRejectedInner(ctx context.Context, inner *cebpf.Map) error {
 	if inner == nil {
-		return
+		return nil
 	}
-	if err := inner.Close(); err != nil && !periodiccaller.ReportOwnedError(ctx, err) {
+	err := inner.Close()
+	if err != nil && !periodiccaller.ReportOwnedError(ctx, err) {
 		log.Errorf("retire rejected async inner map: %v", err)
 	}
+	return err
 }

@@ -1,0 +1,45 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hotspot
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+)
+
+type deniedJITMaps struct{ bootstrapMaps }
+
+func (deniedJITMaps) UpdatePidInterpreterMapping(libpf.PID, lpm.Prefix, uint8, host.FileID, uint64) error {
+	return syscall.EPERM
+}
+
+func TestBootstrapJITMapErrorPreservesCause(t *testing.T) {
+	var vm hotspotVMData
+	v := &vm.vmStructs
+	v.CodeCache.Heap = 0x100
+	v.CodeHeap.Sizeof = 32
+	v.CodeHeap.Segmap = 16
+	v.VirtualSpace.HighBoundary = 8
+	mem := make([]byte, 0x500)
+	for addr, value := range map[int]uint64{0x100: 0x200, 0x200: 0x1000, 0x208: 0x2000, 0x210: 0x3000, 0x218: 0x4000} {
+		binary.LittleEndian.PutUint64(mem[addr:], value)
+	}
+	d := hotspotInstance{rm: remotememory.RemoteMemory{ReaderAt: bytes.NewReader(mem)}, prefixes: make(libpf.Set[lpm.Prefix]), d: &hotspotData{}}
+	if _, err := d.d.GetOrInit(func() (hotspotVMData, error) { return vm, nil }); err != nil {
+		t.Fatal(err)
+	}
+	d.epochTarget = libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	err := d.SynchronizeMappings(deniedJITMaps{}, nil, bootstrapProcess{}, nil)
+	if !errors.Is(err, syscall.EPERM) || d.mainMappingsInserted {
+		t.Fatalf("error=%v inserted=%t", err, d.mainMappingsInserted)
+	}
+}

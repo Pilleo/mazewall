@@ -1,0 +1,1050 @@
+//go:build mw_kernel && linux
+
+package tracer
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+const (
+	kwKernelNoHzPath      = "/sys/devices/system/cpu/nohz_full"
+	kwKernelUeventTarget  = "/sys/devices/virtual/mem/null/uevent"
+	kwKernelUeventPayload = "change\n"
+)
+
+func kwBudgetError(harnessCtx context.Context, scope *periodiccaller.OwnedScope, stopCtx context.Context) error {
+	if err := kwEpochScopeError(harnessCtx); err != nil {
+		return fmt.Errorf("harness context: %w", err)
+	}
+	if scope == nil {
+		return errors.New("missing owned scope")
+	}
+	if err := kwEpochScopeError(scope.Context()); err != nil {
+		return fmt.Errorf("scope context: %w", err)
+	}
+	if err := scope.Failure(); err != nil {
+		return fmt.Errorf("scope failure: %w", err)
+	}
+	if stopCtx != nil {
+		if err := kwEpochScopeError(stopCtx); err != nil {
+			return fmt.Errorf("original stop context: %w", err)
+		}
+	}
+	return nil
+}
+
+func kwCheckBudgets(t *testing.T, phase string, h *kwColdNativeHarness, stopCtx context.Context) {
+	t.Helper()
+	if h == nil {
+		t.Fatalf("[ACTUAL] %s: missing harness", phase)
+	}
+	if err := kwBudgetError(h.ctx, h.scope, stopCtx); err != nil {
+		t.Fatalf("[ACTUAL] %s: original budget/context ended before/during operation: %v", phase, err)
+	}
+}
+
+func kwCheckOnlyUnsupportedLeaves(err error) error {
+	if err == nil {
+		return errors.New("expected qualification-only Unsupported error, got nil")
+	}
+	var leaves int
+	var walk func(e error, depth int) error
+	walk = func(e error, depth int) error {
+		if e == nil {
+			return nil
+		}
+		if depth > 64 {
+			return fmt.Errorf("error unwrap depth exceeded at %T (%v)", e, e)
+		}
+		switch u := e.(type) {
+		case interface{ Unwrap() []error }:
+			children := u.Unwrap()
+			if len(children) == 0 {
+				return fmt.Errorf("unexpected empty multi-unwrap leaf %T: %v", e, e)
+			}
+			hasChild := false
+			for _, c := range children {
+				if c != nil {
+					hasChild = true
+					if bad := walk(c, depth+1); bad != nil {
+						return bad
+					}
+				}
+			}
+			if !hasChild {
+				return fmt.Errorf("unexpected nil-only multi-unwrap %T: %v", e, e)
+			}
+			return nil
+		case interface{ Unwrap() error }:
+			inner := u.Unwrap()
+			if inner == nil {
+				if !errors.Is(e, errors.ErrUnsupported) {
+					return fmt.Errorf("unexpected non-Unsupported leaf %T (%v)", e, e)
+				}
+				leaves++
+				return nil
+			}
+			return walk(inner, depth+1)
+		default:
+			if !errors.Is(e, errors.ErrUnsupported) {
+				return fmt.Errorf("unexpected non-Unsupported leaf %T (%v)", e, e)
+			}
+			leaves++
+			return nil
+		}
+	}
+	if bad := walk(err, 0); bad != nil {
+		return fmt.Errorf("%w (full error: %v)", bad, err)
+	}
+	if leaves == 0 {
+		return fmt.Errorf("no Unsupported leaves found in error: %v", err)
+	}
+	return nil
+}
+
+type kwColdNativeHarness struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	scope   *periodiccaller.OwnedScope
+	sock    *kwUnjoinedSocket
+	reader  *kwSocketReader
+	binding kobjectSocketBinding
+	kernel  *btf.Spec
+	objects *kwNativeObjects
+	epoch   *kwNativeEpoch
+}
+
+func kwAcquireColdNativeHarness(t *testing.T, timeout time.Duration) *kwColdNativeHarness {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	scope := periodiccaller.NewOwnedScope(ctx, nil)
+	h := &kwColdNativeHarness{ctx: ctx, cancel: cancel, scope: scope}
+
+	t.Cleanup(func() {
+		defer cancel()
+		if h.epoch != nil {
+			err := h.epoch.Retire()
+			var released bool
+			if h.objects != nil {
+				h.objects.mu.Lock()
+				released = h.objects.gate == nil && len(h.objects.maps) == 0 && len(h.objects.acquiredPrograms) == 0 && len(h.objects.acquiredProbes) == 0
+				h.objects.mu.Unlock()
+			}
+			if err != nil || !released {
+				t.Errorf("[ACTUAL] RETAINED NATIVE GRAPH (epoch.Retire): released=%t err=%v (leaving remainder for VM shutdown)", released, err)
+			}
+		} else if h.objects != nil {
+			err := h.objects.retire()
+			h.objects.mu.Lock()
+			released := h.objects.gate == nil && len(h.objects.maps) == 0 && len(h.objects.acquiredPrograms) == 0 && len(h.objects.acquiredProbes) == 0
+			h.objects.mu.Unlock()
+			if err != nil || !released {
+				t.Errorf("[ACTUAL] RETAINED NATIVE GRAPH (objects.retire): released=%t err=%v (leaving remainder for VM shutdown)", released, err)
+			}
+		}
+		if h.reader != nil {
+			if err := h.reader.Retire(); err != nil {
+				t.Errorf("[ACTUAL] RETAINED SOCKET READER (reader.Retire): %v", err)
+			}
+		} else if h.sock != nil {
+			if err := h.sock.close(); err != nil {
+				t.Errorf("[ACTUAL] RETAINED UNJOINED SOCKET (sock.close): %v", err)
+			}
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		if err := scope.Stop(stopCtx); err != nil {
+			t.Errorf("scope.Stop: %v", err)
+		}
+	})
+
+	lt := kwStartTestLifetime{}
+	if err := scope.BindLifetime(lt); err != nil {
+		t.Fatalf("scope.BindLifetime: %v", err)
+	}
+	t.Logf("[ACTUAL-PROVENANCE] synthetic test lifetime enrolled (session=%q tgid=%d birth=%d): no retained real-process identity or authority; factory activation/claim orchestration is bypassed in this component-only cold test",
+		lt.Session(), lt.HostTGID(), lt.Birth())
+	prepared, err := prepareKobjectWitness(ctx, scope)
+	if err != nil {
+		t.Fatalf("[ACTUAL] prepareKobjectWitness failed: %v", err)
+	}
+	if prepared == nil || prepared.phase != kwFactoryPrepared || prepared.spec == nil || prepared.binding.Generation == 0 {
+		t.Fatalf("[ACTUAL] prepareKobjectWitness returned invalid prepared witness: %+v", prepared)
+	}
+	// Extra cross-check that genuine embedded support ELF passes spec preparation.
+	if rawSpec, err := support.LoadCollectionSpec(); err != nil {
+		t.Fatalf("[ACTUAL] support.LoadCollectionSpec failed: %v", err)
+	} else if err := validateKobjectNativeSpec(rawSpec); err != nil {
+		t.Fatalf("[ACTUAL] validateKobjectNativeSpec failed on genuine ELF: %v", err)
+	}
+
+	sock, err := acquireKobjectSocket(ctx, prepared.binding.Generation)
+	if err != nil {
+		t.Fatalf("[ACTUAL] acquireKobjectSocket failed: %v", err)
+	}
+	h.sock = sock
+
+	reader, err := newKobjectSocketReader(ctx, scope.Context(), sock)
+	if err != nil {
+		t.Fatalf("[ACTUAL] newKobjectSocketReader failed: %v", err)
+	}
+	h.reader = reader
+
+	binding, err := reader.Binding()
+	if err != nil {
+		t.Fatalf("[ACTUAL] reader.Binding failed: %v", err)
+	}
+	h.binding = binding
+	t.Logf("[ACTUAL] socket binding: cookie=%d portID=%d generation=%d", binding.cookie, binding.portID, binding.generation)
+
+	kernel, err := btf.LoadKernelSpec()
+	if err != nil {
+		t.Fatalf("[ACTUAL] btf.LoadKernelSpec failed: %v", err)
+	}
+	h.kernel = kernel
+
+	objects, err := loadKobjectNativeObjects(ctx, prepared.spec, kernel, binding)
+	h.objects = objects
+	if err != nil {
+		var verr *cebpf.VerifierError
+		if errors.As(err, &verr) {
+			t.Logf("[ACTUAL] eBPF verifier full log (%d lines):\n%+v", len(verr.Log), verr)
+		}
+		t.Fatalf("[ACTUAL] loadKobjectNativeObjects failed: %v", err)
+	}
+	if objects == nil {
+		t.Fatal("[ACTUAL] loadKobjectNativeObjects returned nil objects without error")
+	}
+
+	if err := attachKobjectNativeObjects(ctx, objects, kernel); err != nil {
+		objects.mu.Lock()
+		for hook := kwHook(0); hook < kwHookCount; hook++ {
+			for dir := kwDirection(0); dir < kwDirectionCount; dir++ {
+				slot := objects.probes[hook][dir]
+				t.Logf("[ACTUAL-ATTACH-SLOT] hook=%d dir=%d baseProgID=%d hasEvent=%t hasLink=%t attachedProgID=%d classicLinkID=%d tracingLinkID=%d tracingBTFID=%d",
+					hook, dir, objects.baseline[hook][dir].id, slot.event != nil, slot.link != nil,
+					slot.program.id, slot.classic.id, slot.tracing.id, slot.tracing.targetBTFID)
+			}
+		}
+		objects.mu.Unlock()
+		t.Fatalf("[ACTUAL] attachKobjectNativeObjects (all 14 slots) failed: %v", err)
+	}
+
+	epoch, err := newKobjectNativeEpoch(ctx, scope.Context(), objects, binding)
+	if err != nil {
+		t.Fatalf("[ACTUAL] newKobjectNativeEpoch failed: %v", err)
+	}
+	h.epoch = epoch
+	return h
+}
+
+func kwAssertColdGateClosed(t *testing.T, o *kwNativeObjects) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.gate == nil {
+		t.Fatal("missing control gate")
+	}
+	o.gate.mu.Lock()
+	word := o.gate.sampleWordLocked()
+	history := o.gate.history
+	mapID := o.gate.mapID
+	o.gate.mu.Unlock()
+	if word != kwControlClosed || history != kwGateNeverOpened {
+		t.Fatalf("[ACTUAL] gate did not remain cold-closed: word=%#x history=%d mapID=%d", word, history, mapID)
+	}
+}
+
+func kwLogNativeIdentities(t *testing.T, tag string, o *kwNativeObjects, guards [kwHookCount][kwDirectionCount]kwHookGuard) {
+	t.Helper()
+	o.mu.Lock()
+	probes := o.probes
+	t.Logf("[%s] layout: gen=%d listenMask=%#x ptr=%d ulong=%d sock=%d nlk=%d bcast=%d",
+		tag, o.layout.generation, o.layout.listenMask, o.layout.pointerBytes, o.layout.ulongBytes,
+		o.layout.sockSize, o.layout.nlkSize, o.layout.bcastSize)
+	for _, m := range o.maps {
+		t.Logf("[%s] map=%q id=%d type=%d key=%d val=%d max=%d flags=%#x",
+			tag, m.name, m.info.id, m.info.mapType, m.info.keySize, m.info.valueSize, m.info.maxEntries, m.info.flags)
+	}
+	o.mu.Unlock()
+	for h := kwHook(0); h < kwHookCount; h++ {
+		for d := kwDirection(0); d < kwDirectionCount; d++ {
+			g := guards[h][d]
+			if h <= kwHookRelay {
+				t.Logf("[%s] classic[%d/%d]: avail=%d progID=%d progType=%d recMiss=%d linkID=%d perfType=%d addr=%#x missed=%d lifetime=%t recW=%d missW=%d policy=%d",
+					tag, h, d, g.availability, g.program.id, g.program.programType, g.program.recursionMisses,
+					g.link.id, g.link.perfType, g.link.address, g.link.missed,
+					g.lifetimeBound, g.recursionWidth, g.missWidth, g.missPolicy)
+			} else {
+				tracingLink := probes[h][d].tracing
+				t.Logf("[%s] tracing[%d/%d]: avail=%d progID=%d progType=%d recMiss=%d linkID=%d targetBTFID=%d attachType=%d lifetime=%t recW=%d missW=%d policy=%d",
+					tag, h, d, g.availability, g.program.id, g.program.programType, g.program.recursionMisses,
+					tracingLink.id, g.tracingAttachmentID, g.tracingAttachmentType,
+					g.lifetimeBound, g.recursionWidth, g.missWidth, g.missPolicy)
+			}
+		}
+	}
+}
+
+func kwAssertGuardsMetadataAndUnqualified(t *testing.T, o *kwNativeObjects, guards [kwHookCount][kwDirectionCount]kwHookGuard, err error) {
+	t.Helper()
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("[ACTUAL] readKobjectNativeGuards unexpectedly succeeded without ErrUnsupported: %v", err)
+	}
+	o.mu.Lock()
+	baselines := o.baseline
+	probes := o.probes
+	o.mu.Unlock()
+	for h := kwHook(0); h < kwHookCount; h++ {
+		for d := kwDirection(0); d < kwDirectionCount; d++ {
+			g := guards[h][d]
+			if g.availability != kwGuardAvailable {
+				t.Fatalf("[ACTUAL] guard[%d/%d] unavailable: avail=%d err=%v", h, d, g.availability, g.err)
+			}
+			if !errors.Is(g.err, errors.ErrUnsupported) {
+				t.Fatalf("[ACTUAL] guard[%d/%d] missing qualification error: %v", h, d, g.err)
+			}
+			if g.lifetimeBound || g.recursionWidth != 0 || g.missWidth != 0 || g.missPolicy != kwMissPolicyUnqualified {
+				t.Fatalf("[ACTUAL] guard[%d/%d] invented qualification: lifetime=%t recW=%d missW=%d policy=%d",
+					h, d, g.lifetimeBound, g.recursionWidth, g.missWidth, g.missPolicy)
+			}
+			if g.program.id == 0 || g.program.id != baselines[h][d].id {
+				t.Fatalf("[ACTUAL] guard[%d/%d] program ID mismatch: got=%d base=%d", h, d, g.program.id, baselines[h][d].id)
+			}
+			if h <= kwHookRelay {
+				if g.link.id == 0 || g.link.id != probes[h][d].classic.id || g.link.programID != g.program.id || g.link.address == 0 {
+					t.Fatalf("[ACTUAL] guard[%d/%d] classic link metadata invalid: got=%+v attach=%+v", h, d, g.link, probes[h][d].classic)
+				}
+			} else {
+				if probes[h][d].tracing.id == 0 || probes[h][d].tracing.programID != g.program.id ||
+					g.tracingAttachmentID == 0 || g.tracingAttachmentID != probes[h][d].tracing.targetBTFID || g.tracingAttachmentType != probes[h][d].tracing.attachType {
+					t.Fatalf("[ACTUAL] guard[%d/%d] tracing link metadata invalid: linkID=%d btf=%d type=%d attach=%+v",
+						h, d, probes[h][d].tracing.id, g.tracingAttachmentID, g.tracingAttachmentType, probes[h][d].tracing)
+				}
+			}
+		}
+	}
+}
+
+func TestKernelKobjectGlobalBarrierAdapter(t *testing.T) {
+	statInfo, statErr := os.Stat(kwKernelNoHzPath)
+	rawNoHz, nohzErr := os.ReadFile(kwKernelNoHzPath)
+	if statErr != nil {
+		t.Logf("[ACTUAL] stat %s: err=%v", kwKernelNoHzPath, statErr)
+	} else {
+		t.Logf("[ACTUAL] stat %s: mode=%v size=%d", kwKernelNoHzPath, statInfo.Mode(), statInfo.Size())
+	}
+	t.Logf("[ACTUAL] raw %s: err=%v len=%d text=%q hex=%x", kwKernelNoHzPath, nohzErr, len(rawNoHz), string(rawNoHz), rawNoHz)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	barrierErr := performKobjectGlobalBarrier(ctx)
+	t.Logf("[ACTUAL] performKobjectGlobalBarrier(finite_deadline): err=%v", barrierErr)
+
+	if nohzErr != nil {
+		if barrierErr == nil {
+			t.Fatalf("[ACTUAL] performKobjectGlobalBarrier succeeded despite nohz read error %v", nohzErr)
+		}
+		t.Fatalf("[ACTUAL] cannot read %s: read_err=%v barrier_err=%v", kwKernelNoHzPath, nohzErr, barrierErr)
+	}
+
+	active, parseErr := parseKobjectNoHz(rawNoHz)
+	if parseErr != nil {
+		if barrierErr == nil {
+			t.Fatalf("[ACTUAL] performKobjectGlobalBarrier silently accepted unparsed nohz %q (parseErr=%v)", string(rawNoHz), parseErr)
+		}
+		t.Fatalf("[ACTUAL] real parseKobjectNoHz / performKobjectGlobalBarrier rejected kernel %s representation %q (hex=%x): %v",
+			kwKernelNoHzPath, string(rawNoHz), rawNoHz, barrierErr)
+	}
+	if active {
+		if barrierErr == nil {
+			t.Fatalf("[ACTUAL] performKobjectGlobalBarrier succeeded while nohz_full %q is active", string(rawNoHz))
+		}
+		t.Fatalf("[ACTUAL] nohz_full is active (%q), real barrier rejected as expected: %v", string(rawNoHz), barrierErr)
+	}
+	if barrierErr != nil {
+		t.Fatalf("[ACTUAL] performKobjectGlobalBarrier failed on inactive nohz_full %q: %v", string(rawNoHz), barrierErr)
+	}
+}
+
+func TestKernelKobjectWitnessColdNativeComponents(t *testing.T) {
+	h := kwAcquireColdNativeHarness(t, 30*time.Second)
+	kwAssertColdGateClosed(t, h.objects)
+
+	kwCheckBudgets(t, "before-readKobjectBinding", h, nil)
+	wire, err := readKobjectBinding(h.objects)
+	kwCheckBudgets(t, "after-readKobjectBinding", h, nil)
+	if err != nil {
+		t.Fatalf("[ACTUAL] readKobjectBinding failed: %v", err)
+	}
+	if wire.cookie != h.binding.cookie || wire.portID != uint64(h.binding.portID) ||
+		wire.generation != h.binding.generation || wire.listenMask != h.objects.layout.listenMask || wire.abiVersion != kwBindingABIVersion {
+		t.Fatalf("[ACTUAL] kw_binding wire mismatch: got=%+v wantCookie=%d wantPort=%d wantGen=%d wantMask=%#x",
+			wire, h.binding.cookie, h.binding.portID, h.binding.generation, h.objects.layout.listenMask)
+	}
+
+	kwCheckBudgets(t, "before-early-checkKobjectContextsEmpty", h, nil)
+	err = checkKobjectContextsEmpty(h.objects)
+	kwCheckBudgets(t, "after-early-checkKobjectContextsEmpty", h, nil)
+	if err != nil {
+		t.Fatalf("[ACTUAL] checkKobjectContextsEmpty (early): %v", err)
+	}
+
+	kwCheckBudgets(t, "before-early-readKobjectCounts", h, nil)
+	earlyCounts, err := readKobjectCounts(h.objects)
+	kwCheckBudgets(t, "after-early-readKobjectCounts", h, nil)
+	if err != nil {
+		t.Fatalf("[ACTUAL] readKobjectCounts (early) failed: %v", err)
+	}
+	if err := validateKobjectCounters(earlyCounts); err != nil {
+		t.Fatalf("[ACTUAL] validateKobjectCounters (early) failed: %v", err)
+	}
+
+	kwCheckBudgets(t, "before-early-readKobjectNativeGuards", h, nil)
+	earlyGuards, earlyGuardErr := readKobjectNativeGuards(h.objects)
+	kwCheckBudgets(t, "after-early-readKobjectNativeGuards", h, nil)
+	kwAssertGuardsMetadataAndUnqualified(t, h.objects, earlyGuards, earlyGuardErr)
+	kwLogNativeIdentities(t, "ACTUAL-EARLY", h.objects, earlyGuards)
+	t.Logf("[ACTUAL-EARLY] counts: faults=%d firstError=%d rootStarted=%d rootReturned=%d classicEntries=%v",
+		earlyCounts.faults, earlyCounts.firstError, earlyCounts.rootStarted, earlyCounts.rootReturned, earlyCounts.classicEntries)
+
+	// Finite guest uevent stimulus while gate remains CLOSED.
+	kwCheckBudgets(t, "before-uevent-stimulus", h, nil)
+	f, err := os.OpenFile(kwKernelUeventTarget, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("[ACTUAL] open uevent stimulus target %s failed (EPERM/EACCES/ENOENT not ignored): %v", kwKernelUeventTarget, err)
+	}
+	n, writeErr := f.Write([]byte(kwKernelUeventPayload))
+	closeErr := f.Close()
+	kwCheckBudgets(t, "after-uevent-stimulus", h, nil)
+	if writeErr != nil || closeErr != nil || n != len(kwKernelUeventPayload) {
+		t.Fatalf("[ACTUAL] write %q to %s failed: n=%d writeErr=%v closeErr=%v",
+			kwKernelUeventPayload, kwKernelUeventTarget, n, writeErr, closeErr)
+	}
+	t.Logf("[ACTUAL] wrote %q (%d bytes) to %s", kwKernelUeventPayload, n, kwKernelUeventTarget)
+
+	kwAssertColdGateClosed(t, h.objects)
+	kwCheckBudgets(t, "before-post-checkKobjectContextsEmpty", h, nil)
+	err = checkKobjectContextsEmpty(h.objects)
+	kwCheckBudgets(t, "after-post-checkKobjectContextsEmpty", h, nil)
+	if err != nil {
+		t.Fatalf("[ACTUAL] checkKobjectContextsEmpty (post-stimulus): %v", err)
+	}
+
+	kwCheckBudgets(t, "before-post-readKobjectCounts", h, nil)
+	postCounts, err := readKobjectCounts(h.objects)
+	kwCheckBudgets(t, "after-post-readKobjectCounts", h, nil)
+	if err != nil {
+		t.Fatalf("[ACTUAL] readKobjectCounts (post-stimulus) failed: %v", err)
+	}
+	if err := validateKobjectCounters(postCounts); err != nil {
+		t.Fatalf("[ACTUAL] validateKobjectCounters (post-stimulus) failed: %v", err)
+	}
+	t.Logf("[ACTUAL-POST-STIMULUS] counts: faults=%d firstError=%d rootStarted=%d rootReturned=%d stages=%+v recipient=%+v classicEntries=%v deltas=%v",
+		postCounts.faults, postCounts.firstError, postCounts.rootStarted, postCounts.rootReturned,
+		postCounts.stages, postCounts.recipient, postCounts.classicEntries,
+		[kwStageCount]uint64{
+			postCounts.classicEntries[0] - earlyCounts.classicEntries[0],
+			postCounts.classicEntries[1] - earlyCounts.classicEntries[1],
+			postCounts.classicEntries[2] - earlyCounts.classicEntries[2],
+			postCounts.classicEntries[3] - earlyCounts.classicEntries[3],
+		})
+
+	if postCounts.classicEntries[kwEnv] <= earlyCounts.classicEntries[kwEnv] {
+		t.Fatalf("[ACTUAL] expected classicEntries[kwEnv] advancement after stimulus: early=%d post=%d (all=%v)",
+			earlyCounts.classicEntries[kwEnv], postCounts.classicEntries[kwEnv], postCounts.classicEntries)
+	}
+	if postCounts.faults != 0 || postCounts.firstError != 0 || postCounts.rootStarted != 0 || postCounts.rootReturned != 0 ||
+		postCounts.recipient != (kwRecipientFacts{}) || postCounts.stages != [kwStageCount]kwStageFacts{} {
+		t.Fatalf("[ACTUAL] admitted facts or faults changed while gate was CLOSED: %+v", postCounts)
+	}
+
+	// Exercise original production cold diagnostic readout sequence without relaxing state machine.
+	kwCheckBudgets(t, "before-CloseAdmission", h, nil)
+	if err := h.epoch.CloseAdmission(); err != nil {
+		t.Fatalf("[ACTUAL] CloseAdmission failed: %v", err)
+	}
+	kwCheckBudgets(t, "after-CloseAdmission", h, nil)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	kwCheckBudgets(t, "before-Settle", h, stopCtx)
+	if err := h.epoch.Settle(stopCtx); err != nil {
+		t.Fatalf("[ACTUAL] Settle failed: %v", err)
+	}
+	kwCheckBudgets(t, "after-Settle", h, stopCtx)
+
+	readout, readoutErr := h.epoch.Readout()
+	kwCheckBudgets(t, "after-Readout", h, stopCtx)
+	t.Logf("[ACTUAL-COLD-READOUT] err=%v barrier=%d binding=%+v faults=%d firstError=%d rootStarted=%d rootReturned=%d classicEntries=%v",
+		readoutErr, readout.barrier, readout.binding, readout.faults, readout.firstError, readout.rootStarted, readout.rootReturned, readout.classicEntries)
+	if !errors.Is(readoutErr, errors.ErrUnsupported) {
+		t.Fatalf("[ACTUAL] cold Readout did not preserve ErrUnsupported qualification rejection: %v", readoutErr)
+	}
+	if err := validateKobjectReadout(h.binding, kobjectWitnessReadout{binding: h.binding, native: readout}); !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("[ACTUAL] validateKobjectReadout failed to reject cold native readout: %v", err)
+	}
+
+	if readout.barrier == kwReturnSucceeded {
+		if readout.classicEntries[kwEnv] < postCounts.classicEntries[kwEnv] {
+			t.Fatalf("[ACTUAL-COLD-READOUT] later classicEntries[kwEnv] regressed: readout=%d post=%d",
+				readout.classicEntries[kwEnv], postCounts.classicEntries[kwEnv])
+		}
+		kwAssertGuardsMetadataAndUnqualified(t, h.objects, readout.guards, readoutErr)
+		kwLogNativeIdentities(t, "ACTUAL-READOUT-LATER", h.objects, readout.guards)
+		for hook := kwHook(0); hook < kwHookCount; hook++ {
+			for dir := kwDirection(0); dir < kwDirectionCount; dir++ {
+				if readout.guards[hook][dir].program.id != earlyGuards[hook][dir].program.id {
+					t.Fatalf("[ACTUAL-COLD-READOUT] program identity changed at %d/%d: early=%d later=%d",
+						hook, dir, earlyGuards[hook][dir].program.id, readout.guards[hook][dir].program.id)
+				}
+				if hook <= kwHookRelay && readout.guards[hook][dir].link.id != earlyGuards[hook][dir].link.id {
+					t.Fatalf("[ACTUAL-COLD-READOUT] classic link identity changed at %d/%d: early=%d later=%d",
+						hook, dir, earlyGuards[hook][dir].link.id, readout.guards[hook][dir].link.id)
+				}
+				if hook > kwHookRelay && readout.guards[hook][dir].tracingAttachmentID != earlyGuards[hook][dir].tracingAttachmentID {
+					t.Fatalf("[ACTUAL-COLD-READOUT] tracing target changed at %d/%d: early=%d later=%d",
+						hook, dir, earlyGuards[hook][dir].tracingAttachmentID, readout.guards[hook][dir].tracingAttachmentID)
+				}
+			}
+		}
+	} else {
+		// Distinguish actual attempted barrier failure (kwReturnFailed) from earlier Readout exits (e.g. kwReturnPending).
+		// Check harness, scope, and original stopCtx before and after each direct sampler; never create a new proof budget.
+		if readout.barrier == kwReturnFailed {
+			t.Logf("[LOWER-COMPONENT-EVIDENCE] complete Readout stopped at attempted global barrier rejection (barrier=%d err=%v); invoking shared production readKobjectCounts and readKobjectNativeGuards directly under original budgets",
+				readout.barrier, readoutErr)
+		} else {
+			t.Logf("[LOWER-COMPONENT-EVIDENCE] complete Readout exited early without attempted global barrier (barrier=%d err=%v); not claiming barrier rejection; invoking shared production lower samplers directly under original budgets",
+				readout.barrier, readoutErr)
+		}
+		for hook := kwHook(0); hook < kwHookCount; hook++ {
+			for dir := kwDirection(0); dir < kwDirectionCount; dir++ {
+				g := readout.guards[hook][dir]
+				if !errors.Is(g.err, errors.ErrUnsupported) || g.lifetimeBound || g.recursionWidth != 0 || g.missWidth != 0 || g.missPolicy != kwMissPolicyUnqualified {
+					t.Fatalf("[ACTUAL-COLD-READOUT] unqueried guard[%d/%d] leaked synthetic qualification: %+v", hook, dir, g)
+				}
+			}
+		}
+		kwCheckBudgets(t, "fallback-before-readKobjectCounts", h, stopCtx)
+		laterCounts, err := readKobjectCounts(h.objects)
+		kwCheckBudgets(t, "fallback-after-readKobjectCounts", h, stopCtx)
+		if err != nil {
+			t.Fatalf("[LOWER-COMPONENT-EVIDENCE] readKobjectCounts (later) failed: %v", err)
+		}
+		if err := validateKobjectCounters(laterCounts); err != nil {
+			t.Fatalf("[LOWER-COMPONENT-EVIDENCE] validateKobjectCounters (later) failed: %v", err)
+		}
+		kwCheckBudgets(t, "fallback-before-readKobjectNativeGuards", h, stopCtx)
+		laterGuards, laterGuardErr := readKobjectNativeGuards(h.objects)
+		kwCheckBudgets(t, "fallback-after-readKobjectNativeGuards", h, stopCtx)
+		kwAssertGuardsMetadataAndUnqualified(t, h.objects, laterGuards, laterGuardErr)
+		kwLogNativeIdentities(t, "LOWER-COMPONENT-LATER", h.objects, laterGuards)
+		if laterCounts.classicEntries[kwEnv] < postCounts.classicEntries[kwEnv] {
+			t.Fatalf("[LOWER-COMPONENT-EVIDENCE] later classicEntries[kwEnv] regressed: later=%d post=%d",
+				laterCounts.classicEntries[kwEnv], postCounts.classicEntries[kwEnv])
+		}
+		for hook := kwHook(0); hook < kwHookCount; hook++ {
+			for dir := kwDirection(0); dir < kwDirectionCount; dir++ {
+				if laterGuards[hook][dir].program.id != earlyGuards[hook][dir].program.id {
+					t.Fatalf("[LOWER-COMPONENT-EVIDENCE] program identity changed at %d/%d", hook, dir)
+				}
+				if hook <= kwHookRelay && laterGuards[hook][dir].link.id != earlyGuards[hook][dir].link.id {
+					t.Fatalf("[LOWER-COMPONENT-EVIDENCE] classic link identity changed at %d/%d", hook, dir)
+				}
+				if hook > kwHookRelay && laterGuards[hook][dir].tracingAttachmentID != earlyGuards[hook][dir].tracingAttachmentID {
+					t.Fatalf("[LOWER-COMPONENT-EVIDENCE] tracing target changed at %d/%d", hook, dir)
+				}
+			}
+		}
+	}
+	kwAssertColdGateClosed(t, h.objects)
+}
+
+func TestKernelKobjectWitnessColdOpenAndFenceFailClosed(t *testing.T) {
+	t.Run("Open_cold_never_opened_rejects", func(t *testing.T) {
+		h := kwAcquireColdNativeHarness(t, 30*time.Second)
+		kwCheckBudgets(t, "before-Open", h, nil)
+		err := h.epoch.Open(h.binding)
+		kwCheckBudgets(t, "after-Open", h, nil)
+		t.Logf("[ACTUAL] cold epoch.Open returned: %v", err)
+		if checkErr := kwCheckOnlyUnsupportedLeaves(err); checkErr != nil {
+			t.Fatalf("[ACTUAL] cold epoch.Open did not return Unsupported-only qualification rejection: %v", checkErr)
+		}
+		kwAssertColdGateClosed(t, h.objects)
+		h.epoch.mu.Lock()
+		phase := h.epoch.phase
+		h.epoch.mu.Unlock()
+		if phase != kwEpochQuarantined {
+			t.Fatalf("[ACTUAL] expected quarantined phase after failed Open, got: %d", phase)
+		}
+	})
+
+	t.Run("Fence_cold_settled_rejects", func(t *testing.T) {
+		h := kwAcquireColdNativeHarness(t, 30*time.Second)
+		kwCheckBudgets(t, "before-CloseAdmission", h, nil)
+		if err := h.epoch.CloseAdmission(); err != nil {
+			t.Fatalf("[ACTUAL] CloseAdmission failed: %v", err)
+		}
+		kwCheckBudgets(t, "after-CloseAdmission", h, nil)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		kwCheckBudgets(t, "before-Settle", h, stopCtx)
+		if err := h.epoch.Settle(stopCtx); err != nil {
+			t.Fatalf("[ACTUAL] Settle failed: %v", err)
+		}
+		kwCheckBudgets(t, "after-Settle", h, stopCtx)
+		err := h.epoch.Fence(stopCtx)
+		kwCheckBudgets(t, "after-Fence", h, stopCtx)
+		t.Logf("[ACTUAL] settled epoch.Fence returned: %v", err)
+		if checkErr := kwCheckOnlyUnsupportedLeaves(err); checkErr != nil {
+			t.Fatalf("[ACTUAL] settled epoch.Fence did not return Unsupported-only qualification rejection: %v", checkErr)
+		}
+		kwAssertColdGateClosed(t, h.objects)
+		h.epoch.mu.Lock()
+		phase := h.epoch.phase
+		h.epoch.mu.Unlock()
+		if phase != kwEpochQuarantined {
+			t.Fatalf("[ACTUAL] expected quarantined phase after failed Fence, got: %d", phase)
+		}
+	})
+}
+
+func TestKernelKobjectWitnessModelControls(t *testing.T) {
+	t.Run("held_call_blocks_retire_and_respects_cancel", func(t *testing.T) {
+		o, effects, binding := kwColdEpochFixture(t)
+		scope, cancelScope := context.WithCancel(context.Background())
+		defer cancelScope()
+		e, err := newKobjectNativeEpoch(context.Background(), scope, o, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kwLatchReadoutStop(t, e, o)
+		calls := kwReadoutModelCalls(o)
+		entered, release := make(chan struct{}), make(chan struct{})
+		origMapElem := calls.mapElem
+		var once sync.Once
+		calls.mapElem = func(cmd uintptr, attr *kwMapElemAttr, key, out []byte) syscall.Errno {
+			once.Do(func() { close(entered) })
+			<-release
+			return origMapElem(cmd, attr, key, out)
+		}
+		programQueries := 0
+		origProgram := calls.program
+		calls.program = func(fd int64) (kwProgramInfo, error) {
+			programQueries++
+			return origProgram(fd)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, rErr := e.readoutWithCalls(calls)
+			done <- rErr
+		}()
+		<-entered
+		released := false
+		defer func() {
+			if !released {
+				close(release)
+				<-done
+			}
+		}()
+
+		if rErr := e.Retire(); rErr == nil || len(effects.objects.closed) != 0 || o.gate == nil {
+			t.Fatalf("[MODEL-CONTROL] retired objects while readout call was held: err=%v closed=%d", rErr, len(effects.objects.closed))
+		}
+		cancelScope()
+		close(release)
+		released = true
+		readoutErr := <-done
+		if !errors.Is(readoutErr, context.Canceled) || programQueries != 0 {
+			t.Fatalf("[MODEL-CONTROL] expected Canceled without later program queries: err=%v programQueries=%d", readoutErr, programQueries)
+		}
+		if rErr := e.Retire(); rErr != nil {
+			t.Fatalf("[MODEL-CONTROL] cold retire after call release failed: %v", rErr)
+		}
+	})
+
+	t.Run("missing_guard_rejects", func(t *testing.T) {
+		o, _, binding := kwColdEpochFixture(t)
+		o.probes[kwHookEnv][kwExit].link = nil
+		base := kwReadoutModelCalls(o)
+		guards, err := readKobjectNativeGuardsWithCalls(o, base.program, base.classic, base.tracing)
+		if !errors.Is(err, errors.ErrUnsupported) || guards[kwHookEnv][kwExit].availability != kwGuardMissing {
+			t.Fatalf("[MODEL-CONTROL] expected missing guard ErrUnsupported: avail=%d err=%v", guards[kwHookEnv][kwExit].availability, err)
+		}
+		readout := kobjectWitnessReadout{
+			binding:     binding,
+			native:      kobjectNativeReadout{binding: binding, barrier: kwReturnSucceeded, guards: guards},
+			cut:         kwReturnSucceeded,
+			fence:       kwReturnSucceeded,
+			workerFlush: kwReturnSucceeded,
+		}
+		if vErr := validateKobjectReadout(binding, readout); !errors.Is(vErr, errors.ErrUnsupported) {
+			t.Fatalf("[MODEL-CONTROL] validateKobjectReadout failed to reject missing guard: %v", vErr)
+		}
+	})
+
+	t.Run("failed_fence_rejects", func(t *testing.T) {
+		o, _, binding := kwColdEpochFixture(t)
+		e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kwLatchReadoutStop(t, e, o)
+		if fErr := e.Fence(e.firstStop); !errors.Is(fErr, errors.ErrUnsupported) {
+			t.Fatalf("[MODEL-CONTROL] expected Fence ErrUnsupported: %v", fErr)
+		}
+		readout := kwBoundedModelReadout(binding)
+		readout.fence = kwReturnFailed
+		if vErr := validateKobjectReadout(binding, readout); vErr == nil || !strings.Contains(vErr.Error(), "not returned successfully") {
+			t.Fatalf("[MODEL-CONTROL] expected failed fence rejection, got: %v", vErr)
+		}
+		if rErr := e.Retire(); rErr != nil {
+			t.Fatalf("[MODEL-CONTROL] retire failed: %v", rErr)
+		}
+	})
+
+	t.Run("open_and_fence_reject_unexpected_joined_errors", func(t *testing.T) {
+		if err := kwCheckOnlyUnsupportedLeaves(fmt.Errorf("wrapped: %w", errors.ErrUnsupported)); err != nil {
+			t.Fatalf("[MODEL-CONTROL] valid Unsupported leaf rejected: %v", err)
+		}
+		for _, tc := range []struct {
+			name string
+			leaf error
+		}{
+			{"EPERM", syscall.EPERM},
+			{"EACCES", syscall.EACCES},
+			{"EIO", syscall.EIO},
+			{"deadline", context.DeadlineExceeded},
+			{"identity", errors.New("native open binding mismatch")},
+		} {
+			joined := errors.Join(fmt.Errorf("qual: %w", errors.ErrUnsupported), tc.leaf)
+			checkErr := kwCheckOnlyUnsupportedLeaves(joined)
+			if checkErr == nil || !strings.Contains(checkErr.Error(), tc.leaf.Error()) {
+				t.Fatalf("[MODEL-CONTROL] expected %s rejection preserving original message: checkErr=%v", tc.name, checkErr)
+			}
+		}
+
+		for _, errno := range []syscall.Errno{syscall.EPERM, syscall.EACCES, syscall.EIO} {
+			o, _, binding := kwColdEpochFixture(t)
+			e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := kwReadoutModelCalls(o)
+			calls.mapElem = func(uintptr, *kwMapElemAttr, []byte, []byte) syscall.Errno { return errno }
+			openErr := e.openWithCalls(binding, calls)
+			checkErr := kwCheckOnlyUnsupportedLeaves(openErr)
+			if !errors.Is(openErr, errors.ErrUnsupported) || checkErr == nil || !strings.Contains(checkErr.Error(), errno.Error()) {
+				t.Fatalf("[MODEL-CONTROL] expected Open+Unsupported with %v to reject cleanly: openErr=%v checkErr=%v", errno, openErr, checkErr)
+			}
+			if rErr := e.Retire(); rErr != nil {
+				t.Fatalf("[MODEL-CONTROL] retire after failed Open(%v): %v", errno, rErr)
+			}
+		}
+
+		{
+			o, _, binding := kwColdEpochFixture(t)
+			expiredStartup := kwSilentExpiredDeadline{context.Background()}
+			e, err := newKobjectNativeEpoch(expiredStartup, context.Background(), o, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			openErr := e.openWithCalls(binding, kwReadoutModelCalls(o))
+			checkErr := kwCheckOnlyUnsupportedLeaves(openErr)
+			if !errors.Is(openErr, errors.ErrUnsupported) || checkErr == nil || !strings.Contains(checkErr.Error(), context.DeadlineExceeded.Error()) {
+				t.Fatalf("[MODEL-CONTROL] expected Open+Unsupported with deadline error to reject: openErr=%v checkErr=%v", openErr, checkErr)
+			}
+			if rErr := e.Retire(); rErr != nil {
+				t.Fatalf("[MODEL-CONTROL] retire after expired Open: %v", rErr)
+			}
+		}
+
+		{
+			o, _, binding := kwColdEpochFixture(t)
+			e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrongBinding := binding
+			wrongBinding.generation++
+			openErr := e.openWithCalls(wrongBinding, kwReadoutModelCalls(o))
+			checkErr := kwCheckOnlyUnsupportedLeaves(openErr)
+			if !errors.Is(openErr, errors.ErrUnsupported) || checkErr == nil || !strings.Contains(checkErr.Error(), "native open binding mismatch") {
+				t.Fatalf("[MODEL-CONTROL] expected Open+Unsupported with identity mismatch to reject: openErr=%v checkErr=%v", openErr, checkErr)
+			}
+			if rErr := e.Retire(); rErr != nil {
+				t.Fatalf("[MODEL-CONTROL] retire after mismatched Open: %v", rErr)
+			}
+		}
+
+		{
+			o, _, binding := kwColdEpochFixture(t)
+			e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kwLatchReadoutStop(t, e, o)
+			wrongCtx, cancelWrong := context.WithCancel(context.Background())
+			defer cancelWrong()
+			fenceErr := e.Fence(wrongCtx)
+			checkErr := kwCheckOnlyUnsupportedLeaves(fenceErr)
+			if !errors.Is(fenceErr, errors.ErrUnsupported) || checkErr == nil || !strings.Contains(checkErr.Error(), "native fence requires original first-stop context") {
+				t.Fatalf("[MODEL-CONTROL] expected Fence+Unsupported with context mismatch to reject: fenceErr=%v checkErr=%v", fenceErr, checkErr)
+			}
+			if rErr := e.Retire(); rErr != nil {
+				t.Fatalf("[MODEL-CONTROL] retire after mismatched Fence: %v", rErr)
+			}
+		}
+
+		{
+			o, _, binding := kwColdEpochFixture(t)
+			e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kwLatchReadoutStop(t, e, o)
+			e.mu.Lock()
+			e.stopDeadline = time.Unix(1, 0)
+			e.stopHasDeadline = true
+			e.mu.Unlock()
+			fenceErr := e.Fence(e.firstStop)
+			checkErr := kwCheckOnlyUnsupportedLeaves(fenceErr)
+			if !errors.Is(fenceErr, errors.ErrUnsupported) || checkErr == nil || !strings.Contains(checkErr.Error(), context.DeadlineExceeded.Error()) {
+				t.Fatalf("[MODEL-CONTROL] expected Fence+Unsupported with deadline error to reject: fenceErr=%v checkErr=%v", fenceErr, checkErr)
+			}
+			if rErr := e.Retire(); rErr != nil {
+				t.Fatalf("[MODEL-CONTROL] retire after expired Fence: %v", rErr)
+			}
+		}
+	})
+
+	t.Run("expired_deadline_blocks_effects", func(t *testing.T) {
+		expired := kwSilentExpiredDeadline{context.Background()}
+		calls := 0
+		err := performKobjectGlobalBarrierWithCalls(expired,
+			func() ([]byte, error) { calls++; return nil, nil },
+			func(int, int, int) (int64, error) { calls++; return 0, nil })
+		if !errors.Is(err, context.DeadlineExceeded) || calls != 0 {
+			t.Fatalf("[MODEL-CONTROL] expired deadline did not block barrier effects: calls=%d err=%v", calls, err)
+		}
+
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+		defer scope.Stop(context.Background())
+		if bErr := kwBudgetError(expired, scope, nil); !errors.Is(bErr, context.DeadlineExceeded) {
+			t.Fatalf("[MODEL-CONTROL] expired harness deadline was not rejected by kwBudgetError: %v", bErr)
+		}
+		if bErr := kwBudgetError(context.Background(), scope, expired); !errors.Is(bErr, context.DeadlineExceeded) {
+			t.Fatalf("[MODEL-CONTROL] expired stopCtx deadline was not rejected by kwBudgetError: %v", bErr)
+		}
+
+		o, _, binding := kwColdEpochFixture(t)
+		e, err := newKobjectNativeEpoch(context.Background(), context.Background(), o, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.CloseAdmission(); err != nil {
+			t.Fatal(err)
+		}
+		base := kwReadoutModelCalls(o)
+		settleCalls := kwEpochSettleCalls{mapInfo: base.mapInfo, mapElem: base.mapElem, wait: func(context.Context, context.Context) error { return nil }}
+		if err := e.settleWithCalls(expired, settleCalls); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("[MODEL-CONTROL] expected DeadlineExceeded on expired settle: %v", err)
+		}
+		if rErr := e.Retire(); rErr != nil {
+			t.Fatalf("[MODEL-CONTROL] retire failed: %v", rErr)
+		}
+	})
+}
+
+func kwInventoryFuncProto(fn *btf.Func) string {
+	if fn == nil || fn.Type == nil {
+		return "<nil>"
+	}
+	fp, ok := btf.UnderlyingType(fn.Type).(*btf.FuncProto)
+	if !ok || fp == nil {
+		return fmt.Sprintf("%2v", fn.Type)
+	}
+	params := make([]string, len(fp.Params))
+	for i, p := range fp.Params {
+		name := p.Name
+		if name == "" {
+			name = "_"
+		}
+		params[i] = fmt.Sprintf("%s: %2v", name, p.Type)
+	}
+	return fmt.Sprintf("(%s) -> %2v", strings.Join(params, ", "), fp.Return)
+}
+
+func TestKernelKobjectTargetInventory(t *testing.T) {
+	t.Log("[ACTUAL-INVENTORY-SCOPE] COMPONENT read-only vmlinux BTF + /proc/kallsyms inventory only; no BPF program load, hook attachment, or capability/qualification claim; missing targets are diagnostic observations, not capability PASS")
+
+	kernel, err := btf.LoadKernelSpec()
+	if err != nil {
+		t.Fatalf("[ACTUAL-INVENTORY] btf.LoadKernelSpec failed: %v", err)
+	}
+	if kernel == nil {
+		t.Fatal("[ACTUAL-INVENTORY] btf.LoadKernelSpec returned nil spec")
+	}
+
+	targets := [...]struct {
+		name string
+		kind string
+	}{
+		{"kobject_uevent_env", "classic"},
+		{"kobject_uevent_net_broadcast", "classic"},
+		{"alloc_uevent_skb", "classic"},
+		{"uevent_net_rcv_skb", "classic"},
+		{"do_one_broadcast", "tracing"},
+		{"__netlink_sendskb", "tracing"},
+		{"netlink_overrun", "tracing"},
+	}
+
+	for _, target := range targets {
+		var fn *btf.Func
+		typeErr := kernel.TypeByName(target.name, &fn)
+		if typeErr != nil {
+			t.Logf("[ACTUAL-INVENTORY-BTF-EXACT] target=%s kind=%s err=%v errNotFound=%t errMultiple=%t",
+				target.name, target.kind, typeErr, errors.Is(typeErr, btf.ErrNotFound), errors.Is(typeErr, btf.ErrMultipleMatches))
+			continue
+		}
+		if fn == nil {
+			t.Logf("[ACTUAL-INVENTORY-BTF-EXACT] target=%s kind=%s err=<nil> fn=<nil>", target.name, target.kind)
+			continue
+		}
+		id, idErr := kernel.TypeID(fn)
+		t.Logf("[ACTUAL-INVENTORY-BTF-EXACT] target=%s kind=%s err=<nil> typeID=%d idErr=%v linkage=%s proto=%s",
+			target.name, target.kind, id, idErr, fn.Linkage.String(), kwInventoryFuncProto(fn))
+	}
+
+	type btfFuncEntry struct {
+		name    string
+		id      btf.TypeID
+		idErr   error
+		linkage string
+		proto   string
+	}
+	btfMatches := make(map[string][]btfFuncEntry, len(targets))
+	totalBTFFuncs := 0
+	for typ, iterErr := range kernel.All() {
+		if iterErr != nil {
+			t.Fatalf("[ACTUAL-INVENTORY] kernel.All BTF iteration failed: %v", iterErr)
+		}
+		fn, ok := typ.(*btf.Func)
+		if !ok || fn == nil {
+			continue
+		}
+		totalBTFFuncs++
+		var matched []string
+		for _, target := range targets {
+			if strings.Contains(fn.Name, target.name) {
+				matched = append(matched, target.name)
+			}
+		}
+		if len(matched) == 0 {
+			continue
+		}
+		id, idErr := kernel.TypeID(fn)
+		entry := btfFuncEntry{
+			name:    fn.Name,
+			id:      id,
+			idErr:   idErr,
+			linkage: fn.Linkage.String(),
+			proto:   kwInventoryFuncProto(fn),
+		}
+		for _, base := range matched {
+			btfMatches[base] = append(btfMatches[base], entry)
+		}
+	}
+	t.Logf("[ACTUAL-INVENTORY-BTF-SUMMARY] total_btf_funcs=%d", totalBTFFuncs)
+	for _, target := range targets {
+		entries := btfMatches[target.name]
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].name != entries[j].name {
+				return entries[i].name < entries[j].name
+			}
+			return entries[i].id < entries[j].id
+		})
+		t.Logf("[ACTUAL-INVENTORY-BTF-SCAN] base=%s kind=%s matches=%d", target.name, target.kind, len(entries))
+		for _, e := range entries {
+			t.Logf("[ACTUAL-INVENTORY-BTF-FUNC] base=%s name=%q typeID=%d idErr=%v linkage=%s proto=%s",
+				target.name, e.name, e.id, e.idErr, e.linkage, e.proto)
+		}
+	}
+
+	type kallsymsEntry struct {
+		addr    string
+		symType string
+		name    string
+		mod     string
+	}
+	const kallsymsPath = "/proc/kallsyms"
+	f, openErr := os.Open(kallsymsPath)
+	if openErr != nil {
+		t.Logf("[ACTUAL-INVENTORY-KALLSYMS] open %s failed (read error, not empty): %v", kallsymsPath, openErr)
+		return
+	}
+	kallMatches := make(map[string][]kallsymsEntry, len(targets))
+	totalKallsyms := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		totalKallsyms++
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 {
+			continue
+		}
+		symName := fields[2]
+		mod := ""
+		if len(fields) >= 4 {
+			mod = fields[3]
+		}
+		for _, target := range targets {
+			if strings.Contains(symName, target.name) {
+				kallMatches[target.name] = append(kallMatches[target.name], kallsymsEntry{
+					addr:    fields[0],
+					symType: fields[1],
+					name:    symName,
+					mod:     mod,
+				})
+			}
+		}
+	}
+	scanErr := scanner.Err()
+	closeErr := f.Close()
+	if scanErr != nil || closeErr != nil {
+		t.Logf("[ACTUAL-INVENTORY-KALLSYMS] read %s error (incomplete, not treating as empty): lines=%d scanErr=%v closeErr=%v",
+			kallsymsPath, totalKallsyms, scanErr, closeErr)
+	} else {
+		t.Logf("[ACTUAL-INVENTORY-KALLSYMS-SUMMARY] path=%s lines=%d", kallsymsPath, totalKallsyms)
+	}
+	for _, target := range targets {
+		entries := kallMatches[target.name]
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].name != entries[j].name {
+				return entries[i].name < entries[j].name
+			}
+			return entries[i].addr < entries[j].addr
+		})
+		t.Logf("[ACTUAL-INVENTORY-KALLSYMS-SCAN] base=%s kind=%s matches=%d", target.name, target.kind, len(entries))
+		for _, e := range entries {
+			t.Logf("[ACTUAL-INVENTORY-KALLSYMS-SYM] base=%s name=%q type=%s addr=%s mod=%s",
+				target.name, e.name, e.symType, e.addr, e.mod)
+		}
+	}
+}

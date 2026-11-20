@@ -3,10 +3,245 @@
 package tracer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"reflect"
+	"strings"
+	"syscall"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/support"
 )
+
+var errTracerDiagnosticUnavailable = errors.New("tracer definition diagnostic unavailable")
+var errTracerDiagnosticRejected = errors.New("tracer definition diagnostic rejected")
+
+type tracerDiagnosticProvider interface { DefinitionSourceDiagnostics() (json.RawMessage, error) }
+type tracerDiagnosticClaim struct { marker byte }
+type tracerDiagnosticBudget struct { firstDone, parentDone <-chan struct{}; firstDeadline, parentDeadline time.Time; hasFirstDeadline, hasParentDeadline bool }
+
+type tracerDiagnosticEnvelope struct {
+	Schema int `json:"schema"`
+	Queue json.RawMessage `json:"queue,omitempty"`
+	Processing json.RawMessage `json:"processing,omitempty"`
+	Missing []string `json:"missing"`
+}
+
+func sanitizeTracerDiagnostic(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || len(raw) > 32768 || !json.Valid(raw) { return nil, errTracerDiagnosticRejected }
+	var e tracerDiagnosticEnvelope
+	d := json.NewDecoder(bytes.NewReader(raw)); d.DisallowUnknownFields()
+	if d.Decode(&e) != nil || d.Decode(new(any)) != io.EOF || e.Schema != 1 || e.Missing == nil || len(e.Missing) > 16 { return nil, errTracerDiagnosticRejected }
+	for i, reason := range e.Missing {
+		switch reason { case "queue-binding-absent", "queue-pool-missing", "queue-getter-error", "queue-capability-absent", "processing-source-unverified", "processing-join-unverified", "processing-binding-absent", "epoch-target-absent", "observed-pid-absent", "binding-unrepresentable": default: return nil, errTracerDiagnosticRejected }
+		for _, prior := range e.Missing[:i] { if prior == reason { return nil, errTracerDiagnosticRejected } }
+	}
+	for _, section := range []json.RawMessage{e.Queue, e.Processing} { if len(section) != 0 && (section[0] != '{' || !json.Valid(section)) { return nil, errTracerDiagnosticRejected } }
+	return append(json.RawMessage(nil), raw...), nil
+}
+
+// The provider call and JSON validation run without the cache lock held.
+func snapshotTracerDiagnostic(provider tracerDiagnosticProvider) (json.RawMessage, error) {
+	if provider == nil { return nil, errTracerDiagnosticUnavailable }
+	raw, err := provider.DefinitionSourceDiagnostics()
+	if err != nil { return nil, errTracerDiagnosticUnavailable }
+	return sanitizeTracerDiagnostic(raw)
+}
+
+func (c *auxiliaryLocalCache) reserveTracerDiagnostic() *tracerDiagnosticClaim {
+	c.nativeMu.Lock(); defer c.nativeMu.Unlock()
+	if c.diagnosticClaim != nil { return nil }
+	c.diagnosticClaim = &tracerDiagnosticClaim{}; c.diagnosticReady = make(chan struct{}); return c.diagnosticClaim
+}
+
+func (c *auxiliaryLocalCache) commitTracerDiagnostic(claim *tracerDiagnosticClaim, raw json.RawMessage) bool {
+	return c.commitTracerDiagnosticBefore(claim, raw, nil, nil)
+}
+
+func (c *auxiliaryLocalCache) commitTracerDiagnosticBefore(claim *tracerDiagnosticClaim, raw json.RawMessage, firstDone, parentDone <-chan struct{}) bool {
+	return c.commitTracerDiagnosticBudget(claim, raw, tracerDiagnosticBudget{firstDone: firstDone, parentDone: parentDone})
+}
+
+func (c *auxiliaryLocalCache) commitTracerDiagnosticBudget(claim *tracerDiagnosticClaim, raw json.RawMessage, budget tracerDiagnosticBudget) bool {
+	copy, err := sanitizeTracerDiagnostic(raw); if err != nil { return false }
+	c.nativeMu.Lock(); defer c.nativeMu.Unlock()
+	if claim == nil || c.diagnosticClaim != claim || c.diagnosticReady == nil || tracerDiagnosticBudgetExpired(budget) { return false }; select { case <-c.diagnosticReady: return false; default: }
+	c.diagnosticBytes = copy; close(c.diagnosticReady); return true
+}
+
+func (c *auxiliaryLocalCache) rejectTracerDiagnostic(claim *tracerDiagnosticClaim) {
+	c.nativeMu.Lock(); defer c.nativeMu.Unlock()
+	if claim == nil || c.diagnosticClaim != claim || c.diagnosticReady == nil { return }; select { case <-c.diagnosticReady: return; default: close(c.diagnosticReady) }
+}
+
+func (t *Tracer) DefinitionSourceDiagnosticsReady() <-chan struct{} {
+	if t == nil { return nil }; c := &t.auxiliaryLocal; c.nativeMu.Lock(); defer c.nativeMu.Unlock(); return c.diagnosticReady
+}
+
+func (t *Tracer) freezeTracerDiagnosticBeforeTeardown() {
+	if t == nil { return }; c := &t.auxiliaryLocal; c.nativeMu.Lock(); defer c.nativeMu.Unlock()
+	if c.nativeStarted || c.nativeState != nativeOpen || c.diagnosticClaim != nil { return }
+	c.diagnosticClaim = &tracerDiagnosticClaim{}; c.diagnosticReady = make(chan struct{}); close(c.diagnosticReady)
+}
+
+func tracerDiagnosticExpired(firstDone, parentDone <-chan struct{}) bool {
+	select { case <-firstDone: return true; default: }; select { case <-parentDone: return true; default: }; return false
+}
+
+func tracerDiagnosticBudgetExpired(b tracerDiagnosticBudget) bool {
+	if tracerDiagnosticExpired(b.firstDone, b.parentDone) { return true }; now := time.Now(); return b.hasFirstDeadline && !now.Before(b.firstDeadline) || b.hasParentDeadline && !now.Before(b.parentDeadline)
+}
+
+func (t *Tracer) collectTracerDiagnostic(claim *tracerDiagnosticClaim, provider tracerDiagnosticProvider, firstDone, parentDone <-chan struct{}) {
+	t.collectTracerDiagnosticBudget(claim, provider, tracerDiagnosticBudget{firstDone: firstDone, parentDone: parentDone})
+}
+
+func (t *Tracer) collectTracerDiagnosticBudget(claim *tracerDiagnosticClaim, provider tracerDiagnosticProvider, budget tracerDiagnosticBudget) {
+	c := &t.auxiliaryLocal
+	if claim == nil { return }
+	c.nativeMu.Lock(); eligible := c.diagnosticClaim == claim && c.diagnosticReady != nil && !c.diagnosticCollecting; if eligible { select { case <-c.diagnosticReady: eligible = false; default: c.diagnosticCollecting = true } }; c.nativeMu.Unlock(); if !eligible { return }
+	if tracerDiagnosticBudgetExpired(budget) { c.rejectTracerDiagnostic(claim); return }
+	raw, err := snapshotTracerDiagnostic(provider)
+	if err != nil || !c.commitTracerDiagnosticBudget(claim, raw, budget) { c.rejectTracerDiagnostic(claim) }
+}
+
+// DefinitionSourceDiagnostics returns only a previously committed detached diagnostic.
+func (t *Tracer) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	if t == nil { return nil, errTracerDiagnosticUnavailable }
+	c := &t.auxiliaryLocal
+	c.nativeMu.Lock(); defer c.nativeMu.Unlock()
+	if len(c.diagnosticBytes) == 0 { return nil, errTracerDiagnosticUnavailable }
+	return append(json.RawMessage(nil), c.diagnosticBytes...), nil
+}
+
+func (t *Tracer) originalPIDMapValid() bool {
+	original := t.ebpfMaps["pid_events"]
+	return original != nil && (t.pidEventsMapOverride == nil || t.pidEventsMapOverride == original) &&
+		(t.pidMailbox == nil || t.pidMailbox.origMap == original)
+}
+
+func (t *Tracer) readAuxiliaryStopFacts() (libpf.AuxiliaryBinding, traceDefinitionMapInfo, error) {
+	var binding libpf.AuxiliaryBinding
+	var pidInfo traceDefinitionMapInfo
+	if t == nil || t.auxiliaryScope == nil || t.definitionOwner == nil || t.definitionSource == nil {
+		return binding, pidInfo, fmt.Errorf("auxiliary stop ownership unavailable")
+	}
+	scope, owner, source := t.auxiliaryScope, t.definitionOwner, t.definitionSource
+	source.mu.Lock()
+	sourceErr := source.err
+	owned := source.owner == owner
+	source.mu.Unlock()
+	if sourceErr != nil {
+		return binding, pidInfo, sourceErr
+	}
+	if !owned || source.ops.info == nil || source.ops.lookup == nil || !t.originalPIDMapValid() {
+		return binding, pidInfo, fmt.Errorf("auxiliary stop source ownership unavailable")
+	}
+	checkAdmit := func() error {
+		source.mu.Lock()
+		err := source.err
+		source.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		if err := scope.CommitStopReadout(func() error { return nil }); err != nil {
+			return err
+		}
+		return owner.readoutAdmissionError()
+	}
+	step := func(action func() error) error {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+		if err := scope.WithStopReadoutStep(action); err != nil {
+			return err
+		}
+		return checkAdmit()
+	}
+	err := owner.WithCoveredReadout(func() error {
+		lifetime := owner.HeldLifetime()
+		if lifetime == nil {
+			return fmt.Errorf("auxiliary stop lifetime unavailable")
+		}
+		if err := step(func() error {
+			var err error
+			binding, err = scope.StopReadoutBinding()
+			return err
+		}); err != nil {
+			return err
+		}
+		if err := step(lifetime.Validate); err != nil {
+			return err
+		}
+		var session string
+		var tgid uint32
+		var birth uint64
+		if err := step(func() error { session = lifetime.Session(); return nil }); err != nil { return err }
+		if err := step(func() error { tgid = lifetime.HostTGID(); return nil }); err != nil { return err }
+		if err := step(func() error { birth = lifetime.Birth(); return nil }); err != nil { return err }
+		if err := libpf.ValidateAuxiliaryBinding(binding, binding); err != nil { return err }
+		if binding.Session != session || binding.HostTGID != tgid || binding.Birth != birth || source.binding.Session != session || source.binding.HostTGID != tgid || source.binding.Birth != birth {
+			return fmt.Errorf("auxiliary stop target identity changed")
+		}
+		if err := step(support.CheckTraceDefinitionABI); err != nil { return err }
+		if err := step(func() error { return source.checkBinding(t.ebpfMaps, checkAdmit) }); err != nil { return err }
+		pidMap, pidID := owner.PIDMap(), owner.PIDID()
+		if pidMap == nil || pidID == 0 { return fmt.Errorf("auxiliary stop pid map unavailable") }
+		if err := step(func() error {
+			var err error
+			pidInfo, err = source.ops.info(pidMap)
+			return err
+		}); err != nil { return err }
+		if pidInfo.ID != pidID || pidInfo.Type != uint32(cebpf.Hash) || pidInfo.KeySize != 8 || pidInfo.ValueSize != 1 || pidInfo.MaxEntries == 0 {
+			return fmt.Errorf("auxiliary stop pid map changed")
+		}
+		if err := step(lifetime.Validate); err != nil { return err }
+		if !t.originalPIDMapValid() { return fmt.Errorf("auxiliary stop original pid map changed") }
+		return checkAdmit()
+	})
+	if err == nil {
+		source.mu.Lock()
+		err = source.err
+		source.mu.Unlock()
+	}
+	if err == nil { err = checkAdmit() }
+	if err != nil { return libpf.AuxiliaryBinding{}, traceDefinitionMapInfo{}, err }
+	return binding, pidInfo, nil
+}
+
+// commitAuxiliaryStop is called with the ledger mutex held; copy must be pure.
+func (t *Tracer) commitAuxiliaryStop(copy func() error) error {
+	if t == nil || t.auxiliaryScope == nil || t.definitionSource == nil || t.definitionOwner == nil || copy == nil {
+		return fmt.Errorf("auxiliary stop commit unavailable")
+	}
+	source, owner := t.definitionSource, t.definitionOwner
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	if source.err != nil { return source.err }
+	if source.owner != owner { return fmt.Errorf("auxiliary stop owner changed") }
+	if (source.origCounter != nil && t.ebpfMaps[traceDefinitionCounterMap] != source.origCounter) ||
+		(source.origPerf != nil && t.ebpfMaps["trace_events"] != source.origPerf) ||
+		(source.origConfig != nil && t.ebpfMaps[traceDefinitionConfigMap] != source.origConfig) {
+		return fmt.Errorf("auxiliary stop source maps changed")
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.state != definitionOwnerOpen || owner.quarantined || owner.readoutSealed {
+		return fmt.Errorf("auxiliary stop owner not open")
+	}
+	if owner.ctx != nil && owner.ctx.Err() != nil { return owner.ctx.Err() }
+	return t.auxiliaryScope.CommitStopReadout(func() error {
+		if !t.originalPIDMapValid() { return fmt.Errorf("auxiliary stop original pid map changed") }
+		return copy()
+	})
+}
 
 func (t *Tracer) auxiliaryContext(ctx context.Context) context.Context {
 	if t.auxiliaryScope != nil {
@@ -14,16 +249,251 @@ func (t *Tracer) auxiliaryContext(ctx context.Context) context.Context {
 	}
 	return ctx
 }
-func (t *Tracer) StopAuxiliary(ctx context.Context) error {
-	if t.auxiliaryScope == nil {
-		return fmt.Errorf("owned auxiliary scope not initialized")
+
+func (o *definitionOwner) closeAfterScope(ctx context.Context, scope *periodiccaller.OwnedScope) error {
+	if scope == nil {
+		return o.closeWithContext(ctx)
 	}
-	return t.auxiliaryScope.Stop(ctx)
+	scopeErr := scope.Stop(ctx)
+	if o == nil {
+		return scopeErr
+	}
+	o.sealReadoutAdmission()
+	o.scopeJoinOnce.Do(func() {
+		o.scopeJoinDone = make(chan struct{})
+		go func() {
+			defer close(o.scopeJoinDone)
+			_ = scope.Stop(context.Background())
+			_ = o.closeWithContext(context.Background())
+		}()
+	})
+	done := o.scopeJoinDone
+	select {
+	case <-done:
+		return errors.Join(scopeErr, o.CloseErr())
+	default:
+	}
+	select {
+	case <-done:
+		return errors.Join(scopeErr, o.CloseErr())
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return errors.Join(scopeErr, o.CloseErr())
+		default:
+			return errors.Join(scopeErr, &traceDefinitionOwnerError{cause: ctx.Err(), owner: o})
+		}
+	}
 }
+
+type detachedKobjectError struct { message string; cause error }
+func (e *detachedKobjectError) Error() string { return e.message }
+func (e *detachedKobjectError) Unwrap() error { return e.cause }
+
+type detachedKobjectJoin struct { message string; causes []error }
+func (e *detachedKobjectJoin) Error() string { return e.message }
+func (e *detachedKobjectJoin) Unwrap() []error { return e.causes }
+
+var (
+	kobjectFmtSingleType = reflect.TypeOf(fmt.Errorf("%w", errors.ErrUnsupported))
+	kobjectFmtMultiType = reflect.TypeOf(fmt.Errorf("%w %w", errors.ErrUnsupported, errors.ErrUnsupported))
+	kobjectJoinType = reflect.TypeOf(errors.Join(errors.ErrUnsupported))
+)
+
+func detachKobjectChildren(children []error, budget *int) ([]error, bool) {
+	if len(children) == 0 || len(children) > *budget { return nil, false }
+	copied := make([]error, 0, len(children)); for _, child := range children { if child == nil { return nil, false }; detached, valid := detachKobjectError(child, budget); if !valid { return nil, false }; copied = append(copied, detached) }; return copied, true
+}
+
+// Only trusted wrapper types may have methods called; the shared budget bounds cycles.
+func detachKobjectError(err error, budget *int) (out error, ok bool) {
+	defer func() { if recover() != nil { out, ok = nil, false } }()
+	if err == nil { return nil, true }
+	if *budget <= 0 { return nil, false }; *budget -= 1
+	if err == context.Canceled || err == context.DeadlineExceeded || err == errors.ErrUnsupported { return err, true }
+	if _, yes := err.(syscall.Errno); yes { return err, true }
+	switch e := err.(type) {
+	case *kobjectFactoryError: if e == nil || e.cause == nil { return nil, false }; return detachKobjectError(e.cause, budget)
+	case *traceDefinitionOwnerError: if e == nil || e.cause == nil { return nil, false }; return detachKobjectError(e.cause, budget)
+	case *detachedKobjectError: if e == nil || e.cause == nil { return nil, false }; child, valid := detachKobjectError(e.cause, budget); if !valid { return nil, false }; return &detachedKobjectError{message: strings.Clone(e.message), cause: child}, true
+	case *detachedKobjectJoin: if e == nil { return nil, false }; children, valid := detachKobjectChildren(e.causes, budget); if !valid { return nil, false }; return &detachedKobjectJoin{message: strings.Clone(e.message), causes: children}, true
+	}
+	switch reflect.TypeOf(err) {
+	case kobjectFmtSingleType:
+		child := err.(interface{ Unwrap() error }).Unwrap(); if child == nil { return nil, false }; detached, valid := detachKobjectError(child, budget); if !valid { return nil, false }; return &detachedKobjectError{message: strings.Clone(err.Error()), cause: detached}, true
+	case kobjectFmtMultiType, kobjectJoinType:
+		children, valid := detachKobjectChildren(err.(interface{ Unwrap() []error }).Unwrap(), budget); if !valid { return nil, false }
+		if reflect.TypeOf(err) == kobjectFmtMultiType { return &detachedKobjectJoin{message: strings.Clone(err.Error()), causes: children}, true }
+		messages := make([]string, 0, len(children)); for _, child := range children { messages = append(messages, child.Error()) }; return &detachedKobjectJoin{message: strings.Join(messages, "\n"), causes: children}, true
+	}
+	return nil, false
+}
+
+func (t *Tracer) cacheKobjectStop(facts kobjectWitnessReadout, cause error) {
+	budget := 128; detached, ok := detachKobjectError(cause, &budget); if !ok { return }
+	for i := range facts.native.guards { for j := range facts.native.guards[i] { copied, valid := detachKobjectError(facts.native.guards[i][j].err, &budget); if !valid { return }; facts.native.guards[i][j].err = copied } }
+	if detached == nil { detached = errors.ErrUnsupported }
+	t.auxiliaryLocal.recordKobjectRejection(facts, detached)
+}
+
+func (t *Tracer) finishKobjectBeforeSeal(ctx context.Context) error {
+	if p := t.kobjectWitness; p != nil {
+		facts, finishErr := p.Finish(ctx)
+		t.cacheKobjectStop(facts, finishErr)
+		return errors.Join(finishErr, p.Retire())
+	}
+	return nil
+}
+
+func (t *Tracer) stopAuxiliary(ctx context.Context) error {
+	var err error
+	if t.auxiliaryScope == nil {
+		err = fmt.Errorf("owned auxiliary scope not initialized")
+	}
+	err = errors.Join(err, t.finishKobjectBeforeSeal(ctx))
+	err = errors.Join(err, t.definitionOwner.closeAfterScope(ctx, t.auxiliaryScope))
+	t.publishAuxiliaryLocal(err)
+	return err
+}
+
+func nativeWaitError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil { return err }
+	return context.Canceled
+}
+
+func (t *Tracer) finishNativeClaim(firstCtx, parentCtx context.Context, firstClosed, parentClosed bool, o DefinitionAuxiliaryObservation, err error) {
+	provider, _ := any(t.processManager).(tracerDiagnosticProvider)
+	t.finishNativeClaimWithProvider(firstCtx, parentCtx, firstClosed, parentClosed, o, err, provider)
+}
+
+func (t *Tracer) finishNativeClaimWithProvider(firstCtx, parentCtx context.Context, firstClosed, parentClosed bool, o DefinitionAuxiliaryObservation, err error, provider tracerDiagnosticProvider) {
+	if firstClosed || parentClosed {
+		if firstClosed {
+			cause := firstCtx.Err()
+			if cause == nil { cause = context.Canceled }
+			err = errors.Join(err, cause)
+		}
+		if parentClosed {
+			cause := parentCtx.Err()
+			if cause == nil { cause = context.Canceled }
+			err = errors.Join(err, cause)
+		}
+		if t.definitionOwner != nil && err != nil {
+			err = &traceDefinitionOwnerError{cause: err, owner: t.definitionOwner}
+		}
+		o = t.freezeDefinitionAuxiliary(err)
+	}
+	c := &t.auxiliaryLocal; claim := c.reserveTracerDiagnostic(); c.nativeMu.Lock(); firstDone, parentDone := c.nativeFirstDone, c.nativeParentDone; c.nativeMu.Unlock()
+	c.commitNativeResult(o, err)
+	if firstClosed || parentClosed { c.rejectTracerDiagnostic(claim); return }
+	budget := tracerDiagnosticBudget{firstDone: firstDone, parentDone: parentDone}; if firstCtx != nil { budget.firstDeadline, budget.hasFirstDeadline = firstCtx.Deadline() }; if parentCtx != nil { budget.parentDeadline, budget.hasParentDeadline = parentCtx.Deadline() }
+	t.collectTracerDiagnosticBudget(claim, provider, budget)
+}
+
+// StopAuxiliaryFinal freezes a detached result; owner cleanup can continue after it returns.
+func (t *Tracer) StopAuxiliaryFinal(ctx context.Context) (DefinitionAuxiliaryObservation, error) {
+	c := &t.auxiliaryLocal
+	c.nativeMu.Lock()
+	if c.nativeState == nativeTerminal {
+		o, err := c.nativeObservation, c.nativeErr
+		c.nativeMu.Unlock()
+		return o, err
+	}
+	c.nativeMu.Unlock()
+	callerDone := ctx.Done()
+	var parentCtx context.Context
+	var parentDone <-chan struct{}
+	if t.definitionOwner != nil {
+		parentCtx = t.definitionOwner.ctx
+		if parentCtx != nil { parentDone = parentCtx.Done() }
+	}
+	c.nativeMu.Lock()
+	first := !c.nativeStarted
+	if first {
+		c.nativeStarted = true
+		c.nativeDone = make(chan struct{})
+		c.nativeFirstCtx, c.nativeFirstDone = ctx, callerDone
+		c.nativeParentCtx, c.nativeParentDone = parentCtx, parentDone
+	}
+	done, firstDone, parentDone := c.nativeDone, c.nativeFirstDone, c.nativeParentDone
+	firstCtx, parentCtx := c.nativeFirstCtx, c.nativeParentCtx
+	c.nativeMu.Unlock()
+	if first {
+		go func() {
+			err := t.stopAuxiliary(firstCtx)
+			o := t.freezeDefinitionAuxiliary(err)
+			if err == nil && o.Reason() == DefinitionAuxiliaryReasonStopFailure {
+				if t.auxiliaryScope != nil { err = t.auxiliaryScope.ParentErr() }
+				if err == nil { err = errors.New("auxiliary stop failure without retained cause") }
+				o = t.freezeDefinitionAuxiliary(err)
+			}
+			if claimed, firstClosed, parentClosed := c.claimNativeResult(true); claimed {
+				t.finishNativeClaim(firstCtx, parentCtx, firstClosed, parentClosed, o, err)
+			}
+		}()
+	}
+	for {
+		select { case <-done: return c.nativeResult(); default: }
+		if claimed, firstClosed, parentClosed := c.claimNativeResult(false); claimed {
+			t.finishNativeClaim(firstCtx, parentCtx, firstClosed, parentClosed, DefinitionAuxiliaryObservation{}, nil)
+			return c.nativeResult()
+		}
+		c.nativeMu.Lock()
+		pending := c.nativeState == nativeClaimed
+		c.nativeMu.Unlock()
+		if pending {
+			select {
+			case <-done: return c.nativeResult()
+			case <-callerDone:
+				select { case <-done: return c.nativeResult(); default: }
+				return DefinitionAuxiliaryObservation{}, nativeWaitError(ctx)
+			}
+		}
+		select {
+		case <-done: return c.nativeResult()
+		case <-firstDone:
+		case <-parentDone:
+		case <-callerDone:
+			select { case <-done: return c.nativeResult(); default: }
+			if claimed, firstClosed, parentClosed := c.claimNativeResult(false); claimed {
+				t.finishNativeClaim(firstCtx, parentCtx, firstClosed, parentClosed, DefinitionAuxiliaryObservation{}, nil)
+				return c.nativeResult()
+			}
+			return DefinitionAuxiliaryObservation{}, nativeWaitError(ctx)
+		}
+	}
+}
+
+func (t *Tracer) StopAuxiliary(ctx context.Context) error {
+	_, err := t.StopAuxiliaryFinal(ctx)
+	return err
+}
+
+func (t *Tracer) AuxiliaryObservation() (libpf.AuxiliaryObservation, error) {
+	if t.auxiliaryScope == nil {
+		return libpf.AuxiliaryObservation{}, fmt.Errorf("owned auxiliary scope not initialized")
+	}
+	return t.auxiliaryScope.Observation()
+}
+
+func (t *Tracer) AuxiliaryBinding() (libpf.AuxiliaryBinding, error) {
+	if t.auxiliaryScope == nil {
+		return libpf.AuxiliaryBinding{}, fmt.Errorf("owned auxiliary scope not initialized")
+	}
+	return t.auxiliaryScope.AuxiliaryBinding()
+}
+
 func newAuxiliaryContext(ctx context.Context, cfg *Config) (context.Context, *periodiccaller.OwnedScope) {
 	if cfg.HotSpotEpochTarget.PID == 0 && cfg.HotSpotObservedPID == 0 {
 		return ctx, nil
 	}
 	s := periodiccaller.NewOwnedScope(ctx, cfg.OnHotSpotFatal)
 	return s.Context(), s
+}
+
+func (t *Tracer) KindObservation(source libpf.AuxiliarySource) (libpf.KindObservation, error) {
+	if t == nil || t.auxiliaryScope == nil {
+		return libpf.KindObservation{}, fmt.Errorf("owned auxiliary scope not initialized")
+	}
+	return t.auxiliaryScope.KindObservation(source)
 }

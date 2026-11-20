@@ -10,12 +10,13 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.Locale
 
 class TierENativeTimingDiagnosticTest {
     @Test
     fun `parser admits the sealed first fork log with twelve binding detail rows`() {
         val log = requireNotNull(javaClass.getResourceAsStream("/tier-e/native-timing-first-fork.txt")).use { it.readBytes() }
-        val hash = MessageDigest.getInstance("SHA-256").digest(log).joinToString("") { "%02x".format(it) }
+        val hash = MessageDigest.getInstance("SHA-256").digest(log).joinToString("") { "%02x".format(Locale.ROOT, it) }
         assertEquals("a28856c78e837a791aaf83cd6b92ec025e240acf017ef158eb873bba966e3c3c", hash)
         val observation = TierENativeTimingDiagnostic.parse('A', "full", log.decodeToString())
         assertEquals(514L, observation.captures)
@@ -28,7 +29,7 @@ class TierENativeTimingDiagnosticTest {
     @Test
     fun `independent capture clocks can cross while both readings are complete`() {
         val log = requireNotNull(javaClass.getResourceAsStream("/tier-e/native-timing-cpu-clock-crossing.txt")).use { it.readBytes() }
-        val hash = MessageDigest.getInstance("SHA-256").digest(log).joinToString("") { "%02x".format(it) }
+        val hash = MessageDigest.getInstance("SHA-256").digest(log).joinToString("") { "%02x".format(Locale.ROOT, it) }
         assertEquals("29819fc10b99b32bcc482041d8cc2121c81b33a4730a1524e0d0f6077f9421a9", hash)
         val captured = TierENativeTimingDiagnostic.parse('C', "full", log.decodeToString())
         assertEquals(1_726_964L, captured.captureElapsedNs)
@@ -169,7 +170,7 @@ class TierENativeTimingDiagnosticTest {
         val exported = root.resolve("diagnostic")
         Files.createDirectory(exported)
         try {
-            fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+            fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(Locale.ROOT, it) }
 
             fun write(
                 name: String,

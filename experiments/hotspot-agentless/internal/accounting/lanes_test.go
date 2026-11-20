@@ -102,3 +102,30 @@ func TestUnrecognizedLanesAreDeterministicAndNeverComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownLossIsNotZeroLoss(t *testing.T) {
+	p := Evaluate(Counts{Known: true, Quiesced: true, Joined: true,
+		Attempted: 10, Submitted: 8, ReserveFailed: 2,
+		Received: 7, Terminals: 7})
+	if !p.Complete || p.Lost != 3 {
+		t.Fatal(p)
+	}
+}
+
+func TestEachLaneRequiresItsOwnFinalEvidence(t *testing.T) {
+	b := Binding{Session: "s", PID: 123, Birth: 456, MapID: 7, PossibleCPUs: 1}
+	all := []Lane{SelectedEvents, Definitions, Enrichment, Wire, Retention}
+	for _, absent := range all {
+		lanes := map[Lane]LaneEvidence{}
+		for _, lane := range all {
+			if lane != absent {
+				lanes[lane] = LaneEvidence{Binding: b, Final: true,
+					Counts: Counts{Known: true, Quiesced: true, Joined: true}}
+			}
+		}
+		missing := MissingEvidence(b, lanes)
+		if len(missing) != 1 || missing[0] != absent {
+			t.Fatal(absent, missing)
+		}
+	}
+}

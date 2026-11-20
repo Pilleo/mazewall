@@ -7,31 +7,602 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
+	"sync"
 	"time"
 )
 
-type nativeEventStopBackend struct{ instance *ebpfInstance }
+type eventReadoutHoldPhase uint8
 
-func (b nativeEventStopBackend) Quiesce() error {
+const (
+	eventReadoutInitializing eventReadoutHoldPhase = iota
+	eventReadoutReady
+	eventReadoutEntered
+	eventReadoutConsumed
+	eventReadoutClosing
+	eventReadoutClosed
+)
+
+type eventCloseState uint8
+
+const (
+	eventCloseUnattempted eventCloseState = iota
+	eventCloseRunning
+	eventCloseSucceeded
+	eventCloseFailed
+	eventCloseQuarantined
+)
+
+type eventCloseRecord struct {
+	state eventCloseState
+	err   error
+}
+
+type eventCloseFunctions struct {
+	ringReaderClose func(*ringbuf.Reader) error
+	perfReaderClose func(*perf.Reader) error
+	programClose    func(*ebpf.Program) error
+	mapClose        func(*ebpf.Map) error
+}
+
+type eventReadoutHold struct {
+	stateMu        sync.Mutex
+	phase          eventReadoutHoldPhase
+	initOnce       sync.Once
+	initDone       chan struct{}
+	initial        eventInitializationSnapshot
+	initErr        error
+	stopContext    context.Context
+	activeUses     uint32
+	usesDrained    chan struct{}
+	closeRequested bool
+	closeDone      chan struct{}
+	closeErr       error
+	cleanupOnce    sync.Once
+	linkCloses     map[link.Link]*eventCloseRecord
+	ringCloses     map[*ringbuf.Reader]*eventCloseRecord
+	perfCloses     map[*perf.Reader]*eventCloseRecord
+	programCloses  map[*ebpf.Program]*eventCloseRecord
+	mapCloses      map[*ebpf.Map]*eventCloseRecord
+	observed       []error
+	receiverJoined bool
+	closers        eventCloseFunctions
+}
+
+func newEventReadoutHold() *eventReadoutHold {
+	h, err := newEventReadoutHoldWithClosers(eventCloseFunctions{
+		ringReaderClose: (*ringbuf.Reader).Close,
+		perfReaderClose: (*perf.Reader).Close,
+		programClose:    (*ebpf.Program).Close,
+		mapClose:        (*ebpf.Map).Close,
+	})
+	if err != nil { panic(err) }
+	return h
+}
+
+func newEventReadoutHoldWithClosers(closers eventCloseFunctions) (*eventReadoutHold, error) {
+	if closers.ringReaderClose == nil || closers.perfReaderClose == nil || closers.programClose == nil || closers.mapClose == nil {
+		return nil, fmt.Errorf("native event close functions missing")
+	}
+	return &eventReadoutHold{phase: eventReadoutInitializing, initDone: make(chan struct{}), usesDrained: make(chan struct{}), closeDone: make(chan struct{}), closers: closers}, nil
+}
+
+type nativeEventStopBackend struct {
+	instance *ebpfInstance
+	hold     *eventReadoutHold
+}
+
+type eventInitializationSnapshot struct {
+	collection  *ebpf.Collection
+	programs    map[string]*ebpf.Program
+	maps        map[string]*ebpf.Map
+	tracers     []*Tracer
+	drains      []*eventDrainReader
+	lostMaps    []*ebpf.Map
+	readers     []*ringbuf.Reader
+	perfReaders []*perf.Reader
+	links       []link.Link
+	root        *definitionReadoutRoot
+	rootValue   definitionReadoutRoot
+}
+
+func (b nativeEventStopBackend) nativeReadoutHold() *eventReadoutHold { return b.hold }
+
+func (i *ebpfInstance) publishOwnedEventInitialization(startErr error) {
+	owner := i.eventFinalizer
+	if owner == nil {
+		return
+	}
+	backend, ok := owner.backend.(interface{ nativeReadoutHold() *eventReadoutHold })
+	if !ok {
+		return
+	}
+	hold := backend.nativeReadoutHold()
+	if hold == nil {
+		return
+	}
+	hold.initOnce.Do(func() {
+		snapshot := eventInitializationSnapshot{collection: i.collection, links: append([]link.Link(nil), i.links...)}
+		if snapshot.collection != nil {
+			snapshot.programs = make(map[string]*ebpf.Program, len(snapshot.collection.Programs))
+			for name, program := range snapshot.collection.Programs {
+				snapshot.programs[name] = program
+			}
+			snapshot.maps = make(map[string]*ebpf.Map, len(snapshot.collection.Maps))
+			for name, m := range snapshot.collection.Maps {
+				snapshot.maps[name] = m
+			}
+		}
+		for _, tracer := range i.tracers {
+			if tracer != nil {
+				snapshot.tracers = append(snapshot.tracers, tracer)
+				snapshot.drains = append(snapshot.drains, tracer.eventDrain)
+				snapshot.lostMaps = append(snapshot.lostMaps, tracer.lostSampleMap)
+				snapshot.readers = append(snapshot.readers, tracer.ringbufReader)
+				snapshot.perfReaders = append(snapshot.perfReaders, tracer.perfReader)
+			}
+		}
+		owner.mu.Lock()
+		snapshot.root = owner.definitionRoot
+		if snapshot.root != nil {
+			snapshot.rootValue = *snapshot.root
+			snapshot.rootValue.maps = make(map[string]*ebpf.Map, len(snapshot.root.maps))
+			for name, m := range snapshot.root.maps {
+				snapshot.rootValue.maps[name] = m
+			}
+			snapshot.readers = append(snapshot.readers, snapshot.root.reader)
+		}
+		owner.mu.Unlock()
+		hold.stateMu.Lock()
+		hold.initial = snapshot
+		hold.initErr = startErr
+		hold.linkCloses = make(map[link.Link]*eventCloseRecord)
+		hold.ringCloses = make(map[*ringbuf.Reader]*eventCloseRecord)
+		hold.perfCloses = make(map[*perf.Reader]*eventCloseRecord)
+		hold.programCloses = make(map[*ebpf.Program]*eventCloseRecord)
+		hold.mapCloses = make(map[*ebpf.Map]*eventCloseRecord)
+		for _, l := range snapshot.links {
+			if l != nil && hold.linkCloses[l] == nil { hold.linkCloses[l] = &eventCloseRecord{} }
+		}
+		for _, r := range snapshot.readers {
+			if r != nil && hold.ringCloses[r] == nil { hold.ringCloses[r] = &eventCloseRecord{} }
+		}
+		for _, r := range snapshot.perfReaders {
+			if r != nil && hold.perfCloses[r] == nil { hold.perfCloses[r] = &eventCloseRecord{} }
+		}
+		for _, p := range snapshot.programs {
+			if p != nil && hold.programCloses[p] == nil { hold.programCloses[p] = &eventCloseRecord{} }
+		}
+		for _, m := range snapshot.maps {
+			if m != nil && hold.mapCloses[m] == nil { hold.mapCloses[m] = &eventCloseRecord{} }
+		}
+		if startErr == nil && !hold.closeRequested {
+			hold.phase = eventReadoutReady
+		}
+		close(hold.initDone)
+		hold.stateMu.Unlock()
+	})
+}
+
+func (h *eventReadoutHold) waitInitialization(ctx context.Context) (eventInitializationSnapshot, error) {
+	if ctx == nil {
+		return eventInitializationSnapshot{}, fmt.Errorf("native stop context missing")
+	}
+	if err := ctx.Err(); err != nil {
+		return eventInitializationSnapshot{}, err
+	}
+	select {
+	case <-h.initDone:
+	case <-ctx.Done():
+		return eventInitializationSnapshot{}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return eventInitializationSnapshot{}, err
+	}
+	h.stateMu.Lock()
+	snapshot, err := h.initial, h.initErr
+	h.stateMu.Unlock()
+	return snapshot, err
+}
+
+func (h *eventReadoutHold) bindStopContext(ctx context.Context) context.Context {
+	h.stateMu.Lock()
+	if h.stopContext == nil {
+		h.stopContext = ctx
+	}
+	first := h.stopContext
+	h.stateMu.Unlock()
+	return first
+}
+
+func (b nativeEventStopBackend) initializedResources(ctx context.Context) (eventInitializationSnapshot, error) {
+	if b.hold == nil {
+		return eventInitializationSnapshot{}, fmt.Errorf("native readout hold missing")
+	}
+	return b.hold.waitInitialization(b.hold.bindStopContext(ctx))
+}
+
+func (h *eventReadoutHold) beginResourceUse(ctx context.Context, readout bool) error {
+	if ctx == nil {
+		return fmt.Errorf("native stop context missing")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.stateMu.Lock()
+	allowed := h.initErr == nil && !h.closeRequested && h.activeUses == 0 &&
+		(h.phase == eventReadoutReady || (!readout && h.phase == eventReadoutConsumed))
+	if allowed {
+		h.activeUses++
+		if readout {
+			h.phase = eventReadoutEntered
+		}
+	}
+	h.stateMu.Unlock()
+	if !allowed {
+		return fmt.Errorf("native resource use not admitted")
+	}
+	return nil
+}
+
+func (h *eventReadoutHold) beginBorrowerUse(done <-chan struct{}) error {
+	h.stateMu.Lock()
+	initialized := false
+	select {
+	case <-h.initDone:
+		initialized = true
+	default:
+	}
+	open := true
+	select {
+	case <-done:
+		open = false
+	default:
+	}
+	allowed := initialized && h.initErr == nil && h.phase == eventReadoutEntered &&
+		h.activeUses > 0 && h.activeUses < ^uint32(0) && !h.closeRequested && open
+	if allowed {
+		h.activeUses++
+	}
+	h.stateMu.Unlock()
+	if !allowed {
+		return fmt.Errorf("native borrower use not admitted")
+	}
+	return nil
+}
+
+func (h *eventReadoutHold) sealResourceUses() <-chan struct{} {
+	h.stateMu.Lock()
+	if !h.closeRequested {
+		h.closeRequested = true
+		h.phase = eventReadoutClosing
+		if h.activeUses == 0 {
+			close(h.usesDrained)
+		}
+	}
+	drained := h.usesDrained
+	h.stateMu.Unlock()
+	return drained
+}
+
+// closeEffect records the actual return before the enclosing use is released.
+func (h *eventReadoutHold) closeEffect(record *eventCloseRecord, closeFn func() error) error {
+	h.stateMu.Lock()
+	if record == nil {
+		h.stateMu.Unlock()
+		return fmt.Errorf("uncaptured event close")
+	}
+	state, previous := record.state, record.err
+	if state == eventCloseUnattempted { record.state = eventCloseRunning }
+	h.stateMu.Unlock()
+	if state == eventCloseSucceeded { return nil }
+	if state == eventCloseFailed { return previous }
+	if state == eventCloseQuarantined { return previous }
+	if state != eventCloseUnattempted { return fmt.Errorf("event close already running") }
+	err := closeFn()
+	h.stateMu.Lock()
+	record.err = err
+	if err == nil { record.state = eventCloseSucceeded } else {
+		record.state = eventCloseFailed
+		h.observed = append(h.observed, err)
+	}
+	h.stateMu.Unlock()
+	return err
+}
+
+type eventDisposalPending struct { hold *eventReadoutHold; cause error }
+
+func (e *eventDisposalPending) Error() string { return "owned event disposal pending" }
+func (e *eventDisposalPending) Is(target error) bool {
+	e.hold.stateMu.Lock()
+	errs := append([]error(nil), e.hold.observed...)
+	e.hold.stateMu.Unlock()
+	if eventDisposalErrorIs(e.cause, target, e.hold) { return true }
+	for _, err := range errs {
+		if eventDisposalErrorIs(err, target, e.hold) { return true }
+	}
+	return false
+}
+
+// Start may retain its own pre-initialization pending error in initErr.
+func eventDisposalErrorIs(err, target error, hold *eventReadoutHold) bool {
+	if err == nil { return false }
+	if pending, ok := err.(*eventDisposalPending); ok && pending.hold == hold {
+		return eventDisposalErrorIs(pending.cause, target, hold)
+	}
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range multi.Unwrap() {
+			if eventDisposalErrorIs(child, target, hold) { return true }
+		}
+		return false
+	}
+	if single, ok := err.(interface{ Unwrap() error }); ok {
+		return eventDisposalErrorIs(single.Unwrap(), target, hold)
+	}
+	return errors.Is(err, target)
+}
+
+func (b nativeEventStopBackend) requestDisposal(cause error) error {
+	h := b.hold
+	h.sealResourceUses()
+	h.cleanupOnce.Do(func() { go b.runDisposal() })
+	h.stateMu.Lock()
+	closed, err := h.phase == eventReadoutClosed, h.closeErr
+	replaced := closed && err == nil && b.instance.collection != nil
+	h.stateMu.Unlock()
+	if replaced { return fmt.Errorf("owned event collection changed after disposal") }
+	if closed { return err }
+	return &eventDisposalPending{hold: h, cause: cause}
+}
+
+// disposalInventory proves the captured writer inventory, not merely an empty link list.
+func (b nativeEventStopBackend) disposalInventory(s eventInitializationSnapshot, initErr error) error {
+	i, h := b.instance, b.hold
+	o := i.eventFinalizer
+	if o == nil { return fmt.Errorf("event disposal owner missing") }
+	o.mu.Lock()
+	scopeErr := validateEventFinalizationWriters(i)
+	tracerErr := s.validateTracers(i)
+	var rootErr error
+	if s.root != nil { rootErr = o.validateRuntimeScope(i) }
+	a := o.admission
+	valid := o == i.eventFinalizer && a != nil && a.instance == i && a.tracer != nil &&
+		i.tracers["openat"] == a.tracer && a.tracer.mapName == "events" &&
+		len(s.tracers) == 1 && s.tracers[0] == a.tracer && len(s.links) <= 1 &&
+		len(s.perfReaders) == 1 && a.tracer.perfReader == s.perfReaders[0] &&
+		(len(s.links) != 0 || initErr != nil) && o.definitionRoot == s.root
+	h.stateMu.Lock()
+	valid = valid && h.receiverJoined && s.collection != nil && i.collection == s.collection &&
+		len(s.programs) == 1 && s.programs["capture_openat"] != nil &&
+		len(s.collection.Programs) == len(s.programs) && len(s.collection.Maps) == len(s.maps)
+	if a == nil || len(s.maps) != len(a.maps) { valid = false } else {
+		for name := range a.maps {
+			if s.maps[name] == nil || s.collection == nil || s.collection.Maps[name] != s.maps[name] { valid = false }
+		}
+	}
+	if s.collection != nil {
+		for name, p := range s.programs {
+			if p == nil || s.collection.Programs[name] != p { valid = false }
+		}
+	}
+	if len(i.links) != 0 && len(i.links) != len(s.links) { valid = false }
+	for index, l := range s.links {
+		if l == nil { valid = false; continue }
+		record := h.linkCloses[l]
+		if record == nil || record.state != eventCloseSucceeded { valid = false }
+		if len(i.links) != 0 && (index >= len(i.links) || i.links[index] != l) { valid = false }
+	}
+	if s.root != nil {
+		if len(s.links) != 1 || s.root.link != s.links[0] || s.root.link != s.rootValue.link ||
+			s.root.program != s.rootValue.program || s.root.programID != s.rootValue.programID ||
+			s.root.collection != s.collection { valid = false }
+	}
+	if valid && scopeErr == nil && tracerErr == nil && rootErr == nil {
+		i.links = nil
+		if s.root != nil { s.root.retired = true }
+	}
+	h.stateMu.Unlock()
+	o.mu.Unlock()
+	if !valid { return errors.Join(scopeErr, tracerErr, rootErr, fmt.Errorf("owned event disposal inventory changed or producer not retired")) }
+	return errors.Join(scopeErr, tracerErr, rootErr)
+}
+
+func (b nativeEventStopBackend) runDisposal() {
+	h := b.hold
+	<-h.initDone
+	h.stateMu.Lock()
+	s, initErr := h.initial, h.initErr
+	if initErr != nil { h.observed = append(h.observed, initErr) }
+	h.stateMu.Unlock()
+	<-h.usesDrained
+	if initErr == nil || s.root != nil {
+		for _, l := range s.links {
+			if l != nil { _ = h.closeEffect(h.linkCloses[l], l.Close) }
+		}
+	} else if len(s.links) != 0 {
+		unknown := fmt.Errorf("pre-snapshot link retirement unknown")
+		h.stateMu.Lock()
+		for _, l := range s.links {
+			if record := h.linkCloses[l]; record != nil && record.state == eventCloseUnattempted {
+				record.state, record.err = eventCloseQuarantined, unknown
+			}
+		}
+		h.observed = append(h.observed, unknown)
+		h.stateMu.Unlock()
+	}
+	for _, r := range s.readers {
+		if r != nil { _ = h.closeEffect(h.ringCloses[r], func() error { return h.closers.ringReaderClose(r) }) }
+	}
+	for _, r := range s.perfReaders {
+		if r != nil { _ = h.closeEffect(h.perfCloses[r], func() error { return h.closers.perfReaderClose(r) }) }
+	}
+	b.instance.wg.Wait()
+	h.stateMu.Lock()
+	h.receiverJoined = true
+	h.stateMu.Unlock()
+	for _, drain := range s.drains {
+		if drain != nil {
+			if err := drain.result(); err != nil {
+				h.stateMu.Lock(); h.observed = append(h.observed, err); h.stateMu.Unlock()
+			}
+		}
+	}
+	gateErr := b.disposalInventory(s, initErr)
+	if gateErr == nil {
+		var collectionErrs []error
+		for _, p := range s.programs {
+			if err := h.closeEffect(h.programCloses[p], func() error { return h.closers.programClose(p) }); err != nil { collectionErrs = append(collectionErrs, err) }
+		}
+		for _, m := range s.maps {
+			if err := h.closeEffect(h.mapCloses[m], func() error { return h.closers.mapClose(m) }); err != nil { collectionErrs = append(collectionErrs, err) }
+		}
+		if len(collectionErrs) == 0 {
+			h.stateMu.Lock()
+			matched := b.instance.collection == s.collection
+			if matched { b.instance.collection = nil }
+			h.stateMu.Unlock()
+			if !matched { gateErr = fmt.Errorf("owned event collection changed during disposal") }
+		}
+	}
+	h.stateMu.Lock()
+	if gateErr != nil { h.observed = append(h.observed, gateErr) }
+	errs := append([]error(nil), h.observed...)
+	h.stateMu.Unlock()
+	err := errors.Join(errs...)
+	h.stateMu.Lock()
+	h.closeErr, h.phase = err, eventReadoutClosed
+	close(h.closeDone)
+	h.stateMu.Unlock()
+}
+
+func (h *eventReadoutHold) endResourceUse(ctx context.Context, readout bool) error {
+	h.stateMu.Lock()
+	if h.activeUses == 0 {
+		h.stateMu.Unlock()
+		return fmt.Errorf("native resource use underflow")
+	}
+	h.activeUses--
+	if readout && h.phase == eventReadoutEntered {
+		h.phase = eventReadoutConsumed
+	}
+	requested := h.closeRequested
+	if requested && h.activeUses == 0 {
+		close(h.usesDrained)
+	}
+	h.stateMu.Unlock()
+	var requestErr error
+	if requested {
+		requestErr = fmt.Errorf("native resource close requested during use")
+	}
+	return errors.Join(requestErr, ctx.Err())
+}
+
+func (h *eventReadoutHold) withAfterReadout(ctx context.Context, fn func(context.Context) error) (err error) {
+	if err := h.beginResourceUse(ctx, true); err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, h.endResourceUse(ctx, true)) }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn(ctx)
+}
+
+func (s eventInitializationSnapshot) validateTracers(i *ebpfInstance) error {
+	if len(i.tracers) != len(s.tracers) {
+		return fmt.Errorf("owned event tracers changed")
+	}
+	for index, t := range s.tracers {
+		found := false
+		for _, current := range i.tracers {
+			if current == t {
+				found = true
+				break
+			}
+		}
+		if !found || t.eventDrain != s.drains[index] || t.ringbufReader != s.readers[index] || t.lostSampleMap != s.lostMaps[index] {
+			return fmt.Errorf("owned event tracer resources changed")
+		}
+	}
+	return nil
+}
+
+func (b nativeEventStopBackend) Quiesce() (retErr error) {
+	resources, err := b.initializedResources(nil)
+	if err != nil {
+		return err
+	}
+	ctx := b.hold.bindStopContext(nil)
+	if err := b.hold.beginResourceUse(ctx, false); err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, b.hold.endResourceUse(ctx, false)) }()
 	i := b.instance
+	if len(i.links) != len(resources.links) {
+		return fmt.Errorf("owned event links changed")
+	}
+	for index, l := range resources.links {
+		if i.links[index] != l {
+			return fmt.Errorf("owned event links changed")
+		}
+	}
+	if i.definitionReadoutConfigured() {
+		o := i.eventFinalizer
+		if o == nil {
+			return fmt.Errorf("definition source owner missing")
+		}
+		o.mu.Lock()
+		if err := o.validateRuntimeScope(i); err != nil {
+			o.mu.Unlock()
+			return err
+		}
+		root := o.definitionRoot
+		valid := root != nil && root == resources.root && root.link != nil && root.programID != 0 && !root.retired && len(i.links) == 1 && i.links[0] == root.link
+		o.mu.Unlock()
+		if !valid {
+			return fmt.Errorf("definition original root ownership changed")
+		}
+	}
 	if len(i.links) > 1 || len(i.rawDetachers) != 0 || len(i.perfFds) != 0 {
 		return fmt.Errorf("event writer ownership changed")
 	}
-	for _, l := range i.links {
+	for _, l := range resources.links {
 		if l == nil {
 			return fmt.Errorf("unowned event producer link")
 		}
-		if err := l.Close(); err != nil {
+		if err := b.hold.closeEffect(b.hold.linkCloses[l], l.Close); err != nil {
 			return fmt.Errorf("retire owned openat link: %w", err)
 		}
 	}
-	i.links = nil
+	if i.definitionReadoutConfigured() {
+		o := i.eventFinalizer
+		o.mu.Lock()
+		i.links = nil
+		o.definitionRoot.retired = true
+		o.mu.Unlock()
+	} else {
+		i.links = nil
+	}
 	return nil
 }
-func (b nativeEventStopBackend) Flush() error {
-	for _, t := range b.instance.tracers {
+func (b nativeEventStopBackend) Flush() (retErr error) {
+	resources, err := b.initializedResources(nil)
+	if err != nil {
+		return err
+	}
+	ctx := b.hold.bindStopContext(nil)
+	if err := b.hold.beginResourceUse(ctx, false); err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, b.hold.endResourceUse(ctx, false)) }()
+	if err := resources.validateTracers(b.instance); err != nil {
+		return err
+	}
+	for _, t := range resources.tracers {
 		if t.eventDrain == nil || t.ringbufReader == nil {
 			return fmt.Errorf("owned event reader not started")
 		}
@@ -43,28 +614,112 @@ func (b nativeEventStopBackend) Flush() error {
 	return nil
 }
 func (b nativeEventStopBackend) Join(ctx context.Context) error {
-	for _, t := range b.instance.tracers {
-		select {
-		case <-t.eventDrain.done:
-		case <-ctx.Done():
-			return ctx.Err()
+	resources, err := b.initializedResources(ctx)
+	if err != nil {
+		return err
+	}
+	ctx = b.hold.bindStopContext(ctx)
+	opts := b.instance.eventStopOptions
+	var closeWindow func()
+	defer func() {
+		if closeWindow != nil {
+			closeWindow()
 		}
-		if err := t.eventDrain.result(); err != nil {
+	}()
+	if err := func() (retErr error) {
+		if err := b.hold.beginResourceUse(ctx, false); err != nil {
 			return err
 		}
-	}
-	b.instance.wg.Wait()
-	if opts := b.instance.eventStopOptions; opts != nil && (opts.StrictFull || opts.ObservedFull) {
-		if opts.AfterReadout == nil {
-			return fmt.Errorf("strict definition finalization hook missing")
+		defer func() { retErr = errors.Join(retErr, b.hold.endResourceUse(ctx, false)) }()
+		if err := resources.validateTracers(b.instance); err != nil {
+			return err
 		}
-		if err := opts.AfterReadout(ctx); err != nil {
+		for _, t := range resources.tracers {
+			if t.eventDrain == nil {
+				return fmt.Errorf("owned event reader not started")
+			}
+			select {
+			case <-t.eventDrain.done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			if err := t.eventDrain.result(); err != nil {
+				return err
+			}
+		}
+		b.instance.wg.Wait()
+		b.hold.stateMu.Lock()
+		b.hold.receiverJoined = true
+		b.hold.stateMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if opts != nil && (opts.StrictFull || opts.ObservedFull) {
+			if opts.AfterReadout == nil {
+				return fmt.Errorf("strict definition finalization hook missing")
+			}
+			if b.instance.definitionReadoutConfigured() {
+				o := b.instance.eventFinalizer
+				o.mu.Lock()
+				if o.err != nil || o.stage != eventReadersFlushing || o.definitionRoot == nil || !o.definitionRoot.retired || o.definitionWindow != definitionReadoutNotEntered {
+					o.mu.Unlock()
+					return fmt.Errorf("definition readout window lacks native retirement/join")
+				}
+				o.definitionContext = ctx
+				o.definitionWindow = definitionReadoutActive
+				o.mu.Unlock()
+				closeWindow = func() {
+					o.mu.Lock()
+					o.definitionWindow = definitionReadoutClosed
+					o.definitionContext = nil
+					o.mu.Unlock()
+				}
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+	if opts != nil && (opts.StrictFull || opts.ObservedFull) {
+		if err := b.hold.withAfterReadout(ctx, opts.AfterReadout); err != nil {
+			return err
+		}
+		if b.instance.definitionReadoutConfigured() {
+			o := b.instance.eventFinalizer
+			o.mu.Lock()
+			borrowed := o.definitionLeased
+			o.definitionWindow = definitionReadoutClosed
+			o.mu.Unlock()
+			if borrowed {
+				return fmt.Errorf("definition readout still borrowed")
+			}
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-func (b nativeEventStopBackend) Sample() (uint64, error) {
+func (b nativeEventStopBackend) Sample() (value uint64, retErr error) {
+	resources, err := b.initializedResources(nil)
+	if err != nil {
+		return 0, err
+	}
+	owner := b.instance.eventFinalizer
+	if owner == nil || owner.snapshot().Phase != "receiver_joined" {
+		return 0, fmt.Errorf("counters sampled before owned joins")
+	}
+	ctx := b.hold.bindStopContext(nil)
+	if err := b.hold.beginResourceUse(ctx, false); err != nil {
+		return 0, err
+	}
+	defer func() { retErr = errors.Join(retErr, b.hold.endResourceUse(ctx, false)) }()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := resources.validateTracers(b.instance); err != nil {
+		return 0, err
+	}
 	if b.instance.selectedAccounting != nil {
 		owner := b.instance.eventFinalizer
 		if owner.snapshot().Phase != "receiver_joined" {
@@ -78,7 +733,7 @@ func (b nativeEventStopBackend) Sample() (uint64, error) {
 		owner.observation.SelectedAccounting = value
 		owner.mu.Unlock()
 	}
-	for _, t := range b.instance.tracers {
+	for _, t := range resources.tracers {
 		if t.lostSampleMap == nil {
 			return 0, fmt.Errorf("owned native reserve counter missing")
 		}
@@ -100,7 +755,21 @@ func (b nativeEventStopBackend) Sample() (uint64, error) {
 	}
 	return 0, fmt.Errorf("owned event tracer missing")
 }
+func (i *ebpfInstance) disposalBackend() (nativeEventStopBackend, error) {
+	if i.eventFinalizer == nil { return nativeEventStopBackend{}, fmt.Errorf("event disposal owner missing") }
+	provider, ok := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold })
+	if !ok { return nativeEventStopBackend{}, fmt.Errorf("native event disposal hold missing") }
+	hold := provider.nativeReadoutHold()
+	if hold == nil { return nativeEventStopBackend{}, fmt.Errorf("native event disposal hold missing") }
+	return nativeEventStopBackend{instance: i, hold: hold}, nil
+}
+
 func closeEventCollection(i *ebpfInstance) error {
+	if i.eventFinalizer != nil {
+		b, err := i.disposalBackend()
+		if err != nil { return err }
+		return b.requestDisposal(nil)
+	}
 	if i.collection == nil {
 		return nil
 	}
@@ -122,12 +791,43 @@ func closeEventCollection(i *ebpfInstance) error {
 	return nil
 }
 func (b nativeEventStopBackend) Retire() error {
-	for _, t := range b.instance.tracers {
-		if err := t.ringbufReader.Close(); err != nil {
-			return fmt.Errorf("retire owned event reader: %w", err)
-		}
+	if b.instance == nil || b.hold == nil { return fmt.Errorf("native event disposal hold missing") }
+	owner, ownerErr := b.instance.disposalBackend()
+	if ownerErr != nil { return ownerErr }
+	if owner.hold != b.hold { return fmt.Errorf("native event disposal hold changed") }
+	err := b.requestDisposal(nil)
+	if _, pending := err.(*eventDisposalPending); !pending { return err }
+	h := b.hold
+	select {
+	case <-h.closeDone:
+		return b.requestDisposal(nil)
+	default:
 	}
-	return closeEventCollection(b.instance)
+	ctx := h.bindStopContext(nil)
+	if ctx != nil {
+		if cause := ctx.Err(); cause != nil { return &eventDisposalPending{hold: h, cause: cause} }
+	}
+	h.stateMu.Lock()
+	active := h.activeUses != 0
+	h.stateMu.Unlock()
+	if active { return err }
+	select {
+	case <-h.initDone:
+	default:
+		return err
+	}
+	select {
+	case <-h.closeDone:
+		return b.requestDisposal(nil)
+	default:
+	}
+	if ctx == nil { return &eventDisposalPending{hold: h, cause: fmt.Errorf("native stop context missing")} }
+	select {
+	case <-h.closeDone:
+		return b.requestDisposal(nil)
+	case <-ctx.Done():
+		return &eventDisposalPending{hold: h, cause: ctx.Err()}
+	}
 }
 func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, parameters map[string]*params.Param) error {
 	value, enabled := gc.GetVar(operators.EventFinalizationOptionsKey)
@@ -163,6 +863,10 @@ func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, para
 	if err := validateEventFinalizationProfile(i, u.AsBool(), o.AsBool(), opts.StrictFull || opts.ObservedFull); err != nil {
 		return err
 	}
+	admission, err := admitEventFinalizationScope(i)
+	if err != nil {
+		return err
+	}
 	copy := *opts
 	if opts.Accounting != nil {
 		target := *opts.Accounting
@@ -177,7 +881,8 @@ func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, para
 		}
 	}
 	i.eventStopOptions = &copy
-	i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i})
+	i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i, hold: newEventReadoutHold()})
+	i.eventFinalizer.admission = admission
 	return nil
 }
 func (i *ebpfInstance) stopOwnedEvents() error {
@@ -187,24 +892,44 @@ func (i *ebpfInstance) stopOwnedEvents() error {
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	_, err := i.eventFinalizer.stop(ctx)
+	executionCtx := ctx
+	if backend, ok := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }); ok {
+		if hold := backend.nativeReadoutHold(); hold != nil {
+			executionCtx = hold.bindStopContext(ctx)
+		}
+	}
+	_, err := i.eventFinalizer.stopWithExecution(ctx, executionCtx)
 	return err
 }
 func (i *ebpfInstance) closeOwnedEvents() error {
-	started := false
-	for _, t := range i.tracers {
-		if t.eventDrain != nil {
-			started = true
-		}
-	}
-	if !started && len(i.links) == 0 {
-		return closeEventCollection(i)
-	}
-	return i.stopOwnedEvents()
+	if i.eventFinalizer == nil { return closeEventCollection(i) }
+	b, err := i.disposalBackend()
+	if err != nil { return err }
+	return b.requestDisposal(nil)
 }
 func (i *ebpfInstance) EventFinalization() (operators.EventFinalizationObservation, bool) {
 	if i.eventFinalizer == nil {
 		return operators.EventFinalizationObservation{}, false
 	}
-	return i.eventFinalizer.snapshot(), true
+	observation := i.eventFinalizer.snapshot()
+	provider, ok := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold })
+	if !ok { return observation, true }
+	h := provider.nativeReadoutHold()
+	if h == nil { return observation, true }
+	h.stateMu.Lock()
+	errs := append([]error(nil), h.observed...)
+	pending := h.closeRequested && h.phase != eventReadoutClosed
+	h.stateMu.Unlock()
+	if cleanupErr := errors.Join(errs...); cleanupErr != nil {
+		if observation.Error != "" { cleanupErr = errors.Join(errors.New(observation.Error), cleanupErr) }
+		observation.Error = cleanupErr.Error()
+		observation.Phase = eventStopPhase(eventStopFailed)
+		observation.ResourcesRetired = false
+		observation.LossComplete = false
+	} else if pending {
+		if observation.Phase == eventStopPhase(eventResourcesRetired) { observation.Phase = eventStopPhase(eventStopRequested) }
+		observation.ResourcesRetired = false
+		observation.LossComplete = false
+	}
+	return observation, true
 }

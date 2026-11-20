@@ -16,9 +16,30 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 internal class SeccompActionTest {
+    @Test
+    fun `invalid action payloads cannot be constructed or copied`() {
+        for (errno in listOf(Int.MIN_VALUE, -1, 0, 65_536, Int.MAX_VALUE)) {
+            assertFailsWith<IllegalArgumentException> { SeccompAction.ACT_ERRNO(errno) }
+            assertFailsWith<IllegalArgumentException> { SeccompAction.ACT_ERRNO().copy(errno = errno) }
+        }
+        for (traceId in listOf(Int.MIN_VALUE, -1, 65_536, Int.MAX_VALUE)) {
+            assertFailsWith<IllegalArgumentException> { SeccompAction.ACT_TRACE(traceId) }
+            assertFailsWith<IllegalArgumentException> { SeccompAction.ACT_TRACE(0).copy(traceId = traceId) }
+        }
+    }
+
+    @Test
+    fun `action encoding preserves full valid payload`() {
+        assertEquals(0x00050001, SeccompAction.ACT_ERRNO(1).toKernelReturnCode())
+        assertEquals(0x0005ffff, SeccompAction.ACT_ERRNO(65_535).toKernelReturnCode())
+        assertEquals(0x7ff00000, SeccompAction.ACT_TRACE(0).toKernelReturnCode())
+        assertEquals(0x7ff0ffff, SeccompAction.ACT_TRACE(65_535).toKernelReturnCode())
+    }
+
     companion object {
         @JvmStatic
         fun actionRankings(): Stream<Arguments> =
@@ -50,7 +71,7 @@ internal class SeccompActionTest {
                 40,
                 4,
                 NativeConstants.SECCOMP_RET_TRACE,
-                NativeConstants.SECCOMP_RET_TRACE,
+                NativeConstants.SECCOMP_RET_TRACE or 1,
             ),
             Arguments.of(
                 SeccompAction.ACT_NOTIFY,

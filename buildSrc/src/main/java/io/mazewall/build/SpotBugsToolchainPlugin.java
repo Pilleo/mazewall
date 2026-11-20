@@ -4,9 +4,11 @@ import com.github.spotbugs.snom.SpotBugsExtension;
 import com.github.spotbugs.snom.SpotBugsTask;
 import java.io.IOException;
 import java.nio.file.Files;
+import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.Task;
 import org.gradle.api.artifacts.VersionCatalogsExtension;
 import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.api.tasks.bundling.Jar;
@@ -60,24 +62,27 @@ public final class SpotBugsToolchainPlugin implements Plugin<Project> {
             project.getExtensions().getByType(SpotBugsExtension.class).getToolVersion().set(version);
             project.getConfigurations().named("spotbugsSlf4j", c -> c.getResolutionStrategy().activateDependencyLocking());
             project.getTasks().withType(SpotBugsTask.class).configureEach(task -> {
+                task.doFirst(new RegenerateAuxClasspath());
                 task.getSpotbugsClasspath().setFrom(overlay.flatMap(Jar::getArchiveFile),
                         project.getConfigurations().named("spotbugs"), project.getConfigurations().named("spotbugsSlf4j"));
                 var report = task.getReports().maybeCreate("xml");
                 report.getRequired().set(true);
-                task.doFirst(runningTask -> {
-                    var spotbugs = (SpotBugsTask) runningTask;
-                    if (spotbugs.getUseAuxclasspathFile().get()) {
-                        var auxclasspath = spotbugs.getAuxclasspathFile().get().getAsFile().toPath();
-                        try {
-                            // Plugin 6.5.5 rewrites this file without truncating an existing longer value.
-                            Files.deleteIfExists(auxclasspath);
-                        } catch (IOException failure) {
-                            throw new GradleException("Cannot reset SpotBugs auxiliary classpath: " + auxclasspath, failure);
-                        }
-                    }
-                });
                 task.doLast(new VerifySpotBugsReport(report.getOutputLocation().get().getAsFile()));
             });
         }));
+    }
+
+    private static final class RegenerateAuxClasspath implements Action<Task> {
+        @Override public void execute(Task task) {
+            var spotbugs = (SpotBugsTask) task;
+            if (!spotbugs.getUseAuxclasspathFile().getOrElse(false)) return;
+            var file = spotbugs.getAuxclasspathFile().get().getAsFile().toPath();
+            try {
+                // SpotBugs 6.5.5 overwrites this file without truncating it.
+                Files.deleteIfExists(file);
+            } catch (IOException failure) {
+                throw new GradleException("Cannot regenerate SpotBugs auxiliary classpath: " + file, failure);
+            }
+        }
     }
 }

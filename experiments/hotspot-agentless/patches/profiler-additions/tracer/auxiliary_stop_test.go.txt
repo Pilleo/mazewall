@@ -4,12 +4,249 @@ package tracer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+	"golang.org/x/sys/unix"
 )
+
+// These coordinator controls do not issue native authority or prove source closure.
+type tracerDiagnosticTestProvider func() (json.RawMessage, error)
+func (f tracerDiagnosticTestProvider) DefinitionSourceDiagnostics() (json.RawMessage, error) { return f() }
+type tracerDiagnosticPoisonError struct{}
+func (tracerDiagnosticPoisonError) Error() string { panic("unexpected Error") }
+func (tracerDiagnosticPoisonError) Unwrap() error { panic("unexpected Unwrap") }
+
+func TestTracerDiagnosticCachePrimitives(t *testing.T) {
+	tracer := &Tracer{}; c := &tracer.auxiliaryLocal
+	claim := c.reserveTracerDiagnostic(); other := (&Tracer{}).auxiliaryLocal; otherClaim := other.reserveTracerDiagnostic(); if claim == nil || otherClaim == nil || claim == otherClaim || c.reserveTracerDiagnostic() != nil { t.Fatal("reservation not exclusive") }
+	const payload = `{"schema":1,"queue":{"unit":"owned-map-update-request","requests_owned":18446744073709551615,"queue_accepted":0,"admission_held":0,"refused":0,"applied":0,"applied_published":0,"applied_not_published":0,"failed":0,"aborted":0,"pending":0,"cleanup_failed":0,"pending_known":false,"all_workers_ended":false,"caller_joined_claim":false,"scope_joined_witness":false,"held":false,"last_unavailable":false,"last_published":false,"outcome":1,"proof_error_present":false,"last_apply_error_present":false,"last_cleanup_error_present":false},"processing":{"unit":"handle-trace-input","has_binding":true,"expected_binding":{"source":1,"session":"s","host_tgid":1,"birth":18446744073709551615,"counter_map_id":1,"perf_map_id":2,"possible_cpus":1,"generation":1},"epoch_target":{"pid":1,"process_start_ticks":1,"counter_address":1,"initial_epoch":1},"observed_pid":1,"admitted":0,"pre_reporter_rejected":0,"reporter_ok":0,"reporter_error":0,"in_flight":0,"target_bound":0,"foreign_to_binding":0,"binding_unknown":0,"overflow":false,"has_last_admitted":false,"has_last_classified":false,"last_terminal":0,"outcome":1,"reporter_error_present":false,"proof_error_present":false,"getter_error_present":false},"missing":["processing-source-unverified","processing-join-unverified","queue-binding-absent"]}`
+	source := json.RawMessage(payload); calls := 0
+	provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { calls++; if !c.nativeMu.TryLock() { t.Fatal("provider called under nativeMu") }; c.nativeMu.Unlock(); return source, nil })
+	if _, err := tracer.DefinitionSourceDiagnostics(); err == nil || calls != 0 { t.Fatal("getter reached provider or returned missing cache") }
+	snapshot, err := snapshotTracerDiagnostic(provider); if err != nil { t.Fatal(err) }; source[0] = 'x'
+	if c.commitTracerDiagnostic(otherClaim, snapshot) || other.commitTracerDiagnostic(claim, snapshot) || !other.commitTracerDiagnostic(otherClaim, snapshot) || !c.commitTracerDiagnostic(claim, snapshot) { t.Fatal("claim identity not enforced") }; snapshot[0] = 'x'
+	if c.commitTracerDiagnostic(claim, json.RawMessage(`{"schema":1,"missing":[]}`)) || other.commitTracerDiagnostic(otherClaim, json.RawMessage(`{"schema":1,"missing":[]}`)) { t.Fatal("committed claim overwritten") }
+	got, err := tracer.DefinitionSourceDiagnostics(); if err != nil || string(got) != payload || calls != 1 { t.Fatal("cached diagnostic changed") }; got[0] = 'x'; again, err := tracer.DefinitionSourceDiagnostics(); if err != nil || string(again) != payload { t.Fatal("getter leaked cache bytes") }
+	poison := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { return nil, tracerDiagnosticPoisonError{} }); if _, err := snapshotTracerDiagnostic(poison); err != errTracerDiagnosticUnavailable { t.Fatal("provider error not detached") }
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{"schema":2,"missing":[]}`), json.RawMessage(`{`), json.RawMessage(strings.Repeat(" ", 32769))} { if _, err := sanitizeTracerDiagnostic(raw); err != errTracerDiagnosticRejected { t.Fatal("invalid diagnostic accepted") } }
+}
+
+func TestTracerNativePublicationPrecedesDiagnostic(t *testing.T) {
+	tracer := &Tracer{}; c := &tracer.auxiliaryLocal; first, cancel := context.WithCancel(context.Background()); defer cancel(); c.nativeDone = make(chan struct{}); c.nativeFirstDone = first.Done(); c.nativeState = nativeClaimed
+	entered, release, returned := make(chan struct{}), make(chan struct{}), make(chan struct{}); var releaseOnce sync.Once; defer func() { releaseOnce.Do(func() { close(release) }); <-returned }()
+	provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { if !c.nativeMu.TryLock() { panic("provider under nativeMu") }; c.nativeMu.Unlock(); close(entered); <-release; return json.RawMessage(`{"schema":1,"missing":[]}`), nil })
+	go func() { defer close(returned); tracer.finishNativeClaimWithProvider(first, nil, false, false, DefinitionAuxiliaryObservation{}, unix.EPERM, provider) }()
+	<-entered; select { case <-c.nativeDone: default: t.Fatal("provider blocked native publication") }; _, err := c.nativeResult(); if !errors.Is(err, unix.EPERM) { t.Fatal("native error changed") }; ready := tracer.DefinitionSourceDiagnosticsReady(); if ready == nil { t.Fatal("missing diagnostic readiness") }; select { case <-ready: t.Fatal("pending diagnostic published early"); default: }; if _, err := tracer.DefinitionSourceDiagnostics(); err == nil { t.Fatal("pending diagnostic available") }; cancel(); releaseOnce.Do(func() { close(release) }); <-returned; select { case <-ready: default: t.Fatal("late diagnostic pending") }; if _, err := tracer.DefinitionSourceDiagnostics(); err == nil { t.Fatal("late diagnostic upgraded") }
+}
+
+func TestTracerDiagnosticLateAndTimeoutClaims(t *testing.T) {
+	tracer := &Tracer{}; c := &tracer.auxiliaryLocal; first, cancel := context.WithCancel(context.Background()); defer cancel(); c.nativeDone = make(chan struct{}); c.nativeFirstDone = first.Done(); c.nativeState = nativeClaimed; cancel(); calls := 0
+	provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { calls++; return json.RawMessage(`{"schema":1,"missing":[]}`), nil })
+	tracer.finishNativeClaimWithProvider(first, nil, true, false, DefinitionAuxiliaryObservation{}, unix.EPERM, provider); ready := tracer.DefinitionSourceDiagnosticsReady(); if ready == nil { t.Fatal("missing readiness") }; select { case <-ready: default: t.Fatal("timeout diagnostic pending") }; if calls != 0 { t.Fatal("timeout invoked provider") }; _, err := c.nativeResult(); if !errors.Is(err, unix.EPERM) || !errors.Is(err, context.Canceled) { t.Fatal("native cause lost") }; if _, err := tracer.DefinitionSourceDiagnostics(); err == nil { t.Fatal("timeout diagnostic available") }
+	late := &Tracer{}; lateClaim := late.auxiliaryLocal.reserveTracerDiagnostic(); done := make(chan struct{}); close(done); late.collectTracerDiagnostic(lateClaim, provider, done, nil); select { case <-late.DefinitionSourceDiagnosticsReady(): default: t.Fatal("late diagnostic pending") }; if calls != 0 || late.auxiliaryLocal.commitTracerDiagnostic(lateClaim, json.RawMessage(`{"schema":1,"missing":[]}`)) { t.Fatal("late diagnostic upgraded") }
+}
+
+func TestTracerInBudgetDiagnosticReady(t *testing.T) {
+	tracer := &Tracer{}; c := &tracer.auxiliaryLocal; c.nativeDone = make(chan struct{}); c.nativeState = nativeClaimed; source := json.RawMessage(`{"schema":1,"missing":[]}`); provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { return source, nil })
+	open := make(chan struct{}); c.nativeFirstDone, c.nativeParentDone = open, open; future := tracerSilentDeadlineContext{Context: context.Background(), done: open, deadline: time.Now().Add(time.Hour), cache: c}; tracer.finishNativeClaimWithProvider(future, future, false, false, DefinitionAuxiliaryObservation{}, unix.EPERM, provider); select { case <-tracer.DefinitionSourceDiagnosticsReady(): default: t.Fatal("diagnostic not ready") }; source[0] = 'x'; raw, err := tracer.DefinitionSourceDiagnostics(); if err != nil || string(raw) != `{"schema":1,"missing":[]}` { t.Fatal("diagnostic not detached") }; _, err = c.nativeResult(); if !errors.Is(err, unix.EPERM) { t.Fatal("diagnostic changed native error") }
+}
+
+type tracerSilentDeadlineContext struct { context.Context; done <-chan struct{}; deadline time.Time; cache *auxiliaryLocalCache }
+func (c tracerSilentDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c tracerSilentDeadlineContext) Deadline() (time.Time, bool) { if !c.cache.nativeMu.TryLock() { panic("deadline under nativeMu") }; c.cache.nativeMu.Unlock(); select { case <-c.cache.nativeDone: default: panic("deadline before native publication") }; return c.deadline, true }
+
+func TestTracerDiagnosticSilentAbsoluteDeadline(t *testing.T) {
+	for _, worker := range []bool{false, true} { t.Run(fmt.Sprint(worker), func(t *testing.T) {
+		tracer := &Tracer{}; c := &tracer.auxiliaryLocal; c.nativeDone = make(chan struct{}); c.nativeState = nativeClaimed; open := make(chan struct{}); silent := tracerSilentDeadlineContext{Context: context.Background(), done: open, deadline: time.Now().Add(-time.Second), cache: c}; first, parent := context.Context(context.Background()), context.Context(nil); if worker { parent = silent; c.nativeParentDone = open } else { first = silent; c.nativeFirstDone = open }; calls := 0
+		provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { calls++; return json.RawMessage(`{"schema":1,"missing":[]}`), nil }); tracer.finishNativeClaimWithProvider(first, parent, false, false, DefinitionAuxiliaryObservation{}, unix.EPERM, provider); ready := tracer.DefinitionSourceDiagnosticsReady(); if ready == nil { t.Fatal("missing readiness") }; select { case <-ready: default: t.Fatal("expired diagnostic pending") }; select { case <-open: t.Fatal("unexpected notification"); default: }; if calls != 0 { t.Fatal("expired budget queried provider") }; if _, err := tracer.DefinitionSourceDiagnostics(); err == nil { t.Fatal("expired diagnostic available") }; _, err := c.nativeResult(); if !errors.Is(err, unix.EPERM) { t.Fatal("native error changed") }
+	}) }
+	tracer := &Tracer{}; c := &tracer.auxiliaryLocal; claim := c.reserveTracerDiagnostic(); open := make(chan struct{}); provider := tracerDiagnosticTestProvider(func() (json.RawMessage, error) { return json.RawMessage(`{"schema":1,"missing":[]}`), nil }); raw, err := snapshotTracerDiagnostic(provider); if err != nil { t.Fatal(err) }; budget := tracerDiagnosticBudget{firstDone: open, firstDeadline: time.Now().Add(-time.Second), hasFirstDeadline: true}; if c.commitTracerDiagnosticBudget(claim, raw, budget) { t.Fatal("post-provider expired data committed") }; c.rejectTracerDiagnostic(claim); select { case <-tracer.DefinitionSourceDiagnosticsReady(): default: t.Fatal("expired commit not terminal") }; if c.commitTracerDiagnostic(claim, raw) { t.Fatal("expired claim upgraded") }
+}
+
+func TestTracerDiagnosticTeardownFallback(t *testing.T) {
+	tracer := &Tracer{}; if tracer.DefinitionSourceDiagnosticsReady() != nil { t.Fatal("unclaimed diagnostic has readiness") }; tracer.freezeTracerDiagnosticBeforeTeardown(); ready := tracer.DefinitionSourceDiagnosticsReady(); if ready == nil { t.Fatal("teardown did not seal diagnostic") }; select { case <-ready: default: t.Fatal("teardown diagnostic pending") }; if _, err := tracer.DefinitionSourceDiagnostics(); err == nil { t.Fatal("teardown fabricated diagnostic") }; tracer.freezeTracerDiagnosticBeforeTeardown(); if tracer.DefinitionSourceDiagnosticsReady() != ready || tracer.auxiliaryLocal.reserveTracerDiagnostic() != nil { t.Fatal("teardown diagnostic changed") }
+	pending := &Tracer{}; claim := pending.auxiliaryLocal.reserveTracerDiagnostic(); original := pending.DefinitionSourceDiagnosticsReady(); pending.freezeTracerDiagnosticBeforeTeardown(); select { case <-original: t.Fatal("pending claim overwritten"); default: }; raw := json.RawMessage(`{"schema":1,"missing":[]}`); if !pending.auxiliaryLocal.commitTracerDiagnostic(claim, raw) { t.Fatal("pending claim lost") }; pending.freezeTracerDiagnosticBeforeTeardown(); got, err := pending.DefinitionSourceDiagnostics(); if err != nil || string(got) != string(raw) || pending.DefinitionSourceDiagnosticsReady() != original { t.Fatal("committed diagnostic changed") }
+	started := &Tracer{}; started.auxiliaryLocal.nativeStarted = true; started.freezeTracerDiagnosticBeforeTeardown(); if started.DefinitionSourceDiagnosticsReady() != nil { t.Fatal("first stop claim preempted") }
+}
+
+func TestTracerDiagnosticGetterDetachedCache(t *testing.T) {
+	tracer := &Tracer{}
+	if raw, err := tracer.DefinitionSourceDiagnostics(); err == nil || raw != nil { t.Fatal("missing cache returned diagnostic") }
+	tracer.auxiliaryLocal.nativeMu.Lock(); tracer.auxiliaryLocal.diagnosticBytes = []byte(`{"schema":1,"missing":[]}`); tracer.auxiliaryLocal.nativeMu.Unlock()
+	first, err := tracer.DefinitionSourceDiagnostics(); if err != nil { t.Fatal(err) }; first[0] = 'x'
+	second, err := tracer.DefinitionSourceDiagnostics(); if err != nil || string(second) != `{"schema":1,"missing":[]}` { t.Fatal("getter returned mutable cache") }
+}
+
+func TestNativeClaimRejectsStaleContextError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	staleErr := ctx.Err()
+	cancel()
+	tracer := &Tracer{}
+	tracer.auxiliaryLocal.nativeDone = make(chan struct{})
+	tracer.auxiliaryLocal.nativeFirstDone = ctx.Done()
+	claimed, firstClosed, parentClosed := tracer.auxiliaryLocal.claimNativeResult(true)
+	if claimed {
+		tracer.finishNativeClaim(ctx, nil, firstClosed, parentClosed, DefinitionAuxiliaryObservation{}, staleErr)
+	}
+	if staleErr != nil || !claimed || !firstClosed || parentClosed { t.Fatal("closed first signal did not win claim") }
+	select { case <-tracer.auxiliaryLocal.nativeDone: default: t.Fatal("result not published") }
+	got, err := tracer.auxiliaryLocal.nativeResult()
+	if !errors.Is(err, context.Canceled) || got.Reason() != DefinitionAuxiliaryReasonStopFailure || got.Disposition() == DefinitionAuxiliaryFrozenFinal {
+		t.Fatalf("stale error accepted: disposition=%v reason=%v error=%v", got.Disposition(), got.Reason(), err)
+	}
+}
+
+func TestTracerFactoryPreparationOwnership(t *testing.T) {
+	for _, mode := range []string{"valid", "prepare-error", "closer-rejected"} { t.Run(mode, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }
+		p, err := prepareKobjectWitnessWithSpec(context.Background(), scope, kwMinimalPreparationSpec(t)); if err != nil { t.Fatal(err) }
+		if mode == "closer-rejected" { if err := scope.Stop(context.Background()); err != nil { t.Fatal(err) } }
+		if mode == "prepare-error" { p.transport = &kwUnjoinedSocket{} }
+		calls := 0; owner, err := prepareTracerKobject(context.Background(), scope, func(context.Context, *periodiccaller.OwnedScope) (*preparedKobjectWitness, error) { calls++; if mode == "prepare-error" { return p, unix.EACCES }; return p, nil })
+		if owner != p || calls != 1 { t.Fatal("lost prepared owner") }
+		if mode == "valid" { if err != nil || p.transport != nil || p.reader != nil || p.objects != nil || p.epoch != nil || p.component != nil || p.startClaim != nil { t.Fatal("preparation acquired resources", err) }; if err := scope.Stop(context.Background()); err != nil || p.phase != kwFactoryRetired { t.Fatal("closer did not retire empty owner", err) }; return }
+		if err == nil { t.Fatal("expected preparation or registration error") }; cleanupErr := retireTracerKobject(owner); combined := errors.Join(err, cleanupErr)
+		if mode == "prepare-error" { var retained *kobjectFactoryError; if !errors.Is(combined, unix.EACCES) || !errors.As(combined, &retained) || retained.cleanup != p { t.Fatal("lost rollback cause or owner", combined) }; if err := scope.Stop(context.Background()); err != nil { t.Fatal(err) } } else if cleanupErr != nil || p.phase != kwFactoryRetired { t.Fatal("rejected closer did not retire empty owner", cleanupErr) }
+	}) }
+}
+
+func TestTracerOwnedMonitorRequiresPreparedWitness(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background())
+	tracer := &Tracer{auxiliaryScope: scope}
+	if err := tracer.StartMapMonitors(context.Background(), nil); err == nil { t.Fatal("missing owned witness fell through to legacy monitor") }
+}
+
+func TestTracerKobjectPresealAndDetachedCache(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }
+	p := kwFactoryClaimFixture(t, scope, context.Background()); first, cancel := context.WithCancel(context.Background()); defer cancel(); checked := false
+	if err := scope.AddCloser(func() error { p.mu.Lock(); defer p.mu.Unlock(); checked = p.startClaim != nil && p.startClaim.stopFirst == first && scope.Context().Err() != nil; return nil }); err != nil { t.Fatal(err) }
+	tracer := &Tracer{auxiliaryScope: scope, kobjectWitness: p}; err := tracer.stopAuxiliary(first); if !checked { t.Fatal("scope stopped before first factory Finish") }; if p.transport != nil || p.objects != nil || p.component != nil { t.Fatal("empty stop acquired resources") }; if tracer.freezeDefinitionAuxiliary(err).Disposition() == DefinitionAuxiliaryFrozenFinal { t.Fatal("unqualified stop became final") }
+	p.mu.Lock(); original := p.startClaim.stopFirst; p.mu.Unlock(); _, _ = p.Finish(context.Background()); p.mu.Lock(); same := p.startClaim.stopFirst == original; p.mu.Unlock(); if !same { t.Fatal("later caller renewed first stop") }
+	var detached Tracer; detached.cacheKobjectStop(kobjectWitnessReadout{}, unix.EACCES); detached.auxiliaryLocal.kobjectMu.Lock(); present, cached := detached.auxiliaryLocal.kobjectPresent, detached.auxiliaryLocal.kobject; detached.auxiliaryLocal.kobjectMu.Unlock(); if !present || cached.Disposition() != KobjectWitnessRejected || !errors.Is(cached.Err(), unix.EACCES) { t.Fatal("lost detached source rejection") }
+	var retained Tracer; retained.cacheKobjectStop(kobjectWitnessReadout{}, &kobjectFactoryError{cause: unix.EACCES, cleanup: p}); retained.auxiliaryLocal.kobjectMu.Lock(); present, cached = retained.auxiliaryLocal.kobjectPresent, retained.auxiliaryLocal.kobject; retained.auxiliaryLocal.kobjectMu.Unlock(); var carrier *kobjectFactoryError; if !present || !errors.Is(cached.Err(), unix.EACCES) || errors.As(cached.Err(), &carrier) { t.Fatal("factory error was not detached") }
+	var guard Tracer; var facts kobjectWitnessReadout; facts.native.guards[0][0].err = &kobjectFactoryError{cause: unix.EACCES, cleanup: p}; guard.cacheKobjectStop(facts, unix.EACCES); guard.auxiliaryLocal.kobjectMu.Lock(); present, cached = guard.auxiliaryLocal.kobjectPresent, guard.auxiliaryLocal.kobject; guard.auxiliaryLocal.kobjectMu.Unlock(); carrier = nil; if !present || !errors.Is(cached.facts.native.guards[0][0].err, unix.EACCES) || errors.As(cached.facts.native.guards[0][0].err, &carrier) { t.Fatal("guard error was not detached") }
+}
+
+func TestTracerKobjectAutonomousStopIsUnqualified(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background()); if err := scope.Stop(context.Background()); err != nil { t.Fatal(err) }; tracer := &Tracer{auxiliaryScope: scope, kobjectWitness: p}; err := tracer.stopAuxiliary(context.Background()); if tracer.freezeDefinitionAuxiliary(err).Disposition() == DefinitionAuxiliaryFrozenFinal { t.Fatal("autonomous stop became final") }
+}
+
+func TestTracerKobjectStopCancelsBeforeScopeJoin(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background()); canceled, release, returned := make(chan struct{}), make(chan struct{}), make(chan struct{}); var releaseOnce sync.Once
+	if !scope.Go(func() { <-scope.Context().Done(); close(canceled); <-release }) { t.Fatal("scope worker rejected") }
+	tracer := &Tracer{auxiliaryScope: scope, kobjectWitness: p}; go func() { defer close(returned); _ = tracer.stopAuxiliary(context.Background()) }(); defer func() { releaseOnce.Do(func() { close(release) }); <-returned }()
+	<-canceled; select { case <-returned: t.Fatal("stop returned before actual worker"); default: }; releaseOnce.Do(func() { close(release) })
+}
+
+type kwDetachedCycleTest struct{}
+func (*kwDetachedCycleTest) Error() string { return "cycle" }
+func (e *kwDetachedCycleTest) Unwrap() error { return e }
+
+type kwForbiddenDetachedWrapper struct { called *bool }
+func (e *kwForbiddenDetachedWrapper) Error() string { *e.called = true; panic("unexpected Error") }
+func (e *kwForbiddenDetachedWrapper) Unwrap() error { *e.called = true; return unix.EACCES }
+type kwForbiddenDetachedLeaf struct { called *bool }
+func (e *kwForbiddenDetachedLeaf) Error() string { *e.called = true; panic("unexpected Error") }
+
+func TestKobjectDetachedTrustedTypesOnly(t *testing.T) {
+	called := false; wrapper := &kwForbiddenDetachedWrapper{called: &called}; leaf := &kwForbiddenDetachedLeaf{called: &called}; cycle := &kobjectFactoryError{}; cycle.cause = cycle
+	for _, cause := range []error{wrapper, leaf, errors.Join(unix.EACCES, wrapper), cycle, &traceDefinitionOwnerError{}} { var tracer Tracer; tracer.cacheKobjectStop(kobjectWitnessReadout{}, cause); tracer.publishAuxiliaryLocal(nil); if _, present := tracer.freezeDefinitionAuxiliary(nil).Kobject(); present || called { t.Fatal("unknown callback executed or source cached") } }
+	multi := fmt.Errorf("two: %w / %w", unix.EACCES, context.DeadlineExceeded); single := fmt.Errorf("outer: %w", multi); original := errors.Join(single, errors.ErrUnsupported); var tracer Tracer; tracer.cacheKobjectStop(kobjectWitnessReadout{}, original); tracer.publishAuxiliaryLocal(nil); observed, present := tracer.freezeDefinitionAuxiliary(nil).Kobject(); if !present || observed.Err().Error() != original.Error() || !errors.Is(observed.Err(), unix.EACCES) || !errors.Is(observed.Err(), context.DeadlineExceeded) || !errors.Is(observed.Err(), errors.ErrUnsupported) { t.Fatal("trusted wrappers lost message or cause") }
+}
+
+func TestKobjectDetachedErrorChains(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background())
+	owner := &definitionOwner{}; carrier := &kobjectFactoryError{cause: fmt.Errorf("permission: %w", unix.EACCES), cleanup: p}; wrappedOwner := &traceDefinitionOwnerError{cause: carrier, owner: owner}; joined := errors.Join(fmt.Errorf("deadline: %w", context.DeadlineExceeded), wrappedOwner, fmt.Errorf("unsupported: %w", errors.ErrUnsupported)); originalMessage := errors.Join(fmt.Errorf("deadline: %w", context.DeadlineExceeded), fmt.Errorf("permission: %w", unix.EACCES), fmt.Errorf("unsupported: %w", errors.ErrUnsupported)).Error()
+	var tracer Tracer; tracer.cacheKobjectStop(kobjectWitnessReadout{}, joined); tracer.publishAuxiliaryLocal(nil); frozen := tracer.freezeDefinitionAuxiliary(nil); observed, present := frozen.Kobject(); if !present || observed.Disposition() != KobjectWitnessRejected || observed.Err().Error() != originalMessage || !errors.Is(observed.Err(), unix.EACCES) || !errors.Is(observed.Err(), context.DeadlineExceeded) || !errors.Is(observed.Err(), errors.ErrUnsupported) { t.Fatal("lost detached source causes", observed.Err()) }; var factoryErr *kobjectFactoryError; var definitionErr *traceDefinitionOwnerError; if errors.As(observed.Err(), &factoryErr) || errors.As(observed.Err(), &definitionErr) { t.Fatal("retained owner in frozen observation") }; carrier.cause = context.Canceled; wrappedOwner.cause = context.Canceled; if observed.Err().Error() != originalMessage || errors.Is(observed.Err(), context.Canceled) { t.Fatal("cached chain aliases original") }; tracer.cacheKobjectStop(kobjectWitnessReadout{}, context.Canceled); again, _ := tracer.freezeDefinitionAuxiliary(nil).Kobject(); if again.Err().Error() != originalMessage || frozen.Disposition() == DefinitionAuxiliaryFrozenFinal { t.Fatal("replaced frozen rejection or issued final") }
+	deep := error(unix.EACCES); for i := 0; i < 130; i++ { deep = fmt.Errorf("layer: %w", deep) }; for _, cause := range []error{errors.New("unknown"), &kwDetachedCycleTest{}, deep, errors.Join(unix.EACCES, errors.New("unknown"))} { var missing Tracer; missing.cacheKobjectStop(kobjectWitnessReadout{}, cause); missing.publishAuxiliaryLocal(nil); if _, ok := missing.freezeDefinitionAuxiliary(nil).Kobject(); ok { t.Fatal("unprovable chain was cached") } }
+}
+
+func TestKobjectStopRetainsOriginalCarrier(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background()); first := context.Background(); _, _ = p.Finish(first); p.objects = &kwNativeObjects{}; p.err = unix.EACCES; tracer := &Tracer{auxiliaryScope: scope, kobjectWitness: p}; err := tracer.stopAuxiliary(first); var carrier *kobjectFactoryError; if !errors.Is(err, unix.EACCES) || !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatal("external stop lost original retained owner or cause", err) }
+}
+
+func TestTracerProductionPresealCallers(t *testing.T) {
+	for _, mode := range []string{"close", "bootstrap", "bootstrap-retained"} { t.Run(mode, func(t *testing.T) {
+		scope := periodiccaller.NewOwnedScope(context.Background(), nil); defer scope.Stop(context.Background()); if err := scope.BindLifetime(kwStartTestLifetime{}); err != nil { t.Fatal(err) }; p := kwFactoryClaimFixture(t, scope, context.Background()); tracer := &Tracer{auxiliaryScope: scope, kobjectWitness: p}
+		// Pre-completed tail avoids kernel/process effects; this control checks the production caller only.
+		tracer.scopedClose.once.Do(func() { tracer.scopedClose.done = make(chan struct{}); close(tracer.scopedClose.done) })
+		first := context.Background(); if mode == "bootstrap-retained" { _, _ = p.Finish(first); p.objects = &kwNativeObjects{} }; checked := false; if err := scope.AddCloser(func() error { p.mu.Lock(); defer p.mu.Unlock(); checked = p.startClaim != nil && p.startClaim.stopFirst != nil && (mode == "close" || p.startClaim.stopFirst == first); return nil }); err != nil { t.Fatal(err) }
+		if mode == "close" { tracer.Close() } else { err := disposeTracerBootstrap(first, tracer, unix.EACCES); if !errors.Is(err, unix.EACCES) { t.Fatal("lost bootstrap cause", err) }; if mode == "bootstrap-retained" { var carrier *kobjectFactoryError; if !errors.As(err, &carrier) || carrier.cleanup != p { t.Fatal("lost retaining carrier", err) } } }
+		if !checked { t.Fatal("production caller sealed before factory Finish") }; if mode != "bootstrap-retained" && (p.transport != nil || p.objects != nil || p.component != nil) { t.Fatal("constructor-only cleanup acquired resources") }
+	}) }
+}
+
+type nativeBlockingErrContext struct {
+	context.Context
+	entered chan struct{}
+	release chan struct{}
+	once sync.Once
+}
+
+func (c *nativeBlockingErrContext) Err() error {
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
+	return c.Context.Err()
+}
+
+func TestNativeClaimResolvesContextOutsideMutex(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	blocked := &nativeBlockingErrContext{Context: ctx, entered: make(chan struct{}), release: make(chan struct{})}
+	tracer := &Tracer{}
+	tracer.auxiliaryLocal.nativeDone = make(chan struct{})
+	tracer.auxiliaryLocal.nativeFirstDone = blocked.Done()
+	resolverDone, probeDone := make(chan struct{}), make(chan struct{})
+	var releaseOnce, cleanupOnce sync.Once
+	resolverStarted, probeStarted := false, false
+	resolverJoined, probeJoined := false, false
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			releaseOnce.Do(func() { close(blocked.release) })
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if resolverStarted { select { case <-resolverDone: resolverJoined = true; case <-ctx.Done(): t.Error("resolver did not finish") } }
+			if probeStarted { select { case <-probeDone: probeJoined = true; case <-ctx.Done(): t.Error("mutex probe did not finish") } }
+		})
+	}
+	t.Cleanup(cleanup)
+	claimed, firstClosed, parentClosed := tracer.auxiliaryLocal.claimNativeResult(true)
+	entered, probed := false, false
+	if claimed {
+		resolverStarted = true
+		go func() { tracer.finishNativeClaim(blocked, nil, firstClosed, parentClosed, DefinitionAuxiliaryObservation{}, nil); close(resolverDone) }()
+		wait, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		select { case <-blocked.entered: entered = true; case <-wait.Done(): }
+		waitCancel()
+		if entered {
+			probeStarted = true
+			go func() { tracer.auxiliaryLocal.nativeMu.Lock(); tracer.auxiliaryLocal.nativeMu.Unlock(); close(probeDone) }()
+			wait, waitCancel = context.WithTimeout(context.Background(), 2*time.Second)
+			select { case <-probeDone: probed = true; case <-wait.Done(): }
+			waitCancel()
+		}
+	}
+	cleanup()
+	if !claimed || !firstClosed || parentClosed || !entered || !probed || !resolverJoined || !probeJoined {
+		t.Errorf("claim=%v first=%v parent=%v entered=%v probe=%v joins=%v/%v", claimed, firstClosed, parentClosed, entered, probed, resolverJoined, probeJoined)
+		return
+	}
+	got, err := tracer.auxiliaryLocal.nativeResult()
+	if !errors.Is(err, context.Canceled) || got.Reason() != DefinitionAuxiliaryReasonStopFailure || got.Disposition() == DefinitionAuxiliaryFrozenFinal {
+		t.Errorf("unexpected result: disposition=%v reason=%v error=%v", got.Disposition(), got.Reason(), err)
+	}
+}
 
 func TestDefinitionAuxiliaryStopRequiresOwnedInitializedScope(t *testing.T) {
 	stopper, ok := any(&Tracer{}).(interface{ StopAuxiliary(context.Context) error })
@@ -70,5 +307,1180 @@ func TestLegacyProfilerDoesNotAcquireHotSpotAuxiliaryScope(t *testing.T) {
 	ctx, scope := newAuxiliaryContext(parent, &Config{})
 	if ctx != parent || scope != nil {
 		t.Fatal("legacy profiler acquired a HotSpot-only auxiliary scope")
+	}
+}
+
+func TestHotSpotAuxiliaryStopNormalWorkerJoinVsExternalCancel(t *testing.T) {
+	// Verify normal stop cancels only owned context and does not acquire context-failure classification.
+	parent := context.Background()
+	cfg := Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 456}}
+	ctx, scope := newAuxiliaryContext(parent, &cfg)
+	if scope == nil {
+		t.Fatal("expected scope to be initialized")
+	}
+
+	workerStarted := make(chan struct{})
+	workerExited := make(chan struct{})
+	if !periodiccaller.GoOwned(ctx, func() {
+		close(workerStarted)
+		<-ctx.Done()
+		close(workerExited)
+	}) {
+		t.Fatal("failed to enroll worker")
+	}
+	<-workerStarted
+
+	// Normal stop
+	tracer := &Tracer{auxiliaryScope: scope}
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+
+	if err := tracer.StopAuxiliary(stopCtx); err != nil {
+		t.Fatal("expected normal StopAuxiliary to succeed:", err)
+	}
+	<-workerExited
+
+	if !scope.Joined() {
+		t.Fatal("expected scope to be joined after normal stop")
+	}
+	if err := scope.ParentErr(); err != nil {
+		t.Fatalf("normal stop acquired unexpected parent error: %v", err)
+	}
+
+	// Conversely, external cancellation
+	extParent, extCancel := context.WithCancel(context.Background())
+	extCtx, extScope := newAuxiliaryContext(extParent, &cfg)
+	extCancel()
+	if err := extScope.ParentErr(); err == nil {
+		t.Fatal("expected external cancellation to be classified as parent error")
+	}
+	_ = extScope.Stop(context.Background())
+	_ = extCtx
+}
+
+func TestAuxiliaryLocalProjectionAssembly(t *testing.T) {
+	parent := context.Background()
+	cfg := Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 12345}}
+	_, scope := newAuxiliaryContext(parent, &cfg)
+	if scope == nil {
+		t.Fatal("expected scope to be initialized")
+	}
+
+	tracer := &Tracer{
+		auxiliaryScope:       scope,
+		pidEvents:            make(chan libpf.PIDTID, 16),
+		pidEventsMapOverride: &fakePIDMap{},
+		processManager:       &pm.ProcessManager{},
+	}
+	tracer.preparePIDMailbox(&cfg)
+	tracer.preparePIDProcess()
+	if err := scope.AddFinalizer(func() error {
+		return tracer.sealPIDProcess()
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Unready before stop
+	if tracer.auxiliaryLocal.ready.Load() {
+		t.Fatal("auxiliaryLocal must not be ready before StopAuxiliary")
+	}
+
+	// 2. StopAuxiliary stop: records expected unavailable readout
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+
+	stopErr := tracer.StopAuxiliary(stopCtx)
+	if stopErr == nil || !strings.Contains(stopErr.Error(), "auxiliary readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on StopAuxiliary, got: %v", stopErr)
+	}
+
+	// 3. Ready after stop
+	if !tracer.auxiliaryLocal.ready.Load() {
+		t.Fatal("auxiliaryLocal must be ready after StopAuxiliary")
+	}
+
+	snap := tracer.auxiliaryLocal.value
+	if !snap.ScopePresent {
+		t.Fatal("expected ScopePresent to be true")
+	}
+	if !snap.KindsPresent {
+		t.Fatal("expected KindsPresent to be true")
+	}
+	// Check all 15 kind rows
+	for i := 0; i < 15; i++ {
+		row := snap.Kinds.Kinds[i]
+		if !row.Present {
+			t.Fatalf("expected Kinds[%d].Present to be true", i)
+		}
+		if row.Source != libpf.AuxiliarySource(i+2) {
+			t.Fatalf("expected Kinds[%d].Source to be %v, got %v", i, libpf.AuxiliarySource(i+2), row.Source)
+		}
+	}
+	if !snap.MailboxPresent {
+		t.Fatal("expected MailboxPresent to be true")
+	}
+	if !snap.ProcessPresent {
+		t.Fatal("expected ProcessPresent to be true")
+	}
+	if !snap.StopErrorPresent {
+		t.Fatal("expected StopErrorPresent to be true when scope lacks validated identity")
+	}
+	if snap.EligibleJoin {
+		t.Fatal("expected EligibleJoin to be false when Stop returns error")
+	}
+
+	// 4. First-publication immutability: subsequent StopAuxiliary does not mutate projection
+	firstSnap := snap
+	_ = tracer.StopAuxiliary(context.Background())
+	secondSnap := tracer.auxiliaryLocal.value
+	if firstSnap != secondSnap {
+		t.Fatalf("auxiliaryLocal mutated on subsequent call: %+v != %+v", firstSnap, secondSnap)
+	}
+}
+
+func TestAuxiliaryLocalProjectionOnCancelledStop(t *testing.T) {
+	parent := context.Background()
+	cfg := Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 12345}}
+	_, scope := newAuxiliaryContext(parent, &cfg)
+	tracer := &Tracer{auxiliaryScope: scope}
+
+	// Enroll an admitted held worker before stop to verify late worker exit immutability
+	workerRunning := make(chan struct{})
+	workerClean := make(chan struct{})
+	workerDone := make(chan struct{})
+	enrolled := scope.Go(func() {
+		close(workerRunning)
+		<-workerClean
+		close(workerDone)
+	})
+	if !enrolled {
+		t.Fatal("failed to enroll worker in owned scope")
+	}
+
+	defer func() {
+		select {
+		case <-workerClean:
+		default:
+			close(workerClean)
+		}
+		if !scope.IsRetired() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+			_ = scope.Stop(cleanupCtx)
+			cleanupCancel()
+		}
+		select {
+		case <-workerDone:
+		case <-time.After(time.Second):
+			t.Errorf("timed out waiting for worker cleanup")
+		}
+		if !scope.IsRetired() {
+			t.Errorf("expected auxiliary scope to be retired after cleanup")
+		}
+	}()
+
+	select {
+	case <-workerRunning:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for worker start")
+	}
+
+	stopCtx, cancel := context.WithCancel(parent)
+	cancel()
+
+	err := tracer.StopAuxiliary(stopCtx)
+	if err == nil {
+		t.Fatal("expected cancelled stop error")
+	}
+
+	if !tracer.auxiliaryLocal.ready.Load() {
+		t.Fatal("auxiliaryLocal must be ready after cancelled StopAuxiliary")
+	}
+	snap := tracer.auxiliaryLocal.value
+	if !snap.StopErrorPresent {
+		t.Fatal("expected StopErrorPresent to be true on cancelled stop")
+	}
+	if snap.EligibleJoin {
+		t.Fatal("expected EligibleJoin to be false on cancelled stop")
+	}
+
+	// Release late worker and assert first-publication immutability
+	close(workerClean)
+	select {
+	case <-workerDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for late worker exit")
+	}
+
+	tracer.publishAuxiliaryLocal(nil)
+	afterSnap := tracer.auxiliaryLocal.value
+	if afterSnap != snap {
+		t.Fatalf("first publication mutated after late worker exit: %+v != %+v", afterSnap, snap)
+	}
+}
+
+func TestOwnerCloseAfterScopeWaitsForBlockedProducer(t *testing.T) {
+	runOwnerCloseAfterScopeModel(t, "blocked")
+}
+
+func TestKobjectObservationRouting(t *testing.T) {
+	missingTracer := &Tracer{}; missingTracer.publishAuxiliaryLocal(nil)
+	missing, present := missingTracer.freezeDefinitionAuxiliary(nil).Kobject()
+	if present || missing.Disposition() != KobjectWitnessMissing || missing.Err() != nil { t.Fatal("missing witness gained authority") }
+	cause := errors.New("actual witness rejection")
+	facts := kobjectWitnessReadout{}; facts.binding.generation = 42; facts.native.stages[0].attempted = 3; facts.reader.consumed = 5
+	tracer := &Tracer{}
+	if !tracer.auxiliaryLocal.recordKobjectRejection(facts, cause) { t.Fatal("rejection not recorded") }
+	facts.binding.generation = 99; facts.native.stages[0].attempted = 99; facts.reader.consumed = 99
+	tracer.publishAuxiliaryLocal(nil); frozen := tracer.freezeDefinitionAuxiliary(nil); got, present := frozen.Kobject()
+	if !present || got.Disposition() != KobjectWitnessRejected || !errors.Is(got.Err(), cause) || got.facts.binding.generation != 42 || got.facts.native.stages[0].attempted != 3 || got.facts.reader.consumed != 5 { t.Fatal("rejection or detached facts lost") }
+	got.facts.native.stages[0].attempted = 88; again, _ := tracer.freezeDefinitionAuxiliary(nil).Kobject()
+	if again.facts.native.stages[0].attempted != 3 || tracer.auxiliaryLocal.recordKobjectRejection(facts, cause) { t.Fatal("published witness changed") }
+	base := missingTracer.freezeDefinitionAuxiliary(nil)
+	if frozen.Disposition() != base.Disposition() || frozen.Reason() != base.Reason() || !reflect.DeepEqual(frozen.snapshot.Scope, base.snapshot.Scope) || !reflect.DeepEqual(frozen.snapshot.Kinds, base.snapshot.Kinds) || !reflect.DeepEqual(frozen.snapshot.Mailbox, base.snapshot.Mailbox) || !reflect.DeepEqual(frozen.snapshot.Process, base.snapshot.Process) { t.Fatal("kobject changed unrelated disposition or facts") }
+}
+
+func TestDefinitionAuxiliaryFinalModel(t *testing.T) {
+	for _, mode := range []string{"healthy", "cancelled", "duplicate", "parent", "late-close", "first-deadline", "duplicate-deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			cancelled := mode == "cancelled"
+			duplicate := mode == "duplicate"
+			parentFailure, lateClose := mode == "parent", mode == "late-close"
+			firstDeadline, duplicateDeadline := mode == "first-deadline", mode == "duplicate-deadline"
+			parent, cancelParent := context.WithCancel(context.Background())
+			defer cancelParent()
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "final-model", tgid: 1234, birth: 5678}}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf: {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 103},
+				pid: {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var mu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			lookups, infoCalls := 0, 0
+			entered, release, firstDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			duplicateDone := make(chan struct{})
+			scopeWaitDone := make(chan struct{})
+			var enteredOnce, releaseOnce sync.Once
+			var firstCancel, duplicateCancel, scopeWaitCancel context.CancelFunc
+			firstLaunched, duplicateLaunched, scopeWaitLaunched, armed := false, false, false, false
+			var scopeWaitErr error
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil
+			}
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+				info, ok := infos[m]; if !ok { return nil, unix.EINVAL }
+				clone := &cebpf.Map{}; infos[clone] = info; return clone, nil
+			}
+			closeFailed := false
+			traceDefinitionMapCloser = func(m *cebpf.Map) error {
+				mu.Lock(); defer mu.Unlock()
+				closed[m]++
+				if lateClose && !closeFailed { closeFailed = true; return unix.EACCES }
+				return nil
+			}
+			scope := periodiccaller.NewOwnedScope(parent, nil)
+			var owner *definitionOwner
+			var cleanupOnce sync.Once
+			cleanupDone := false
+			cleanup := func() {
+				cleanupOnce.Do(func() {
+					releaseOnce.Do(func() { close(release) })
+					if firstCancel != nil { firstCancel() }
+					if duplicateCancel != nil { duplicateCancel() }
+					waiterDone := !firstLaunched
+					if firstLaunched {
+						wait, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						select { case <-firstDone: waiterDone = true; case <-wait.Done(): t.Error("first stop waiter did not finish") }
+						cancel()
+					}
+					if duplicateLaunched {
+						wait, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						select { case <-duplicateDone: case <-wait.Done(): waiterDone = false; t.Error("duplicate waiter did not finish") }
+						cancel()
+					}
+					if scopeWaitLaunched {
+						wait, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						select { case <-scopeWaitDone: case <-wait.Done(): waiterDone = false; t.Error("scope waiter did not finish") }
+						cancel()
+						if scopeWaitCancel != nil { scopeWaitCancel() }
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					stopErr := scope.Stop(ctx)
+					scopeDone := ctx.Err() == nil
+					cancel()
+					if !scopeDone { t.Error("scope cleanup timed out") }
+					if stopErr != nil && !errors.Is(stopErr, context.Canceled) && !errors.Is(stopErr, context.DeadlineExceeded) { t.Errorf("scope cleanup: %v", stopErr) }
+					physicalDone := owner == nil
+					if owner != nil && scopeDone {
+						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						err := owner.closeWithContext(ctx)
+						if lateClose { if !errors.Is(err, unix.EACCES) { t.Errorf("owner cleanup missing EACCES: %v", err) } } else if err != nil { t.Errorf("owner cleanup: %v", err) }
+						select { case <-owner.closeReqDone: physicalDone = true; case <-ctx.Done(): t.Error("owner cleanup timed out") }
+						cancel()
+					}
+					if waiterDone && scopeDone && physicalDone { cleanupDone = true; traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+				})
+			}
+			t.Cleanup(cleanup)
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(parent, mock, maps)
+			if err != nil {
+				var pending *traceDefinitionOwnerError
+				if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+				t.Fatalf("acquire owner: %v", err)
+			}
+			clones := []*cebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("bind: %v", err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+			native := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			ops := traceDefinitionMapOps{
+				info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+					mu.Lock(); infoCalls++; mu.Unlock(); info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil
+				},
+				lookup: func(m *cebpf.Map, key, value any) error {
+					if m != clones[1] || key != uint32(0) { return unix.EINVAL }
+					out, ok := value.(*traceDefinitionConfig); if !ok { return unix.EINVAL }
+					mu.Lock(); lookups++; block := armed; mu.Unlock()
+					if block { enteredOnce.Do(func() { close(entered) }); <-release }
+					*out = native; return nil
+				},
+				update: func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error { return unix.EINVAL },
+				close: traceDefinitionMapCloser,
+			}
+			owner.ops = ops
+			source := &traceDefinitionSource{owner: owner, lifetime: owner.HeldLifetime(), origCounter: counts, origConfig: config, origPerf: perf,
+				counter: clones[0], config: clones[1], perf: clones[2], configID: 102, nativeConfig: native, ops: ops,
+				binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "final-model", HostTGID: 1234, Birth: 5678, CounterMapID: 101, PerfMapID: 103, PossibleCPUs: 2, Generation: native.Generation}}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps,
+				pidEvents: make(chan libpf.PIDTID, 16), processManager: &pm.ProcessManager{}}
+			cfg := Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 1234}}
+			tracer.preparePIDMailbox(&cfg)
+			tracer.preparePIDProcess()
+			firstBudget := 8*time.Second
+			if firstDeadline { firstBudget = 3*time.Second }
+			ctx, cancel := context.WithTimeout(context.Background(), firstBudget)
+			firstCancel = cancel
+			if cancelled { cancel() }
+			var got, duplicateResult DefinitionAuxiliaryObservation
+			var stopErr, duplicateErr error
+			enteredOK, firstFinished, duplicateFinished := true, true, true
+			earlyFinished, earlyNativeDone, earlyOwnerClosed, earlyScopeDone := false, false, false, false
+			earlyCloses, earlyHolds := 0, int32(0)
+			var earlyErrorText string
+			firstStillLive := false
+			if duplicate || duplicateDeadline || parentFailure || lateClose || firstDeadline {
+				mu.Lock(); armed = true; mu.Unlock()
+				firstLaunched = true
+				go func() { got, stopErr = tracer.StopAuxiliaryFinal(ctx); close(firstDone) }()
+				wait, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				select { case <-entered: case <-wait.Done(): enteredOK = false }
+				waitCancel()
+				if enteredOK && (duplicate || duplicateDeadline) {
+					var short context.Context
+					var shortCancel context.CancelFunc
+					if duplicateDeadline { short, shortCancel = context.WithTimeout(context.Background(), 400*time.Millisecond) } else { short, shortCancel = context.WithCancel(context.Background()); shortCancel() }
+					duplicateCancel = shortCancel
+					duplicateLaunched = true
+					go func() { duplicateResult, duplicateErr = tracer.StopAuxiliaryFinal(short); close(duplicateDone) }()
+					dupWait, dupWaitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+					select { case <-duplicateDone: case <-dupWait.Done(): duplicateFinished = false }
+					dupWaitCancel()
+					shortCancel()
+					firstStillLive = ctx.Err() == nil
+				}
+				if enteredOK && (parentFailure || lateClose || firstDeadline) {
+					var scopeWaitCtx context.Context
+					scopeWaitCtx, scopeWaitCancel = context.WithTimeout(context.Background(), 8*time.Second)
+					scopeWaitLaunched = true
+					go func() { scopeWaitErr = scope.Stop(scopeWaitCtx); close(scopeWaitDone) }()
+					if parentFailure { cancelParent() } else if lateClose { cancel() }
+					wait, waitCancel = context.WithTimeout(context.Background(), 5*time.Second)
+					select { case <-firstDone: earlyFinished = true; case <-wait.Done(): }
+					waitCancel()
+					if earlyFinished {
+						if stopErr != nil { earlyErrorText = stopErr.Error() }
+						select { case <-tracer.auxiliaryLocal.nativeDone: earlyNativeDone = true; default: }
+						select { case <-owner.closeReqDone: earlyOwnerClosed = true; default: }
+						select { case <-scopeWaitDone: earlyScopeDone = true; default: }
+						mu.Lock(); earlyCloses = len(closed); mu.Unlock()
+						earlyHolds = mock.holds.Load()
+					}
+				}
+				releaseOnce.Do(func() { close(release) })
+				wait, waitCancel = context.WithTimeout(context.Background(), 2*time.Second)
+				select { case <-firstDone: case <-wait.Done(): firstFinished = false }
+				waitCancel()
+			} else {
+				got, stopErr = tracer.StopAuxiliaryFinal(ctx)
+			}
+			cancel()
+			wait, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			started := false
+			select { case <-scope.Context().Done(): started = true; case <-wait.Done(): t.Error("scope stop did not start") }
+			waitCancel()
+			cleanup()
+			if !started || !cleanupDone || !firstFinished || !duplicateFinished { if !firstFinished { t.Error("first stop did not finish") }; if !duplicateFinished { t.Error("duplicate stop did not finish") }; return }
+			duplicateCause := error(context.Canceled)
+			if duplicateDeadline { duplicateCause = context.DeadlineExceeded }
+			if (duplicate || duplicateDeadline) && (!enteredOK || !firstStillLive || !errors.Is(duplicateErr, duplicateCause) || duplicateResult.Disposition() != DefinitionAuxiliaryMissing) {
+				t.Errorf("duplicate wait: entered=%v result=%v error=%v", enteredOK, duplicateResult.Disposition(), duplicateErr)
+			}
+			repeat, repeatErr := tracer.StopAuxiliaryFinal(context.Background())
+			compatErr := tracer.StopAuxiliary(context.Background())
+			later, cancelLater := context.WithCancel(context.Background()); cancelLater()
+			late, lateErr := tracer.StopAuxiliaryFinal(later)
+			if !reflect.DeepEqual(got, repeat) { t.Error("terminal receipt changed") }
+			if !reflect.DeepEqual(got, late) || !reflect.DeepEqual(stopErr, lateErr) { t.Error("later canceled context changed terminal result") }
+			if parentFailure || lateClose || firstDeadline {
+				failureCause := error(context.Canceled)
+				if firstDeadline { failureCause = context.DeadlineExceeded }
+				if !enteredOK || !earlyFinished || !earlyNativeDone || earlyOwnerClosed || earlyScopeDone || earlyCloses != 0 || earlyHolds == 0 {
+					t.Errorf("early publication: entered=%v returned=%v nativeDone=%v ownerClosed=%v scopeDone=%v closes=%d holds=%d", enteredOK, earlyFinished, earlyNativeDone, earlyOwnerClosed, earlyScopeDone, earlyCloses, earlyHolds)
+				}
+				if !errors.Is(scopeWaitErr, failureCause) { t.Errorf("scope waiter error: %v", scopeWaitErr) }
+				if !errors.Is(stopErr, failureCause) || stopErr != repeatErr || stopErr != lateErr || got.Disposition() == DefinitionAuxiliaryFrozenFinal {
+					t.Errorf("failure receipt changed: %v %v %v", stopErr, repeatErr, lateErr)
+				}
+				if stopErr != nil && stopErr.Error() != earlyErrorText { t.Error("cached error text changed") }
+				if lateClose && !errors.Is(stopErr, unix.EACCES) { t.Errorf("late close error missing from cached error: %v", stopErr) }
+				mu.Lock(); cloneCounts := make([]int, len(clones)); for i, m := range clones { cloneCounts[i] = closed[m] }; mu.Unlock()
+				for _, n := range cloneCounts { if n != 1 { t.Errorf("clone close count: %d", n) } }
+				if mock.releaseCalls.Load() != 1 { t.Errorf("owner lifetime release count: %d", mock.releaseCalls.Load()) }
+				return
+			}
+			if cancelled {
+				if !errors.Is(stopErr, context.Canceled) || !errors.Is(repeatErr, context.Canceled) || !errors.Is(compatErr, context.Canceled) || got.Disposition() == DefinitionAuxiliaryFrozenFinal { t.Errorf("cancelled receipt: %v %v %v", stopErr, repeatErr, compatErr) }
+				return
+			}
+			if stopErr != nil || repeatErr != nil || compatErr != nil { t.Fatalf("stop errors: %v %v %v", stopErr, repeatErr, compatErr) }
+			if got.Disposition() != DefinitionAuxiliaryFrozenNonfinal || got.Reason() != DefinitionAuxiliaryReasonUnqualifiedSourceClosure { t.Fatalf("unexpected receipt: %v %v", got.Disposition(), got.Reason()) }
+			sc, scOK := got.Scope(); kinds, kindsOK := got.Kinds(); _, mbOK := got.Mailbox(); _, procOK := got.Process()
+			if !scOK || !kindsOK || !mbOK || !procOK || got.Binding() != sc.Observation.Binding || got.Binding().Generation == native.Generation { t.Fatal("missing or incorrectly bound local projections") }
+			kinds.Kinds[0].Binding.Session = "mutated"
+			again, _ := got.Kinds(); if again.Kinds[0].Binding.Session == "mutated" { t.Fatal("kind copy aliases receipt") }
+			mu.Lock(); reads, infosRead := lookups, infoCalls; cloneCounts := make([]int, len(clones)); for i, m := range clones { cloneCounts[i] = closed[m] }; mu.Unlock()
+			_, _ = tracer.StopAuxiliaryFinal(context.Background())
+			mu.Lock(); unchanged := reads == lookups && infosRead == infoCalls; mu.Unlock()
+			if !unchanged { t.Error("repeat stop queried native facts") }
+			for _, n := range cloneCounts { if n != 1 { t.Errorf("clone close count: %d", n) } }
+			if mode == "healthy" { testDefinitionAuxiliaryLocalPolicy(t, got.snapshot) }
+		})
+	}
+}
+
+// This is a local predicate oracle, not a native receipt issuer or source-closure proof.
+func testDefinitionAuxiliaryLocalPolicy(t *testing.T, base auxiliaryLocalSnapshot) {
+	t.Helper()
+	zero := DefinitionAuxiliaryObservation{}
+	if zero.Disposition() != DefinitionAuxiliaryMissing || zero.Reason() != DefinitionAuxiliaryReasonMissingFacts || zero.Binding() != (libpf.AuxiliaryBinding{}) {
+		t.Fatal("zero observation is not missing")
+	}
+	for _, row := range base.Kinds.Kinds {
+		if !row.Present || row.Counts.Admitted != 0 || row.Outcome != libpf.AuxiliaryNotExercised { t.Fatal("model base is not the zero-admitted local case") }
+	}
+	type policyCase struct {
+		name string
+		mutate func(*auxiliaryLocalSnapshot)
+		stopErr error
+		reason DefinitionAuxiliaryReason
+	}
+	missing := DefinitionAuxiliaryReasonMissingFacts
+	invalid := DefinitionAuxiliaryReasonInvalidBindingOrCounters
+	failed := DefinitionAuxiliaryReasonStopFailure
+	cases := []policyCase{
+		{"valid-local", nil, nil, DefinitionAuxiliaryReasonUnqualifiedSourceClosure},
+		{"scope-missing", func(s *auxiliaryLocalSnapshot) { s.ScopePresent = false }, nil, missing},
+		{"kinds-missing", func(s *auxiliaryLocalSnapshot) { s.KindsPresent = false }, nil, missing},
+		{"mailbox-missing", func(s *auxiliaryLocalSnapshot) { s.MailboxPresent = false }, nil, missing},
+		{"process-missing", func(s *auxiliaryLocalSnapshot) { s.ProcessPresent = false }, nil, missing},
+		{"scope-state-absent", func(s *auxiliaryLocalSnapshot) { s.Scope.State = libpf.LocalAbsent }, nil, missing},
+		{"scope-state-unknown", func(s *auxiliaryLocalSnapshot) { s.Scope.State = libpf.LocalCopyState(255) }, nil, invalid},
+		{"kinds-state-unknown", func(s *auxiliaryLocalSnapshot) { s.Kinds.State = libpf.LocalCopyState(255) }, nil, invalid},
+		{"mailbox-state-unknown", func(s *auxiliaryLocalSnapshot) { s.Mailbox.State = libpf.LocalCopyState(255) }, nil, invalid},
+		{"process-state-unknown", func(s *auxiliaryLocalSnapshot) { s.Process.State = libpf.LocalCopyState(255) }, nil, invalid},
+		{"scope-state-panic", func(s *auxiliaryLocalSnapshot) { s.Scope.State = libpf.LocalPanic }, nil, invalid},
+		{"row-missing", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Present = false }, nil, missing},
+		{"scope-session", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Binding.Session = "" }, nil, invalid},
+		{"scope-target", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Binding.HostTGID = 0 }, nil, invalid},
+		{"scope-generation", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Binding.Generation = 0 }, nil, invalid},
+		{"kind-slot", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Source = 255 }, nil, invalid},
+		{"kind-generation", func(s *auxiliaryLocalSnapshot) { r := &s.Kinds.Kinds[0]; r.Binding = s.Scope.Observation.Binding; r.Binding.Source = r.Source; r.Binding.Generation++ }, nil, invalid},
+		{"scope-inflight", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Counts.Admitted++; s.Scope.Observation.Counts.InFlight++ }, nil, invalid},
+		{"scope-overflow", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Counts.Overflow = true }, nil, invalid},
+		{"scope-ledger", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Counts.Completed++ }, nil, invalid},
+		{"scope-balanced-aborted", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Counts.Admitted++; s.Scope.Observation.Counts.Aborted++ }, nil, invalid},
+		{"scope-outcome", func(s *auxiliaryLocalSnapshot) { s.Scope.Observation.Outcome = libpf.AuxiliaryOutcome(255) }, nil, invalid},
+		{"kind-failed", func(s *auxiliaryLocalSnapshot) { r := &s.Kinds.Kinds[0]; r.Counts.Admitted = 1; r.Counts.Failed = 1; r.Outcome = libpf.AuxiliaryFinal; r.Binding = s.Scope.Observation.Binding; r.Binding.Source = r.Source }, nil, invalid},
+		{"kind-incomplete", func(s *auxiliaryLocalSnapshot) { r := &s.Kinds.Kinds[0]; r.Counts.Admitted = 1; r.Counts.Incomplete = 1; r.Outcome = libpf.AuxiliaryFinal; r.Binding = s.Scope.Observation.Binding; r.Binding.Source = r.Source }, nil, invalid},
+		{"kind-balanced-aborted", func(s *auxiliaryLocalSnapshot) { r := &s.Kinds.Kinds[0]; r.Counts.Admitted = 1; r.Counts.Aborted = 1; r.Outcome = libpf.AuxiliaryFinal; r.Binding = s.Scope.Observation.Binding; r.Binding.Source = r.Source }, nil, invalid},
+		{"kind-balanced-skipped", func(s *auxiliaryLocalSnapshot) { r := &s.Kinds.Kinds[0]; r.Counts.Admitted = 1; r.Counts.Skipped = 1; r.Outcome = libpf.AuxiliaryFinal; r.Binding = s.Scope.Observation.Binding; r.Binding.Source = r.Source }, nil, DefinitionAuxiliaryReasonUnqualifiedSourceClosure},
+		{"kind-outcome-unknown", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Outcome = libpf.AuxiliaryOutcome(255) }, nil, invalid},
+		{"kind-outcome-nonfinal", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Outcome = libpf.SourceLocalNonfinal }, nil, invalid},
+		{"kind-overflow", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Counts.Overflow = true }, nil, invalid},
+		{"kind-ledger", func(s *auxiliaryLocalSnapshot) { s.Kinds.Kinds[0].Counts.Admitted++ }, nil, invalid},
+		{"mailbox-map-zero", func(s *auxiliaryLocalSnapshot) { s.Mailbox.ExpectedBinding.MapID = 0 }, nil, invalid},
+		{"mailbox-map-mismatch", func(s *auxiliaryLocalSnapshot) { s.Mailbox.InfoID++ }, nil, invalid},
+		{"mailbox-info-error", func(s *auxiliaryLocalSnapshot) { s.Mailbox.InfoError = true }, nil, invalid},
+		{"mailbox-outcome-unknown", func(s *auxiliaryLocalSnapshot) { s.Mailbox.Outcome = PIDMailboxOutcome(255) }, nil, invalid},
+		{"mailbox-outcome-not-sealed", func(s *auxiliaryLocalSnapshot) { s.Mailbox.Outcome = PIDMailboxNotSealed }, nil, invalid},
+		{"mailbox-info-missing", func(s *auxiliaryLocalSnapshot) { s.Mailbox.InfoReturned = false }, nil, missing},
+		{"mailbox-lifetime-missing", func(s *auxiliaryLocalSnapshot) { s.Mailbox.LifetimeReturned = false }, nil, missing},
+		{"mailbox-lifetime-mismatch", func(s *auxiliaryLocalSnapshot) { s.Mailbox.LifetimeBirth++ }, nil, invalid},
+		{"mailbox-partition", func(s *auxiliaryLocalSnapshot) { s.Mailbox.Counts.TargetAdmitted++ }, nil, invalid},
+		{"mailbox-scan-incomplete", func(s *auxiliaryLocalSnapshot) { s.Mailbox.ScanIncomplete = true }, nil, invalid},
+		{"mailbox-unpolled-unknown", func(s *auxiliaryLocalSnapshot) { s.Mailbox.UnpolledResidualUnknown = true }, nil, DefinitionAuxiliaryReasonUnqualifiedSourceClosure},
+		{"process-partition", func(s *auxiliaryLocalSnapshot) { s.Process.Counts.Received++ }, nil, invalid},
+		{"process-inflight", func(s *auxiliaryLocalSnapshot) { s.Process.Counts.Received++; s.Process.Counts.InFlight++ }, nil, invalid},
+		{"process-overflow", func(s *auxiliaryLocalSnapshot) { s.Process.Counts.Overflow = true }, nil, invalid},
+		{"process-binding", func(s *auxiliaryLocalSnapshot) { s.Process.Binding.Generation++ }, nil, invalid},
+		{"process-outcome-unknown", func(s *auxiliaryLocalSnapshot) { s.Process.Outcome = PIDProcessOutcome(255) }, nil, invalid},
+		{"process-outcome-nonfinal", func(s *auxiliaryLocalSnapshot) { s.Process.Outcome = PIDProcessLocalConservedNonfinal }, nil, invalid},
+		{"stop-error", nil, errors.New("local-stop-sentinel"), failed},
+		{"raw-stop-error", func(s *auxiliaryLocalSnapshot) { s.StopErrorPresent = true }, nil, failed},
+		{"projection-error", func(s *auxiliaryLocalSnapshot) { s.Process.ErrorPresent = true }, nil, failed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := base
+			if tc.mutate != nil { tc.mutate(&s) }
+			// Detached test-only cache: no native writer or concurrent publisher exists here.
+			tracer := &Tracer{}
+			tracer.auxiliaryLocal.value = s
+			tracer.auxiliaryLocal.ready.Store(true)
+			got := tracer.freezeDefinitionAuxiliary(tc.stopErr)
+			if got.Disposition() != DefinitionAuxiliaryFrozenNonfinal || got.Reason() != tc.reason {
+				t.Fatalf("disposition=%v reason=%v want=%v", got.Disposition(), got.Reason(), tc.reason)
+			}
+			withKobject := s; withKobject.Kobject = rejectKobjectWitnessObservation(kobjectWitnessReadout{}, errors.New("witness rejected")); withKobject.KobjectPresent = true
+			other := &Tracer{}; other.auxiliaryLocal.value = withKobject; other.auxiliaryLocal.ready.Store(true); routed := other.freezeDefinitionAuxiliary(tc.stopErr)
+			if routed.Disposition() != got.Disposition() || routed.Reason() != got.Reason() || !reflect.DeepEqual(routed.snapshot.Scope, got.snapshot.Scope) || !reflect.DeepEqual(routed.snapshot.Kinds, got.snapshot.Kinds) || !reflect.DeepEqual(routed.snapshot.Mailbox, got.snapshot.Mailbox) || !reflect.DeepEqual(routed.snapshot.Process, got.snapshot.Process) { t.Fatal("kobject changed existing local policy") }
+		})
+	}
+}
+
+func TestCoveredStopFactsModel(t *testing.T) {
+	for _, mismatch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pid-mismatch=%t", mismatch), func(t *testing.T) {
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "facts-model", tgid: 1234, birth: 5678}}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf: {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 103},
+				pid: {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var mu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				info, ok := infos[m]
+				if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }
+				return info, nil
+			}
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+				info, ok := infos[m]
+				if !ok { return nil, unix.EINVAL }
+				clone := &cebpf.Map{}
+				infos[clone] = info
+				return clone, nil
+			}
+			traceDefinitionMapCloser = func(m *cebpf.Map) error {
+				mu.Lock(); closed[m]++; mu.Unlock()
+				return nil
+			}
+			scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+			var owner *definitionOwner
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := scope.Stop(ctx)
+				scopeDone := ctx.Err() == nil
+				cancel()
+				if !scopeDone { t.Error("scope cleanup timed out") }
+				if err != nil && (!mismatch || !strings.Contains(err.Error(), "auxiliary stop pid map changed")) { t.Errorf("scope cleanup: %v", err) }
+				physicalDone := owner == nil
+				if owner != nil && scopeDone {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					err := owner.closeWithContext(ctx)
+					cancel()
+					if err != nil { t.Errorf("owner cleanup: %v", err) }
+					select { case <-owner.closeReqDone: physicalDone = true; case <-time.After(2*time.Second): t.Error("owner cleanup timed out") }
+				}
+				if scopeDone && physicalDone { traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+			})
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(context.Background(), mock, maps)
+			if err != nil {
+				var pending *traceDefinitionOwnerError
+				if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+				t.Fatalf("acquire model owner: %v", err)
+			}
+			clones := []*cebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+			if len(infos) != 8 { t.Fatal("expected four distinct acquired clones") }
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("bind scope: %v", err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("scope operation did not complete") }
+			native := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			freshConfig := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			lookupCalls, pidInfoCalls := 0, 0
+			ops := traceDefinitionMapOps{
+				info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+					info, ok := infos[m]
+					if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }
+					if m == clones[3] { pidInfoCalls++; if mismatch { info.ID++ } }
+					return info, nil
+				},
+				lookup: func(m *cebpf.Map, key, value any) error {
+					if m != clones[1] || key != uint32(0) { return unix.EINVAL }
+					out, ok := value.(*traceDefinitionConfig)
+					if !ok { return unix.EINVAL }
+					lookupCalls++; *out = freshConfig; return nil
+				},
+				update: func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error { return unix.EINVAL },
+				close: traceDefinitionMapCloser,
+			}
+			owner.ops = ops
+			// MODEL: immutable source construction fields are filled from actual acquired clone references.
+			source := &traceDefinitionSource{
+				owner: owner, lifetime: owner.HeldLifetime(), origCounter: counts, origConfig: config, origPerf: perf,
+				counter: clones[0], config: clones[1], perf: clones[2], configID: 102, nativeConfig: native, ops: owner.ops,
+				binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "facts-model", HostTGID: 1234, Birth: 5678, CounterMapID: 101, PerfMapID: 103, PossibleCPUs: 2, Generation: native.Generation},
+			}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps}
+			var result libpf.AuxiliaryBinding
+			var resultInfo traceDefinitionMapInfo
+			var finalErr error
+			var ledgerMu sync.Mutex
+			commits := 0
+			var published libpf.AuxiliaryBinding
+			var publishedInfo traceDefinitionMapInfo
+			if err := scope.AddFinalizer(func() error {
+				result, resultInfo, finalErr = tracer.readAuxiliaryStopFacts()
+				if finalErr != nil { return finalErr }
+				ledgerMu.Lock()
+				defer ledgerMu.Unlock()
+				finalErr = tracer.commitAuxiliaryStop(func() error { published = result; publishedInfo = resultInfo; commits++; return nil })
+				return finalErr
+			}); err != nil { t.Fatalf("add finalizer: %v", err) }
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = scope.Stop(ctx)
+			stopExpired := ctx.Err()
+			cancel()
+			if stopExpired != nil { t.Fatalf("scope stop deadline: %v", stopExpired) }
+			if mismatch {
+				if err == nil || finalErr == nil || !strings.Contains(finalErr.Error(), "auxiliary stop pid map changed") || commits != 0 || result != (libpf.AuxiliaryBinding{}) || resultInfo != (traceDefinitionMapInfo{}) { t.Fatalf("mismatch accepted: %v", err) }
+			} else {
+				if err != nil || finalErr != nil || commits != 1 || published != result || publishedInfo != resultInfo || result.Session != "facts-model" || result.HostTGID != 1234 || result.Birth != 5678 || result.Generation == native.Generation || resultInfo.ID != owner.PIDID() { t.Fatalf("positive facts rejected: stop=%v final=%v", err, finalErr) }
+				copyBinding, copyInfo := result, resultInfo
+				copyBinding.Session = "mutated"; copyInfo.ID++
+				if result.Session != "facts-model" || resultInfo.ID != 104 || source.binding.Session != "facts-model" || source.nativeConfig != native || copyBinding.Session == result.Session || copyInfo.ID == resultInfo.ID { t.Fatal("facts were not detached") }
+			}
+			if lookupCalls != 1 || pidInfoCalls != 1 { t.Fatalf("fresh clone readbacks missing: lookup=%d pid=%d", lookupCalls, pidInfoCalls) }
+			if _, err := scope.AuxiliaryBinding(); err == nil { t.Fatal("ordinary post-stop binding unexpectedly succeeded") }
+			if _, err := scope.StopReadoutBinding(); err == nil { t.Fatal("stop binding escaped tracked step") }
+			if mock.holds.Load() != 1 { t.Fatal("owner lifetime was not retained after scope stop") }
+			ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			err = owner.closeWithContext(ctx)
+			cancel()
+			if err != nil { t.Fatalf("owner close: %v", err) }
+			select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close timed out") }
+			mu.Lock()
+			valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0
+			for _, clone := range clones { valid = valid && closed[clone] == 1 }
+			mu.Unlock()
+			if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("owned model resources not closed exactly once") }
+		})
+	}
+}
+
+type stopFactsBlockProbe struct {
+	mu sync.Mutex
+	armed bool
+	name string
+	nth, seen, calls int
+	byName map[string]int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *stopFactsBlockProbe) call(name string) {
+	p.mu.Lock()
+	block := false
+	if p.armed {
+		p.calls++
+		if p.byName == nil { p.byName = make(map[string]int) }
+		p.byName[name]++
+		if p.name == name {
+			p.seen++
+			block = p.seen == p.nth
+		}
+	}
+	p.mu.Unlock()
+	if block { close(p.entered); <-p.release }
+}
+
+type stopFactsBlockingLifetime struct {
+	libpf.TraceDefinitionLifetime
+	probe *stopFactsBlockProbe
+}
+
+func (l *stopFactsBlockingLifetime) Validate() error { l.probe.call("validate"); return l.TraceDefinitionLifetime.Validate() }
+func (l *stopFactsBlockingLifetime) Session() string { l.probe.call("session"); return l.TraceDefinitionLifetime.Session() }
+func (l *stopFactsBlockingLifetime) HostTGID() uint32 { l.probe.call("tgid"); return l.TraceDefinitionLifetime.HostTGID() }
+func (l *stopFactsBlockingLifetime) Birth() uint64 { l.probe.call("birth"); return l.TraceDefinitionLifetime.Birth() }
+func (l *stopFactsBlockingLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	r, ok := l.TraceDefinitionLifetime.(libpf.TraceDefinitionRetainer)
+	if !ok { return nil, nil, errors.New("model retainer unavailable") }
+	held, release, err := r.RetainDefinitionLifetime()
+	if err != nil { return nil, nil, err }
+	return &stopFactsBlockingLifetime{TraceDefinitionLifetime: held, probe: l.probe}, release, nil
+}
+
+func TestCoveredStopFactsBlockedCallbacks(t *testing.T) {
+	cases := []struct { name string; nth int; seal, sourceFail bool }{
+		{"validate", 1, false, false}, {"validate", 2, false, false}, {"session", 1, false, false}, {"tgid", 1, false, false}, {"birth", 1, false, false},
+		{"counter", 1, false, false}, {"perf", 1, false, false}, {"config-info", 1, false, false}, {"config-lookup", 1, false, false}, {"pid", 1, false, false},
+		{"config-lookup", 1, true, false}, {"config-lookup", 1, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s-%d-seal=%t-source=%t", tc.name, tc.nth, tc.seal, tc.sourceFail), func(t *testing.T) {
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			probe := &stopFactsBlockProbe{name: tc.name, nth: tc.nth, entered: make(chan struct{}), release: make(chan struct{})}
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "blocking-model", tgid: 1234, birth: 5678}}
+			lifetime := &stopFactsBlockingLifetime{TraceDefinitionLifetime: mock, probe: probe}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf: {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 103},
+				pid: {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var mu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) { info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil }
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) { info, ok := infos[m]; if !ok { return nil, unix.EINVAL }; clone := &cebpf.Map{}; infos[clone] = info; return clone, nil }
+			traceDefinitionMapCloser = func(m *cebpf.Map) error { mu.Lock(); closed[m]++; mu.Unlock(); return nil }
+			scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+			stopCtx, cancelStop := context.WithCancel(context.Background())
+			stopDone, finalDone, finalEntered := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			var owner *definitionOwner
+			var stopErr, finalErr error
+			var result libpf.AuxiliaryBinding
+			var resultInfo traceDefinitionMapInfo
+			commits := 0
+			launched := false
+			t.Cleanup(func() {
+				releaseOnce.Do(func() { close(probe.release) })
+				cancelStop()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := scope.Stop(ctx)
+				scopeDone := ctx.Err() == nil
+				cancel()
+				if !scopeDone { t.Error("scope cleanup timed out") }
+				if err != nil && !errors.Is(err, context.Canceled) && !(tc.seal && strings.Contains(err.Error(), "definition owner not open")) && !(tc.sourceFail && errors.Is(err, unix.EACCES)) { t.Errorf("scope cleanup: %v", err) }
+				joined := !launched
+				if launched { select { case <-stopDone: joined = true; case <-time.After(2*time.Second): t.Error("stop cleanup timed out") } }
+				select { case <-finalEntered: select { case <-finalDone: case <-time.After(2*time.Second): t.Error("finalizer cleanup timed out"); joined = false }; default: }
+				physicalDone := owner == nil
+				if owner != nil && scopeDone {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					err := owner.closeWithContext(ctx)
+					cancel()
+					if err != nil { t.Errorf("owner cleanup: %v", err) }
+					select { case <-owner.closeReqDone: physicalDone = true; case <-time.After(2*time.Second): t.Error("owner physical cleanup timed out") }
+				}
+				if scopeDone && joined && physicalDone { traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+			})
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(context.Background(), lifetime, maps)
+			if err != nil {
+				var pending *traceDefinitionOwnerError
+				if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+				t.Fatalf("acquire model owner: %v", err)
+			}
+			clones := []*cebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+			if len(infos) != 8 { t.Fatal("expected four acquired clones") }
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("scope bind: %v", err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("scope operation did not complete") }
+			native := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			ops := traceDefinitionMapOps{
+				info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+					name := "unknown"
+					switch m { case clones[0]: name = "counter"; case clones[1]: name = "config-info"; case clones[2]: name = "perf"; case clones[3]: name = "pid" }
+					probe.call(name)
+					info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil
+				},
+				lookup: func(m *cebpf.Map, key, value any) error { probe.call("config-lookup"); out, ok := value.(*traceDefinitionConfig); if !ok || m != clones[1] || key != uint32(0) { return unix.EINVAL }; *out = native; return nil },
+				update: func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error { return unix.EINVAL }, close: traceDefinitionMapCloser,
+			}
+			owner.ops = ops
+			// MODEL: fixed source construction values use real owner-acquired clone references.
+			source := &traceDefinitionSource{owner: owner, lifetime: owner.HeldLifetime(), origCounter: counts, origConfig: config, origPerf: perf, counter: clones[0], config: clones[1], perf: clones[2], configID: 102, nativeConfig: native, ops: owner.ops,
+				binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "blocking-model", HostTGID: 1234, Birth: 5678, CounterMapID: 101, PerfMapID: 103, PossibleCPUs: 2, Generation: native.Generation}}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps}
+			var ledgerMu sync.Mutex
+			if err := scope.AddFinalizer(func() error {
+				defer close(finalDone)
+				probe.mu.Lock(); probe.armed = true; probe.mu.Unlock()
+				close(finalEntered)
+				result, resultInfo, finalErr = tracer.readAuxiliaryStopFacts()
+				if finalErr != nil { return finalErr }
+				ledgerMu.Lock(); defer ledgerMu.Unlock()
+				finalErr = tracer.commitAuxiliaryStop(func() error { commits++; return nil })
+				return finalErr
+			}); err != nil { t.Fatalf("finalizer: %v", err) }
+			launched = true
+			go func() { stopErr = scope.Stop(stopCtx); close(stopDone) }()
+			select { case <-probe.entered: case <-time.After(2*time.Second): t.Fatal("selected callback did not enter") }
+			probe.mu.Lock(); callsAtEntry := probe.calls; probe.mu.Unlock()
+			if tc.sourceFail {
+				if callsAtEntry < 8 || stopCtx.Err() != nil { t.Fatal("source failure did not reach the live config lookup") }
+				source.fail(unix.EACCES)
+			} else if tc.seal { owner.sealReadoutAdmission() } else { cancelStop(); select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("cancelled stop did not return") }; if !errors.Is(stopErr, context.Canceled) { t.Fatalf("stop lost cancellation: %v", stopErr) } }
+			var frozen libpf.AuxiliaryObservation
+			if !tc.seal && !tc.sourceFail {
+				var snapshotErr error
+				frozen, snapshotErr = scope.Observation()
+				if !scope.IsSnapshotted() || !errors.Is(snapshotErr, context.Canceled) { t.Fatal("cancelled snapshot was not frozen") }
+			}
+			reenrolled := false
+			if scope.ExecuteCallback(func() { reenrolled = true }) || reenrolled { t.Fatal("stopped scope accepted a new callback") }
+			mu.Lock(); n := len(closed); mu.Unlock()
+			probe.mu.Lock(); callsWhileBlocked := probe.calls; probe.mu.Unlock()
+			if n != 0 || mock.holds.Load() != 2 || owner.Closing() || owner.Quarantined() || owner.Closed() || callsWhileBlocked != callsAtEntry { t.Fatal("blocked readout lost ownership or advanced") }
+			releaseOnce.Do(func() { close(probe.release) })
+			select { case <-finalDone: case <-time.After(2*time.Second): t.Fatal("finalizer did not return") }
+			select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("stop did not return") }
+			if finalErr == nil || commits != 0 || result != (libpf.AuxiliaryBinding{}) || resultInfo != (traceDefinitionMapInfo{}) || ((tc.seal || tc.sourceFail) && stopErr == nil) { t.Fatal("late callback published success") }
+			probe.mu.Lock(); callsAfterReturn := probe.calls; pidCalls, validations := probe.byName["pid"], probe.byName["validate"]; probe.mu.Unlock()
+			if callsAfterReturn != callsAtEntry { t.Fatal("a subsequent native or lifetime callback ran") }
+			if tc.sourceFail && (!errors.Is(finalErr, unix.EACCES) || !errors.Is(stopErr, unix.EACCES) || pidCalls != 0 || validations != 1) { t.Fatalf("source failure did not stop subsequent primitives: %v", finalErr) }
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err = scope.Stop(ctx)
+			scopeExpired := ctx.Err()
+			cancel()
+			if scopeExpired != nil || err == nil { t.Fatalf("actual scope join: %v", err) }
+			if !tc.seal && !tc.sourceFail {
+				after, snapshotErr := scope.Observation()
+				if !reflect.DeepEqual(after, frozen) || !errors.Is(snapshotErr, context.Canceled) { t.Fatal("late callback changed the frozen snapshot") }
+			}
+			mu.Lock(); n = len(closed); mu.Unlock()
+			if n != 0 || mock.holds.Load() != 1 || owner.Closing() || owner.Quarantined() || owner.Closed() { t.Fatal("scope return closed owner resources") }
+			ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			err = owner.closeWithContext(ctx)
+			cancel()
+			if err != nil { t.Fatalf("owner close: %v", err) }
+			select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close timed out") }
+			mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+			if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("model ownership not released exactly once") }
+		})
+	}
+}
+
+func TestOwnerCloseAfterScopeNormal(t *testing.T) {
+	runOwnerCloseAfterScopeModel(t, "normal")
+}
+
+func TestOwnerCloseAfterScopePreFailed(t *testing.T) {
+	runOwnerCloseAfterScopeModel(t, "failed")
+}
+
+func runOwnerCloseAfterScopeModel(t *testing.T, mode string) {
+	t.Helper()
+	primary := errors.New("model primary failure")
+	oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+	mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "join-model", tgid: 1234, birth: 5678}}
+	counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+	infos := map[*cebpf.Map]traceDefinitionMapInfo{
+		counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+		config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+		perf:   {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 1, ID: 103},
+		pid:    {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+	}
+	var mu sync.Mutex
+	closed := make(map[*cebpf.Map]int)
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	var earlyClose bool
+	var failClone *cebpf.Map
+	traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+		info, ok := infos[m]
+		if !ok {
+			return traceDefinitionMapInfo{}, unix.EINVAL
+		}
+		return info, nil
+	}
+	traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+		info, ok := infos[m]
+		if !ok {
+			return nil, unix.EINVAL
+		}
+		clone := &cebpf.Map{}
+		infos[clone] = info
+		return clone, nil
+	}
+	traceDefinitionMapCloser = func(m *cebpf.Map) error {
+		mu.Lock()
+		closed[m]++
+		if mode == "normal" && !scope.Joined() {
+			earlyClose = true
+		}
+		mu.Unlock()
+		if m == failClone {
+			return unix.EACCES
+		}
+		return nil
+	}
+
+	var owner *definitionOwner
+	started, workerDone, unblock := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	stopDone := make(chan struct{})
+	var unblockOnce sync.Once
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	workerLaunched, stopLaunched := false, false
+	var stopErr error
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblock) })
+		cancelCaller()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := scope.Stop(ctx)
+		scopeDone := ctx.Err() == nil
+		cancel()
+		if !scopeDone {
+			t.Error("scope cleanup timed out")
+		}
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, primary) {
+			t.Errorf("scope cleanup: %v", err)
+		}
+		allDone := scopeDone
+		stopJoined := !stopLaunched
+		if workerLaunched {
+			select {
+			case <-workerDone:
+			case <-time.After(2 * time.Second):
+				t.Error("producer cleanup timed out")
+				allDone = false
+			}
+		}
+		if stopLaunched {
+			select {
+			case <-stopDone:
+				stopJoined = true
+			case <-time.After(2 * time.Second):
+				t.Error("stop cleanup timed out")
+				allDone = false
+			}
+		}
+		if owner != nil {
+			if stopLaunched && stopJoined {
+				select {
+				case <-owner.scopeJoinDone:
+				case <-time.After(2 * time.Second):
+					t.Error("owner join cleanup timed out")
+					allDone = false
+				}
+			} else if !stopLaunched && scopeDone {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := owner.closeWithContext(ctx)
+				cancel()
+				if err != nil && !errors.Is(err, unix.EACCES) {
+					t.Errorf("owner cleanup: %v", err)
+				}
+			}
+			select {
+			case <-owner.closeReqDone:
+			case <-time.After(2 * time.Second):
+				t.Error("physical owner cleanup timed out")
+				allDone = false
+			}
+		}
+		if allDone {
+			traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser
+		}
+	})
+
+	maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+	var err error
+	owner, err = acquireDefinitionOwner(context.Background(), mock, maps)
+	if err != nil {
+		var pending *traceDefinitionOwnerError
+		if errors.As(err, &pending) && pending.PendingOwner() != nil {
+			owner = pending.PendingOwner()
+		}
+		t.Fatalf("acquire model owner: %v", err)
+	}
+	clones := []*cebpf.Map{owner.countsMap, owner.configMap, owner.perfMap, owner.pidMap}
+	if mode == "blocked" {
+		failClone = clones[0]
+	}
+	if len(infos) != 8 {
+		t.Fatal("owner did not acquire four model clones")
+	}
+	if err := scope.BindLifetime(owner.HeldLifetime()); err != nil {
+		t.Fatalf("bind scope lifetime: %v", err)
+	}
+	if mock.holds.Load() != 2 {
+		t.Fatal("scope and owner did not retain two holds")
+	}
+	if mode == "normal" {
+		calls := 0
+		if !scope.ExecuteCallback(func() { calls++ }) || calls != 1 {
+			t.Fatal("scope callback did not complete")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		stopLaunched = true
+		stopErr = owner.closeAfterScope(ctx, scope)
+		close(stopDone)
+		cancel()
+		if stopErr != nil || !scope.Joined() {
+			t.Fatalf("normal scope stop: %v", stopErr)
+		}
+		select {
+		case <-owner.scopeJoinDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("owner join did not complete")
+		}
+		select {
+		case <-owner.closeReqDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("physical owner close did not complete")
+		}
+		mu.Lock()
+		valid := !earlyClose && len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0
+		for _, clone := range clones {
+			valid = valid && closed[clone] == 1
+		}
+		mu.Unlock()
+		if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 {
+			t.Fatal("normal close violated join or ownership")
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+		err = owner.closeAfterScope(ctx, scope)
+		cancel()
+		if err != nil {
+			t.Fatalf("repeat normal close: %v", err)
+		}
+		mu.Lock()
+		for _, clone := range clones {
+			valid = valid && closed[clone] == 1
+		}
+		mu.Unlock()
+		readouts := 0
+		if !valid || mock.releaseCalls.Load() != 1 || owner.WithCoveredReadout(func() error { readouts++; return nil }) == nil || readouts != 0 {
+			t.Fatal("repeat normal close renewed or released ownership")
+		}
+		return
+	}
+	workerLaunched = scope.Go(func() {
+		defer close(workerDone)
+		close(started)
+		<-unblock
+	})
+	if !workerLaunched {
+		t.Fatal("producer enrollment failed")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("producer did not enter")
+	}
+	stopLaunched = true
+	if mode == "failed" {
+		scope.Fail(primary)
+		cancelCaller()
+		stopErr = owner.closeAfterScope(callerCtx, scope)
+		close(stopDone)
+	} else {
+		go func() {
+			stopErr = owner.closeAfterScope(callerCtx, scope)
+			close(stopDone)
+		}()
+		select {
+		case <-scope.Context().Done():
+		case <-time.After(2 * time.Second):
+			t.Fatal("scope stop did not begin")
+		}
+		cancelCaller()
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("caller did not return")
+	}
+	var pending *traceDefinitionOwnerError
+	if !errors.As(stopErr, &pending) || !errors.Is(stopErr, context.Canceled) {
+		t.Fatalf("expected cancelled pending owner: %v", stopErr)
+	}
+	if mode == "failed" && !errors.Is(stopErr, primary) {
+		t.Fatalf("pending owner lost primary failure: %v", stopErr)
+	}
+	calls := 0
+	if err := owner.WithCoveredReadout(func() error { calls++; return nil }); err == nil || calls != 0 {
+		t.Fatal("sealed owner admitted readout")
+	}
+	mu.Lock()
+	n := len(closed)
+	mu.Unlock()
+	if n != 0 || mock.holds.Load() != 2 || mock.releaseCalls.Load() != 0 || owner.Closing() || owner.Quarantined() || owner.Closed() {
+		t.Fatal("owner released resources before producer joined")
+	}
+	unblockOnce.Do(func() { close(unblock) })
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("producer did not return")
+	}
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	joinErr := scope.Stop(joinCtx)
+	joinExpired := joinCtx.Err()
+	joinCancel()
+	if joinExpired != nil || (joinErr != nil && !errors.Is(joinErr, context.Canceled) && !errors.Is(joinErr, primary)) {
+		t.Fatalf("scope join: %v, context: %v", joinErr, joinExpired)
+	}
+	select {
+	case <-owner.scopeJoinDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("owner join did not complete")
+	}
+	select {
+	case <-owner.closeReqDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("physical owner close did not complete")
+	}
+	if mode == "blocked" && (!errors.Is(stopErr, unix.EACCES) || !errors.Is(stopErr, context.Canceled) || !errors.Is(owner.CloseErr(), unix.EACCES) || errors.Is(owner.CloseErr(), context.Canceled)) {
+		t.Fatalf("late physical error not retained correctly: pending=%v close=%v", stopErr, owner.CloseErr())
+	}
+	if mode == "failed" && (owner.CloseErr() != nil || !errors.Is(stopErr, primary) || !errors.Is(stopErr, context.Canceled)) {
+		t.Fatalf("failed scope contaminated physical close: pending=%v close=%v", stopErr, owner.CloseErr())
+	}
+	mu.Lock()
+	valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0
+	for _, clone := range clones {
+		valid = valid && closed[clone] == 1
+	}
+	mu.Unlock()
+	if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 {
+		t.Fatal("scope and owner did not release exactly the owned resources")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err = owner.closeAfterScope(ctx, scope)
+	cancel()
+	if (mode == "blocked" && !errors.Is(err, unix.EACCES)) || (mode == "failed" && !errors.Is(err, primary)) {
+		t.Fatalf("repeat close lost physical error: %v", err)
+	}
+	mu.Lock()
+	for _, clone := range clones {
+		valid = valid && closed[clone] == 1
+	}
+	mu.Unlock()
+	if !valid || mock.releaseCalls.Load() != 1 {
+		t.Fatal("repeat close released resources again")
+	}
+	if err := owner.WithCoveredReadout(func() error { calls++; return nil }); err == nil || calls != 0 {
+		t.Fatal("repeat close renewed readout admission")
 	}
 }

@@ -115,20 +115,37 @@ internal data class HotSpotReplaySummary(
     val rawJson: String,
 )
 
+internal data class HotSpotCollectionReceipt(
+    val wireReceipt: HotSpotWireReceipt?,
+    val counts: HotSpotAccumulatorCounts,
+)
+
+internal data class HotSpotRetentionFacts(
+    val discardedOccurrences: ULong,
+    val retainedBytes: Int,
+    val discardedRecoveries: ULong,
+    val finalized: Boolean = true,
+    val pendingOccurrences: ULong = 0uL,
+)
+
 internal class StructuredProfileEvidence(
     val sessionId: String,
     records: List<HotSpotOccurrence>,
     val summary: HotSpotReplaySummary,
-    val discardedOccurrences: ULong,
-    val retainedBytes: Int,
     recoveries: List<String>,
-    val discardedRecoveries: ULong,
-    val finalized: Boolean = true,
-    val pendingOccurrences: ULong = 0uL,
+    retention: HotSpotRetentionFacts,
+    val runtimeProfile: String? = null,
+    val collectionAccounting: HotSpotCollectionOutcome = HotSpotCollectionOutcome.Unknown("uninitialized"),
+    val collectionReceipt: HotSpotCollectionReceipt? = null,
 ) {
     val records: List<HotSpotOccurrence> = java.util.List.copyOf(records)
     val recoveries: List<String> = java.util.List.copyOf(recoveries)
-    val collectionLossComplete: Boolean = false
+    val discardedOccurrences: ULong = retention.discardedOccurrences
+    val retainedBytes: Int = retention.retainedBytes
+    val discardedRecoveries: ULong = retention.discardedRecoveries
+    val finalized: Boolean = retention.finalized
+    val pendingOccurrences: ULong = retention.pendingOccurrences
+    val collectionLossComplete: Boolean get() = collectionAccounting.complete
     val terminalAccountingComplete: Boolean get() = summary.terminalAccountingComplete
     val retentionComplete: Boolean get() = discardedOccurrences == 0uL && discardedRecoveries == 0uL
 }

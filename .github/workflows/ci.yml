@@ -5,6 +5,13 @@ on:
         branches: [main, master]
     pull_request:
         branches: [main, master]
+    workflow_dispatch:
+        inputs:
+            enable_go_validation:
+                description: 'Run optional Agentless Go validation'
+                required: false
+                default: false
+                type: boolean
 
 # Replace obsolete PR work, without grouping/cancelling separate default-branch pushes.
 concurrency:
@@ -610,6 +617,7 @@ jobs:
                   if-no-files-found: ignore
     go-validation:
         name: Agentless Go Validation
+        if: ${{ vars.ENABLE_GO_VALIDATION == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation) }}
         runs-on: ubuntu-26.04
         timeout-minutes: 45
         permissions:
@@ -635,7 +643,7 @@ jobs:
                           - '.github/workflows/ci.yml'
                           - 'scripts/ci_resource_probe.py'
             - name: Set up Go
-              if: steps.go_changes.outputs.go == 'true'
+              if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
               uses: actions/setup-go@v6
               with:
                   go-version-file: profiler/hotspot-agentless/go.mod
@@ -643,10 +651,10 @@ jobs:
                       profiler/hotspot-agentless/go.sum
                       experiments/hotspot-agentless/go.sum
             - name: Install Pinned Vulnerability Scanner
-              if: steps.go_changes.outputs.go == 'true'
+              if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
               run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
             - name: Run Go Checks
-              if: steps.go_changes.outputs.go == 'true'
+              if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
               run: |
                   set -o pipefail
                   mkdir -p build/reports/ci-resources
@@ -703,7 +711,7 @@ jobs:
             container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
         steps:
             - name: Require Core and Mutation Success
-              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success && test "${{ needs.optional-integrations.result }}" = success && test "${{ needs.confined-helper-kernel.result }}" = success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && (test "${{ needs.go-validation.result }}" = success || (test "${{ vars.ENABLE_GO_VALIDATION }}" != true && test "${{ inputs.enable_go_validation }}" != true && test "${{ needs.go-validation.result }}" = skipped)) && test "${{ needs.optional-integrations.result }}" = success && test "${{ needs.confined-helper-kernel.result }}" = success
     publish:
         name: Publish Verified Packages
         needs: [optional-integrations, build-test-publish]

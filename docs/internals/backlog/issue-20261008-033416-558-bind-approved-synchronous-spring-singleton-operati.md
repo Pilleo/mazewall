@@ -6,7 +6,11 @@ priority: high
 dependencies: []
 component: "spring-integration"
 target_modules: ["integrations:spring:mazewall-spring-boot"]
-target_files: ["integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringOperationBinder.java"]
+target_files:
+  - "integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringOperationBinder.java"
+  - "integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringTransactionEffects.java"
+  - "integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringTransactionGuard.java"
+  - "integrations/spring/mazewall-spring-boot/src/test/java/io/mazewall/spring/JdbcTransactionTest.java"
 target_symbols: ["SpringOperationBinder", "DomainLifecycle", "SpringTransactionGuard"]
 open_questions: true
 ---
@@ -58,6 +62,41 @@ Related fixture correction binds JdbcTemplate and manager to the SAME fault-wrap
 datasource and asserts active resource identity. Earlier fault-mode raw-datasource
 logs alone are not managed SQL-effect proof. TASK5-ADOPTION-PLAN.md defines the gated
 typed-owner/JAR adoption and coordinator/root update without copying unreviewed core.
+
+## Optional state-design opportunity — 2026-11-05
+
+[Recursive review F-01](../reviews/2026-11-05-state-complexity-review.md),
+**P3 design-only; no additional JDBC defect established**. The private effect
+ledger in `SpringTransactionEffects.java:105–125` uses `outcome`, nullable
+`completionThread` and `rollbackRequested` to represent pending, rollback intent
+and completed uncertainty. Its projection shares precedence rules with
+`SpringTransactionGuard.java:169–193`. Reviewed callers currently guard them.
+
+When touching the owned S2 outcome slice, consolidate that projection into one
+private exhaustive decision over payload-bearing progress/evidence states,
+removing the redundant tuple rather than adding another owner. Preserve public
+Outcome/report compatibility, retained intent/confirmation evidence and physical
+worker checks. Spring/JDBC calls, savepoint identity maps, callback descendant
+rereads, ambiguity detection and report publication remain effects.
+
+A bounded pure table should prove: intent is not rollback success; failed or
+ambiguous savepoint rollback stays UNKNOWN under outer commit/uncertainty;
+confirmed rollback survives outer completion; whole rollback may confirm
+same-transaction descendants, never independent REQUIRES_NEW work; pending and
+completed UNKNOWN remain distinct. Keep real same-datasource/fault-wrapped H2
+tests as interpreter proof. This optional maintainability improvement is not a
+new release blocker and must not displace the concrete fatal-identity repair below.
+
+---
+## Repository-review expansion — 2026-11-04
+
+[SPR-01](../reviews/2026-11-04-repository-review-findings.md#spr-01) freshly reproduces
+fatal Error replacement when JDBC rollback also fails. Preserve the original fatal at the
+owned boundary with rollback failure attached and UNKNOWN transaction outcome; prove failed
+generation/non-reuse in the actual adapter regression. The successful-rollback fatal and S2
+qualified-manager fixes remain present. Retained S0 effective-manager selection belongs to838;
+new SPR-02 owns framework phase-timeout runtime-plus-dependency retention. These residuals do
+not erase the earlier accepted adapter slice or authorize widening async/advisor contracts.
 
 ---
 <!-- id: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati  file: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md -->

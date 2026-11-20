@@ -1,0 +1,161 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func TestCachedKindsLocalFreezeAndImmutability(t *testing.T) {
+	b := NewKindBook()
+	if _, ok := b.CachedKindsLocal(); ok {
+		t.Fatal("snapshot available before freeze")
+	}
+	var nilBook *KindBook
+	if _, ok := nilBook.CachedKindsLocal(); ok {
+		t.Fatal("nil book has snapshot")
+	}
+	actual := kindBookID(libpf.AuxiliarySourcePeriodicMetrics, "cache")
+	completed, err := b.Admit(libpf.AuxiliarySourcePeriodicMetrics, actual, true)
+	if err != nil { t.Fatal(err) }
+	if err := completed.Complete(); err != nil { t.Fatal(err) }
+	failedID := kindBookID(libpf.AuxiliarySourcePIDCleanup, "cache")
+	failed, err := b.Admit(libpf.AuxiliarySourcePIDCleanup, failedID, true)
+	if err != nil { t.Fatal(err) }
+	if err := failed.Fail(errors.New("failed")); err != nil { t.Fatal(err) }
+	unknown, err := b.Admit(libpf.AuxiliarySourceInterpreterMetrics, libpf.AuxiliaryBinding{}, false)
+	if err != nil { t.Fatal(err) }
+	if err := unknown.Complete(); err != nil { t.Fatal(err) }
+	reloadID := kindBookID(libpf.AuxiliarySourceReportReloadRecord, "cache")
+	held, err := b.Admit(libpf.AuxiliarySourceReportReloadRecord, reloadID, true)
+	if err != nil { t.Fatal(err) }
+	b.Freeze(false, actual, nil)
+	got, ok := b.CachedKindsLocal()
+	if !ok || got.State != libpf.LocalCopied || len(got.Kinds) != 15 { t.Fatalf("snapshot: %+v, %v", got, ok) }
+	for i, row := range got.Kinds {
+		if !row.Present || row.Source != libpf.AuxiliarySource(i+2) { t.Fatalf("slot %d: %+v", i, row) }
+	}
+	row := got.Kinds[0]
+	if row.Binding != actual || row.Counts.Admitted != 1 || row.Counts.Completed != 1 || row.Counts.InFlight != 0 || row.Outcome != libpf.AuxiliaryFinal || row.HeldWork || row.ErrorPresent { t.Fatalf("complete: %+v", row) }
+	row = got.Kinds[1]
+	if row.Binding != failedID || row.Counts.Failed != 1 || !row.ErrorPresent || row.HeldWork { t.Fatalf("failure: %+v", row) }
+	row = got.Kinds[2]
+	if row.Binding != (libpf.AuxiliaryBinding{}) || row.Counts.Completed != 1 || !row.ErrorPresent { t.Fatalf("unknown identity: %+v", row) }
+	row = got.Kinds[14]
+	if row.Binding != reloadID || row.Counts.InFlight != 1 || !row.HeldWork || !row.ErrorPresent { t.Fatalf("held reload: %+v", row) }
+	if got.Kinds[3].Counts.Admitted != 0 || got.Kinds[3].Outcome != libpf.AuxiliaryNotExercised { t.Fatalf("zero frozen row: %+v", got.Kinds[3]) }
+	want := got
+	got.Kinds[0].Binding.Session = "mutated"
+	if err := held.Complete(); err != nil { t.Fatal(err) }
+	b.Freeze(true, libpf.AuxiliaryBinding{}, context.DeadlineExceeded)
+	again, ok := b.CachedKindsLocal()
+	if !ok || again != want { t.Fatalf("cache changed: %+v, want %+v", again, want) }
+}
+
+func TestCachedKindsLocalExpiredAndUnlocked(t *testing.T) {
+	b := NewKindBook()
+	id := kindBookID(libpf.AuxiliarySourcePeriodicMetrics, "expired")
+	op, err := b.Admit(libpf.AuxiliarySourcePeriodicMetrics, id, true)
+	if err != nil { t.Fatal(err) }
+	b.Freeze(true, libpf.AuxiliaryBinding{}, context.DeadlineExceeded)
+	got, ok := b.CachedKindsLocal()
+	if !ok || got.Kinds[0].Binding != (libpf.AuxiliaryBinding{}) || !got.Kinds[0].HeldWork || !got.Kinds[0].ErrorPresent { t.Fatalf("expired: %+v, %v", got, ok) }
+	b.mu.Lock()
+	result := make(chan KindsLocalSnapshot, 1)
+	go func() { value, _ := b.CachedKindsLocal(); result <- value }()
+	select {
+	case value := <-result:
+		if value != got { b.mu.Unlock(); t.Fatal("different cached value") }
+	case <-time.After(time.Second):
+		b.mu.Unlock()
+		t.Fatal("getter waited for owner mutex")
+	}
+	b.mu.Unlock()
+	if err := op.Complete(); err != nil { t.Fatal(err) }
+}
+
+func TestCachedKindsLocalConcurrentFreeze(t *testing.T) {
+	b := NewKindBook()
+	id := kindBookID(libpf.AuxiliarySourcePeriodicMetrics, "concurrent")
+	op, err := b.Admit(libpf.AuxiliarySourcePeriodicMetrics, id, true)
+	if err != nil { t.Fatal(err) }
+	if err := op.Complete(); err != nil { t.Fatal(err) }
+	start, done := make(chan struct{}), make(chan struct{})
+	bad := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for {
+				if value, ok := b.CachedKindsLocal(); ok {
+					if value.State != libpf.LocalCopied || !value.Kinds[0].Present || value.Kinds[0].Binding != id || value.Kinds[0].Counts.Completed != 1 || value.Kinds[0].ErrorPresent || !value.Kinds[14].Present || value.Kinds[14].Source != libpf.AuxiliarySourceReportReloadRecord { bad <- struct{}{} }
+					return
+				}
+				select {
+				case <-done:
+					if _, ok := b.CachedKindsLocal(); !ok { bad <- struct{}{}; return }
+				default:
+				}
+			}
+		}()
+	}
+	close(start)
+	b.Freeze(false, id, nil)
+	close(done)
+	wg.Wait()
+	select { case <-bad: t.Fatal("missing or partially published snapshot"); default: }
+}
+
+func TestCachedKindsLocalDuplicateTerminalAndUnknownKind(t *testing.T) {
+	b := NewKindBook()
+	id := kindBookID(libpf.AuxiliarySourcePeriodicMetrics, "dup-test")
+
+	// 1. Unknown kind rejection
+	unknownKind := libpf.AuxiliarySource(99)
+	if _, err := b.Admit(unknownKind, id, true); err == nil {
+		t.Fatal("expected admission of unknown kind to fail")
+	}
+
+	// 2. Duplicate terminal rejection
+	op, err := b.Admit(libpf.AuxiliarySourcePeriodicMetrics, id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Complete(); err == nil {
+		t.Fatal("expected duplicate terminal to fail")
+	}
+	if err := op.Fail(errors.New("late fail")); err == nil {
+		t.Fatal("expected terminal after complete to fail")
+	}
+
+	// 3. Overflow or held work tracking
+	heldOp, err := b.Admit(libpf.AuxiliarySourcePIDCleanup, id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Freeze(false, id, nil)
+
+	got, ok := b.CachedKindsLocal()
+	if !ok || !got.Kinds[0].Present || got.Kinds[0].Counts.Completed != 1 {
+		t.Fatalf("unexpected snapshot after duplicate terminal: %+v", got)
+	}
+	if !got.Kinds[0].ErrorPresent {
+		t.Fatal("expected duplicate terminal to record sticky error in row")
+	}
+	// Held work must be reported for PIDCleanup
+	if !got.Kinds[1].HeldWork {
+		t.Fatal("expected held work to be true for unfrozen uncompleted operation")
+	}
+	_ = heldOp.Abort()
+}

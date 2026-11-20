@@ -1,0 +1,286 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+)
+
+func TestCachedPIDProcessLocalReducerIsNonfinal(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr.observePIDProcess(makePIDTID(12345, 12345))
+	local, err := localPIDProcessModel(tr)
+	if err != nil || local.Outcome != PIDProcessLocalConservedNonfinal || local.Counts.Received != 1 || local.Counts.OrdinaryNil != 1 { t.Fatalf("local reducer: %+v, %v", local, err) }
+	tr.pidProcess.mu.Lock()
+	tr.pidProcess.publishPIDProcessLocalLocked()
+	tr.pidProcess.mu.Unlock()
+	got, ok := tr.CachedPIDProcessLocal()
+	if !ok || got.Outcome != PIDProcessLocalConservedNonfinal || got.ErrorPresent || got.Counts.Received != 1 || got.Counts.OrdinaryNil != 1 { t.Fatalf("nonfinal local cache: %+v, %v", got, ok) }
+}
+
+func TestCachedPIDProcessLocalRealSealAndCopies(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+	if _, ok := tr.CachedPIDProcessLocal(); ok { t.Fatal("ready before seal") }
+	var nilTracer *Tracer
+	if _, ok := nilTracer.CachedPIDProcessLocal(); ok { t.Fatal("nil tracer ready") }
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.PermissionIgnored, nil) }
+	tr.observePIDProcess(makePIDTID(12345, 12345))
+	if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+	got, ok := tr.CachedPIDProcessLocal()
+	if !ok || got.State != libpf.LocalCopied || got.Outcome != PIDProcessFailed || !got.ErrorPresent || got.Binding != tr.pidProcess.expectedBinding || got.Counts.Received != 1 || got.Counts.PermissionIgnored != 1 || got.Counts.InFlight != 0 { t.Fatalf("snapshot: %+v, %v", got, ok) }
+	want := got
+	got.Binding.Session = "modified copy"
+	tr.pidProcess.mu.Lock()
+	tr.pidProcess.counts.Received = 99
+	result := make(chan PIDProcessLocalSnapshot, 1)
+	readDone := make(chan struct{})
+	readLaunched := false
+	t.Cleanup(func() { if readLaunched { select { case <-readDone: case <-time.After(2*time.Second): t.Error("cache reader cleanup timed out") } } })
+	readLaunched = true
+	go func() { defer close(readDone); v, _ := tr.CachedPIDProcessLocal(); result <- v }()
+	select {
+	case <-readDone:
+		v := <-result
+		if v != want { tr.pidProcess.mu.Unlock(); t.Fatal("cache changed") }
+	case <-time.After(time.Second):
+		tr.pidProcess.mu.Unlock()
+		t.Fatal("getter waited for owner lock")
+	}
+	tr.pidProcess.mu.Unlock()
+	if err := tr.sealPIDProcess(); err == nil { t.Fatal("repeat unretained seal succeeded") }
+	again, ok := tr.CachedPIDProcessLocal()
+	if !ok || again != want { t.Fatal("repeated seal changed cache") }
+}
+
+func TestCachedPIDProcessLocalHeldAndIncomplete(t *testing.T) {
+	t.Run("held", func(t *testing.T) {
+		tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+		entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		var releaseOnce sync.Once
+		launched := false
+		t.Cleanup(func() {
+			releaseOnce.Do(func() { close(release) })
+			if launched { select { case <-done: case <-time.After(2*time.Second): t.Error("held worker cleanup timed out") } }
+		})
+		tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { close(entered); <-release; report(pm.OrdinaryNil, nil) }
+		launched = true
+		go func() { tr.observePIDProcess(makePIDTID(12345, 12345)); close(done) }()
+		select { case <-entered: case <-time.After(2*time.Second): t.Fatal("held worker did not enter") }
+		if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+		got, ok := tr.CachedPIDProcessLocal()
+		_, originalErr := tr.PIDProcessObservation()
+		releaseOnce.Do(func() { close(release) })
+		select { case <-done: case <-time.After(2*time.Second): t.Fatal("held worker did not return") }
+		if !ok || got.Outcome != PIDProcessFailed || !got.ErrorPresent || got.Counts.Received != 1 || got.Counts.InFlight != 1 || originalErr == nil { t.Fatalf("held: %+v, error %v", got, originalErr) }
+		again, ok := tr.CachedPIDProcessLocal()
+		if !ok || again != got { t.Fatal("late terminal changed cache") }
+	})
+	t.Run("no-report", func(t *testing.T) {
+		tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+		tr.pidProcess.syncOrdinaryOverride = func(process.Process, func(pm.OrdinarySyncBranch, error)) {}
+		tr.observePIDProcess(makePIDTID(12345, 12345))
+		if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+		got, ok := tr.CachedPIDProcessLocal()
+		_, originalErr := tr.PIDProcessObservation()
+		if !ok || got.Outcome != PIDProcessFailed || !got.ErrorPresent || got.Counts.Received != 1 || got.Counts.InFlight != 0 || originalErr == nil || !strings.Contains(originalErr.Error(), "without report") { t.Fatalf("incomplete: %+v, error %v", got, originalErr) }
+	})
+}
+
+func TestCachedPIDProcessLocalIdentityAndEmptyBinding(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+	tr.pidProcess.expectedBinding = libpf.AuxiliaryBinding{}
+	if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+	got, ok := tr.CachedPIDProcessLocal()
+	_, originalErr := tr.PIDProcessObservation()
+	if !ok || got.Binding != (libpf.AuxiliaryBinding{}) || got.Outcome != PIDProcessFailed || !got.ErrorPresent || originalErr == nil { t.Fatalf("identity: %+v, error %v", got, originalErr) }
+}
+
+func TestCachedPIDProcessLocalContextAndParentFailure(t *testing.T) {
+	tr, scope, _ := setupTestPIDProcessTracer(t, 12345)
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.Context, context.Canceled) }
+	tr.observePIDProcess(makePIDTID(12345, 12345))
+	cause := errors.New("parent process failure")
+	scope.Fail(cause)
+	if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+	got, ok := tr.CachedPIDProcessLocal()
+	_, originalErr := tr.PIDProcessObservation()
+	if !ok || got.Outcome != PIDProcessFailed || !got.ErrorPresent || got.Counts.Received != 1 || got.Counts.Context != 1 || got.Counts.InFlight != 0 || !errors.Is(originalErr, cause) { t.Fatalf("parent failure: %+v, error %v", got, originalErr) }
+}
+
+func TestCachedPIDProcessLocalConcurrentSeal(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+	start, done, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	bad := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	var startOnce, doneOnce sync.Once
+	joinLaunched := false
+	t.Cleanup(func() {
+		startOnce.Do(func() { close(start) })
+		doneOnce.Do(func() { close(done) })
+		if joinLaunched { select { case <-joined: case <-time.After(2*time.Second): t.Error("cache readers cleanup timed out") } }
+	})
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done(); <-start
+			v, ok := tr.CachedPIDProcessLocal()
+			if !ok { <-done; v, ok = tr.CachedPIDProcessLocal() }
+			if !ok || v.State != libpf.LocalCopied || v.Outcome != PIDProcessFailed || !v.ErrorPresent || v.Binding.HostTGID != 12345 || v.Binding.Generation == 0 { bad <- struct{}{} }
+		}()
+	}
+	joinLaunched = true
+	go func() { wg.Wait(); close(joined) }()
+	startOnce.Do(func() { close(start) })
+	if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+	doneOnce.Do(func() { close(done) })
+	select { case <-joined: case <-time.After(2*time.Second): t.Fatal("cache readers did not return") }
+	select { case <-bad: t.Fatal("incomplete cache publication"); default: }
+}
+
+func TestCachedPIDProcessLocalNormalStopDeferredSealVsExternalCancel(t *testing.T) {
+	t.Run("normal-stop-worker-join", func(t *testing.T) {
+		tr, scope, _ := setupTestPIDProcessTracer(t, 12345)
+		processed := make(chan struct{})
+		tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) {
+			report(pm.PermissionIgnored, nil)
+			close(processed)
+		}
+
+		workerExited := make(chan struct{})
+		workerLaunched := false
+		t.Cleanup(func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			err := scope.Stop(stopCtx); expired := stopCtx.Err(); cancel()
+			if expired != nil { t.Error("worker scope cleanup timed out") }
+			if err != nil && (scope.Failure() == nil || !errors.Is(err, scope.Failure())) { t.Errorf("worker scope cleanup: %v", err) }
+			if workerLaunched { select { case <-workerExited: case <-time.After(time.Second): t.Error("worker cleanup timed out") } }
+		})
+		enrolled := scope.Go(func() {
+			defer close(workerExited)
+			tr.processPIDEvents(scope.Context())
+		})
+		workerLaunched = enrolled
+		if !enrolled {
+			t.Fatal("failed to enroll worker in owned scope")
+		}
+
+		// Emit event and await processed signal (no sleep oracle!)
+		tr.pidEvents <- makePIDTID(12345, 12345)
+		select {
+		case <-processed:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for event processing")
+		}
+
+		// Stop joins the worker; the unretained fixture cannot produce a covered seal.
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		stopErr := scope.Stop(stopCtx)
+		if stopErr != nil && (scope.Failure() == nil || !errors.Is(stopErr, scope.Failure())) { t.Fatalf("scope stop: %v", stopErr) }
+
+		select {
+		case <-workerExited:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for worker exit")
+		}
+
+		if err := tr.sealPIDProcess(); err == nil { t.Fatal("unretained seal succeeded") }
+		got, ok := tr.CachedPIDProcessLocal()
+		if !ok || got.Outcome != PIDProcessFailed || !got.ErrorPresent || got.Counts.Received != 1 || got.Counts.PermissionIgnored != 1 {
+			t.Fatalf("unretained worker snapshot: %+v, ok=%v", got, ok)
+		}
+	})
+
+	t.Run("external-cancel-worker-join", func(t *testing.T) {
+		parent, cancel := context.WithCancel(context.Background())
+		scope := periodiccaller.NewOwnedScope(parent, nil)
+		expected := libpf.AuxiliaryBinding{
+			Source:     libpf.AuxiliarySourcePeriodicCaller,
+			Session:    "ext-cancel",
+			HostTGID:   12345,
+			Birth:      100,
+			Generation: 1, /* model-only fixture scalar */
+		}
+		ch := make(chan libpf.PIDTID, 20)
+		processMgr := &pm.ProcessManager{}
+		tr := &Tracer{
+			auxiliaryScope: scope,
+			processManager: processMgr,
+			pidEvents:      ch,
+			intervals:      stubPIDIntervals{},
+		}
+		tr.pidProcess = &pidProcess{
+			scope:           scope,
+			expectedBinding: expected,
+			origChannel:     ch,
+			origPM:          processMgr,
+			outcome:         PIDProcessNotSealed,
+		}
+
+		processed := make(chan struct{})
+		tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) {
+			report(pm.PermissionIgnored, nil)
+			close(processed)
+		}
+
+		workerExited := make(chan struct{})
+		workerLaunched := false
+		t.Cleanup(func() {
+			cancel()
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+			err := scope.Stop(stopCtx); expired := stopCtx.Err(); stopCancel()
+			if expired != nil { t.Error("cancelled scope cleanup timed out") }
+			if err == nil || !errors.Is(err, context.Canceled) { t.Errorf("cancelled scope cleanup: %v", err) }
+			if workerLaunched { select { case <-workerExited: case <-time.After(time.Second): t.Error("worker cleanup timed out") } }
+		})
+		enrolled := scope.Go(func() {
+			defer close(workerExited)
+			tr.processPIDEvents(scope.Context())
+		})
+		workerLaunched = enrolled
+		if !enrolled {
+			t.Fatal("failed to enroll worker in owned scope")
+		}
+
+		// Emit event and await processed signal
+		tr.pidEvents <- makePIDTID(12345, 12345)
+		select {
+		case <-processed:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for event processing")
+		}
+
+		// Cancel external parent context
+		cancel()
+
+		select {
+		case <-workerExited:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for worker exit on cancel")
+		}
+
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		stopErr := scope.Stop(stopCtx)
+		stopCancel()
+		if stopErr == nil || (!errors.Is(stopErr, context.Canceled) && !strings.Contains(stopErr.Error(), "canceled")) {
+			t.Fatalf("expected parent canceled on Stop, got: %v", stopErr)
+		}
+		if pErr := scope.ParentErr(); pErr == nil || (!errors.Is(pErr, context.Canceled) && !strings.Contains(pErr.Error(), "canceled")) {
+			t.Fatalf("expected parent canceled in ParentErr, got: %v", pErr)
+		}
+		if _, obsErr := scope.Observation(); obsErr == nil {
+			t.Fatal("expected scope observation to report parent failure")
+		}
+	})
+}

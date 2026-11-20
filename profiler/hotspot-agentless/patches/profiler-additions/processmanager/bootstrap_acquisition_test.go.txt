@@ -1,0 +1,194 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libc"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	"go.opentelemetry.io/ebpf-profiler/processmanager/execinfomanager"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type acquisitionProcess struct{ process.Process }
+
+func (acquisitionProcess) PID() libpf.PID { return 123 }
+func (acquisitionProcess) GetRemoteMemory() remotememory.RemoteMemory {
+	return remotememory.RemoteMemory{}
+}
+
+type acquisitionInstance struct {
+	interpreter.InstanceStubs
+	configureErr error
+	libcErr      error
+	detaches     int
+}
+
+func (i *acquisitionInstance) ConfigureHotSpotEpoch(libpf.HotSpotEpochTarget) error {
+	return i.configureErr
+}
+func (i *acquisitionInstance) ConfigureHotSpotObservedBootstrap(libpf.PID) error {
+	return i.configureErr
+}
+func (*acquisitionInstance) CheckHotSpotObservedBootstrap(libpf.PID) error { return nil }
+func (*acquisitionInstance) BeginHotSpotEpoch(libpf.HotSpotIdentity) (interpreter.HotSpotEpochDecoder, error) {
+	return nil, nil
+}
+func (i *acquisitionInstance) Detach(interpreter.EbpfHandler, libpf.PID) error {
+	i.detaches++
+	return nil
+}
+func (i *acquisitionInstance) UpdateLibcInfo(interpreter.EbpfHandler, libpf.PID, libc.LibcInfo) error {
+	return i.libcErr
+}
+
+type acquisitionData struct {
+	instance *acquisitionInstance
+	calls    int
+}
+
+func (d *acquisitionData) Attach(interpreter.EbpfHandler, libpf.PID, libpf.Address, remotememory.RemoteMemory) (interpreter.Instance, error) {
+	d.calls++
+	return d.instance, nil
+}
+func (*acquisitionData) Unload(interpreter.EbpfHandler) {}
+
+func TestObservedBootstrapConfigureFailureJournaled(t *testing.T) {
+	pid := libpf.PID(123)
+	instance := &acquisitionInstance{configureErr: syscall.EACCES}
+	pm := &ProcessManager{observedPID: pid, interpreters: make(map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance)}
+	j := &bootstrapJournal{}
+	err := pm.handleNewInterpreterChecked(context.Background(), acquisitionProcess{}, 0, util.OnDiskFileIdentifier{DeviceID: 1, InodeNum: 2}, &acquisitionData{instance: instance}, strictObservedBootstrap, j)
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("configure error: %v", err)
+	}
+	if err = j.rollback(pm, err); !errors.Is(err, syscall.EACCES) || instance.detaches != 1 || len(j.entries) != 0 {
+		t.Fatalf("rollback err=%v detaches=%d entries=%d", err, instance.detaches, len(j.entries))
+	}
+}
+
+func TestObservedBootstrapFinisherRequiresOwnedReadyInstance(t *testing.T) {
+	pid := libpf.PID(123)
+	info := &processInfo{mappings: []Mapping{{Vaddr: 0x1000}}}
+	instance := &acquisitionInstance{}
+	pm := &ProcessManager{observedPID: pid, pidToProcessInfo: map[libpf.PID]*processInfo{pid: info}, interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{pid: {{DeviceID: 1, InodeNum: 2}: instance}}}
+	j := &bootstrapJournal{info: info}
+	finish := func() error {
+		return pm.finishHotSpotObservedBootstrap(context.Background(), bootstrapTestProcess{}, bootstrapTestLifetime{}, pid, 123, 456, "session", j)
+	}
+	if err := finish(); err != nil {
+		t.Fatalf("ready observed instance rejected: %v", err)
+	}
+	j.info = nil
+	if err := finish(); err == nil {
+		t.Fatal("unowned mappings accepted")
+	}
+	j.info = info
+	pm.epochTarget.PID = pid
+	if err := finish(); err == nil {
+		t.Fatal("conflicting epoch target accepted")
+	}
+}
+
+func TestCheckedInterpreterRollback(t *testing.T) {
+	pid := libpf.PID(123)
+	newKey := util.OnDiskFileIdentifier{DeviceID: 1, InodeNum: 2}
+	newInstance := &acquisitionInstance{configureErr: syscall.EPERM}
+	data := &acquisitionData{instance: newInstance}
+	pm := &ProcessManager{epochTarget: libpf.HotSpotEpochTarget{PID: pid}, interpreters: make(map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance)}
+	j := &bootstrapJournal{}
+	err := pm.handleNewInterpreterChecked(context.Background(), acquisitionProcess{}, 0, newKey, data, strictEpochBootstrap, j)
+	if !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("configure error: %v", err)
+	}
+	if err = j.rollback(pm, err); !errors.Is(err, syscall.EPERM) || newInstance.detaches != 1 || len(j.entries) != 0 {
+		t.Fatalf("rollback err=%v new=%d journal=%d", err, newInstance.detaches, len(j.entries))
+	}
+	_ = j.rollback(pm, nil)
+	if newInstance.detaches != 1 {
+		t.Fatalf("repeated detach: %d", newInstance.detaches)
+	}
+}
+
+type fakeAcquisitionManager struct {
+	addErr, loaderErr, releaseErr error
+	adds, loads, releases         int
+}
+
+func (m *fakeAcquisitionManager) AddOrIncRef(host.FileID, *pfelf.Reference) (execinfomanager.ExecutableInfo, error) {
+	m.adds++
+	return execinfomanager.ExecutableInfo{}, m.addErr
+}
+func (m *fakeAcquisitionManager) LoaderError(host.FileID) error { m.loads++; return m.loaderErr }
+func (m *fakeAcquisitionManager) DecRef(host.FileID) error      { m.releases++; return m.releaseErr }
+
+func TestCheckedELFOwnership(t *testing.T) {
+	pm := &ProcessManager{}
+	m := &fakeAcquisitionManager{loaderErr: syscall.EACCES}
+	j := &bootstrapJournal{}
+	_, err := j.acquireELF(context.Background(), m, host.FileID(42), nil)
+	if !errors.Is(err, syscall.EACCES) || len(j.entries) != 1 || m.loads != 1 {
+		t.Fatalf("loader error=%v journal=%d loads=%d", err, len(j.entries), m.loads)
+	}
+	if err = j.rollback(pm, err); !errors.Is(err, syscall.EACCES) || m.releases != 1 {
+		t.Fatalf("rollback=%v releases=%d", err, m.releases)
+	}
+	_ = j.rollback(pm, nil)
+	if m.releases != 1 {
+		t.Fatalf("duplicate release: %d", m.releases)
+	}
+	m = &fakeAcquisitionManager{addErr: syscall.EPERM}
+	j = &bootstrapJournal{}
+	_, err = j.acquireELF(context.Background(), m, host.FileID(43), nil)
+	_ = j.rollback(pm, err)
+	if !errors.Is(err, syscall.EPERM) || m.loads != 0 || m.releases != 0 {
+		t.Fatalf("add error=%v loads=%d releases=%d", err, m.loads, m.releases)
+	}
+	m = &fakeAcquisitionManager{loaderErr: syscall.EACCES, releaseErr: syscall.EBUSY}
+	j = &bootstrapJournal{}
+	_, err = j.acquireELF(context.Background(), m, host.FileID(44), nil)
+	err = j.rollback(pm, err)
+	if !errors.Is(err, syscall.EACCES) || !errors.Is(err, syscall.EBUSY) || len(j.entries) != 1 {
+		t.Fatalf("joined=%v journal=%d", err, len(j.entries))
+	}
+}
+
+func TestCheckedRejectsBorrowedState(t *testing.T) {
+	pid := libpf.PID(123)
+	key := util.OnDiskFileIdentifier{DeviceID: 1}
+	old := &acquisitionInstance{}
+	data := &acquisitionData{instance: &acquisitionInstance{}}
+	pm := &ProcessManager{interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{pid: {key: old}}}
+	j := &bootstrapJournal{}
+	err := pm.handleNewInterpreterChecked(context.Background(), acquisitionProcess{}, 0, key, data, strictEpochBootstrap, j)
+	if err == nil || data.calls != 0 || old.detaches != 0 || pm.interpreters[pid][key] != old {
+		t.Fatalf("borrowed state: err=%v calls=%d detach=%d", err, data.calls, old.detaches)
+	}
+	pm.interpreters = nil
+	pm.pidToProcessInfo = map[libpf.PID]*processInfo{pid: {}}
+	err = pm.handleNewInterpreterChecked(context.Background(), acquisitionProcess{}, 0, key, data, strictEpochBootstrap, j)
+	if err == nil || data.calls != 0 {
+		t.Fatalf("borrowed info: err=%v calls=%d", err, data.calls)
+	}
+}
+
+func TestCheckedLibcError(t *testing.T) {
+	pid := libpf.PID(123)
+	instance := &acquisitionInstance{libcErr: syscall.EACCES}
+	pm := &ProcessManager{pidToProcessInfo: map[libpf.PID]*processInfo{pid: {}}, interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{pid: {{DeviceID: 1}: instance}}}
+	if err := pm.assignLibcInfoChecked(pid, &libc.LibcInfo{}, strictEpochBootstrap); !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("libc: %v", err)
+	}
+	pm.pidToProcessInfo[pid].libcInfo = nil
+	pm.assignLibcInfo(pid, &libc.LibcInfo{})
+}

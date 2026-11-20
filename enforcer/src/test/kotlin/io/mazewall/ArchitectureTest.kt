@@ -1049,6 +1049,28 @@ class ArchitectureTest {
                 "io.mazewall.platform.native.LiveCompletion\$Pending",
                 "io.mazewall.platform.native.LiveCompletion\$Refused",
             ),
+            "io.mazewall.seccomp.BpfInstruction" to setOf(
+                "io.mazewall.seccomp.BpfInstruction\$Ld",
+                "io.mazewall.seccomp.BpfInstruction\$Alu",
+                "io.mazewall.seccomp.BpfInstruction\$Ret",
+                "io.mazewall.seccomp.BpfInstruction\$Jmp",
+                "io.mazewall.seccomp.BpfInstruction\$Ja",
+            ),
+            "io.mazewall.seccomp.BpfStatus" to setOf(
+                "io.mazewall.seccomp.BpfStatus\$Unverified",
+                "io.mazewall.seccomp.BpfStatus\$Verified",
+            ),
+            "io.mazewall.seccomp.ArgCheck" to setOf(
+                "io.mazewall.seccomp.ArgCheck\$MaskEquals",
+                "io.mazewall.seccomp.ArgCheck\$EqualsAny",
+                "io.mazewall.seccomp.ArgCheck\$EqualsAny32",
+            ),
+            "io.mazewall.seccomp.BpfMacro" to setOf(
+                "io.mazewall.seccomp.BpfMacro\$Instruction",
+                "io.mazewall.seccomp.BpfMacro\$Conditional",
+                "io.mazewall.seccomp.BpfMacro\$Jump",
+                "io.mazewall.seccomp.BpfMacro\$Label",
+            ),
             "io.mazewall.enforcer.api.CanonicalPolicyArtifact" to setOf(
                 "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Worker",
                 "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Process",

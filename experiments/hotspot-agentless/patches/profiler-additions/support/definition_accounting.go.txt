@@ -1,0 +1,102 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package support
+
+import (
+	"encoding/binary"
+	"fmt"
+	"unsafe"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
+)
+
+// CheckTraceDefinitionABI checks the selected embedded producer before enabling it.
+func CheckTraceDefinitionABI() error {
+	var endian [2]byte
+	binary.NativeEndian.PutUint16(endian[:], 1)
+	if endian != [2]byte{1, 0} || unsafe.Sizeof(uintptr(0)) != 8 {
+		return fmt.Errorf("definition accounting requires the selected little-endian 64-bit ABI")
+	}
+	s, err := LoadCollectionSpec()
+	if err != nil {
+		return err
+	}
+	for _, expected := range []struct {
+		name   string
+		typeID ebpf.MapType
+		size   uint32
+	}{{"trace_definition_counts", ebpf.PerCPUArray, 40}, {"trace_definition_config", ebpf.Array, 24}} {
+		m := s.Maps[expected.name]
+		if m == nil || m.Type != expected.typeID || m.KeySize != 4 || m.ValueSize != expected.size || m.MaxEntries != 1 {
+			return fmt.Errorf("definition embedded map ABI: %s", expected.name)
+		}
+	}
+	for _, expected := range []struct {
+		name   string
+		size   uint32
+		fields []string
+	}{{"TraceDefinitionCPUCounts", 40, []string{"attempted", "submitted", "output_failed", "rejected_size", "overflow"}}} {
+		var row *btf.Struct
+		if err := s.Types.TypeByName(expected.name, &row); err != nil {
+			return err
+		}
+		if row.Size != expected.size || len(row.Members) != len(expected.fields) {
+			return fmt.Errorf("definition native row ABI")
+		}
+		for i, name := range expected.fields {
+			if err := definitionMember(row, name, uint32(i*8), 8, true); err != nil {
+				return err
+			}
+		}
+	}
+	var config, trace, labels, epoch *btf.Struct
+	for name, destination := range map[string]**btf.Struct{"TraceDefinitionConfig": &config, "Trace": &trace, "CustomLabelsArray": &labels, "HotspotEpochIdentity": &epoch} {
+		if err := s.Types.TypeByName(name, destination); err != nil {
+			return err
+		}
+	}
+	if config.Size != 24 || trace.Size != 25320 || uint64(unsafe.Sizeof(Trace{})) != 25320 || uint64(unsafe.Offsetof(Trace{}.Frame_data)) != 744 || labels.Size != 644 || epoch.Size != 16 {
+		return fmt.Errorf("definition full native attribution ABI")
+	}
+	for _, expected := range []struct {
+		row      *btf.Struct
+		name     string
+		offset   uint32
+		size     int
+		unsigned bool
+	}{
+		{config, "pid", 0, 4, true}, {config, "enabled", 4, 4, true}, {config, "birth", 8, 8, true}, {config, "generation", 16, 8, true},
+		{trace, "pid", 0, 4, true}, {trace, "tid", 4, 4, true}, {trace, "ktime", 8, 8, true}, {trace, "comm", 16, 16, false},
+		{trace, "apm_transaction_id", 32, 8, false}, {trace, "apm_trace_id", 40, 16, false}, {trace, "custom_labels", 56, 644, false},
+		{labels, "len", 0, 4, true}, {labels, "labels", 4, 640, false}, {trace, "kernel_stack_id", 700, 4, false},
+		{trace, "frame_data_len", 704, 2, true}, {trace, "num_frames", 706, 2, true}, {trace, "origin", 708, 4, false},
+		{trace, "offtime", 712, 8, true}, {trace, "correlation_id", 720, 8, true}, {trace, "hotspot_identity", 728, 16, false},
+		{epoch, "epoch", 0, 8, true}, {epoch, "state", 8, 4, true}, {epoch, "read_error", 12, 4, false}, {trace, "frame_data", 744, 24576, false},
+	} {
+		if err := definitionMember(expected.row, expected.name, expected.offset, expected.size, expected.unsigned); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func definitionMember(row *btf.Struct, name string, offset uint32, size int, unsigned bool) error {
+	for _, member := range row.Members {
+		if member.Name != name {
+			continue
+		}
+		n, err := btf.Sizeof(member.Type)
+		if err != nil || uint32(member.Offset) != offset*8 || member.BitfieldSize != 0 || n != size {
+			return fmt.Errorf("definition native member layout: %s.%s", row.Name, name)
+		}
+		if unsigned {
+			i, ok := btf.UnderlyingType(member.Type).(*btf.Int)
+			if !ok || i.Encoding != btf.Unsigned {
+				return fmt.Errorf("definition native member signedness: %s.%s", row.Name, name)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("definition native member missing: %s.%s", row.Name, name)
+}

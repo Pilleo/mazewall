@@ -3,12 +3,195 @@
 package symbolizer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
 )
+
+type localStopErrorResolver struct {
+	*heldPruneResolver
+	err error
+}
+
+func (r *localStopErrorResolver) StopAuxiliary(context.Context) error { return r.err }
+
+func TestLocalStopClaimAndNativeResult(t *testing.T) {
+	nativeErr := hostilePruneDiagnosticError{}
+	r := &localStopErrorResolver{heldPruneResolver: &heldPruneResolver{}, err: nativeErr}
+	s := &Symbolizer{resolvers: []ResolverInstance{r}}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
+	defer cancel()
+	if got := s.StopAuxiliary(ctx); got != nativeErr { t.Fatal("native error changed") }
+	select { case <-s.localStopReady: default: t.Fatal("local bytes not ready") }
+	first := s.copyLocalPrune()
+	if len(first) == 0 || !s.localChildInvoked || s.localChildIndex != 0 { t.Fatal("missing first local result") }
+	first[0] ^= 1
+	if bytes.Equal(first, s.copyLocalPrune()) { t.Fatal("returned bytes alias memo") }
+	originalDone := s.localStopDone
+	originalDeadline := s.localStopDeadline
+	other, otherCancel := context.WithCancel(context.Background())
+	defer otherCancel()
+	_ = s.StopAuxiliary(other)
+	if s.localStopDone != originalDone || !s.localStopHasDeadline || s.localStopDeadline != originalDeadline { t.Fatal("later stop renewed original budget") }
+	if s.beginLocalStop(other) != nil { t.Fatal("later stop replaced claim") }
+	otherOwner := &Symbolizer{}
+	if otherOwner.beginLocalStop(other) == s.localStopClaim { t.Fatal("claims shared across owners") }
+}
+
+func TestLocalStopDefinitionsWithoutChild(t *testing.T) {
+	s := &Symbolizer{}
+	_, err := s.StopDefinitions(context.Background())
+	if err != ErrStructuredResolverUnavailable { t.Fatal("native result changed") }
+	select { case <-s.localStopReady: default: t.Fatal("local bytes not ready") }
+	if s.localChildInvoked || s.localChildIndex != -1 || len(s.copyLocalPrune()) == 0 { t.Fatal("absent child not retained") }
+}
+
+func TestDefinitionsUsesEarlierPruneFreeze(t *testing.T) {
+	book := periodiccaller.NewKindBook()
+	op, err := book.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+	if err != nil || op == nil { t.Fatal("admit failed") }
+	if err := op.Complete(); err != nil { t.Fatal("complete failed") }
+	done := make(chan struct{})
+	close(done)
+	s := &Symbolizer{options: SymbolizerOptions{KindBook: book}, pruneDone: done}
+	if err := s.stopPruning(context.Background()); err != nil { t.Fatal("stop pruning failed") }
+	before := append([]byte(nil), s.pruneFrozenDiagnostic...)
+	_, err = s.StopDefinitions(context.Background())
+	if err != ErrStructuredResolverUnavailable { t.Fatal("native result changed") }
+	select { case <-s.localStopReady: default: t.Fatal("local result not ready") }
+	got := s.copyLocalPrune()
+	if !bytes.Equal(before, got) { t.Fatal("definitions did not retain frozen prune bytes") }
+	var d pruneDiagnostic
+	if err := json.Unmarshal(got, &d); err != nil { t.Fatal("invalid diagnostic") }
+	if d.Unit != "admitted-prune-callback" || !d.BookFrozen || d.LoopState != "joined" || d.Rows[0].Counts.Admitted != 1 || d.Rows[0].Counts.Completed != 1 { t.Fatal("frozen prune counts lost") }
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil { t.Fatal(err) }
+	var envelope outerDiagnosticEnvelope
+	if json.Unmarshal(raw, &envelope) != nil || !bytes.Equal(envelope.Prune, before) { t.Fatal("relay did not retain previously frozen prune") }
+}
+
+func TestDefinitionsBeforePruneFreezeDoesNotUpgrade(t *testing.T) {
+	book := periodiccaller.NewKindBook()
+	done := make(chan struct{})
+	close(done)
+	s := &Symbolizer{options: SymbolizerOptions{KindBook: book}, pruneDone: done}
+	_, _ = s.StopDefinitions(context.Background())
+	before := s.copyLocalPrune()
+	var d pruneDiagnostic
+	if err := json.Unmarshal(before, &d); err != nil || d.BookFrozen || d.LoopState != "unknown" { t.Fatal("invented frozen state") }
+	if err := s.stopPruning(context.Background()); err != nil { t.Fatal("stop pruning failed") }
+	if !bytes.Equal(before, s.copyLocalPrune()) { t.Fatal("later prune freeze upgraded first result") }
+}
+
+func TestLocalStopPendingDuringPruneFreeze(t *testing.T) {
+	s := &Symbolizer{options: SymbolizerOptions{KindBook: periodiccaller.NewKindBook()}}
+	claim := s.beginLocalStop(context.Background())
+	s.pruneMu.Lock()
+	s.pruneFreezeActive = 1
+	s.pruneMu.Unlock()
+	s.finishLocalStop(claim, pruneLoopUnknown, false, -1)
+	select { case <-s.localStopReady: t.Fatal("published during in-progress freeze"); default: }
+	if len(s.copyLocalPrune()) != 0 { t.Fatal("invented in-progress snapshot") }
+	s.freezePruneBook(false, nil, pruneLoopJoined)
+	select { case <-s.localStopReady: default: t.Fatal("freeze did not publish pending local result") }
+	var d pruneDiagnostic
+	if err := json.Unmarshal(s.copyLocalPrune(), &d); err != nil || !d.BookFrozen { t.Fatal("pending freeze snapshot missing") }
+}
+
+func TestLocalStopTimeoutDoesNotUpgrade(t *testing.T) {
+	book := periodiccaller.NewKindBook()
+	r := &heldPruneStopSpy{heldPruneResolver: &heldPruneResolver{entered: make(chan struct{}), release: make(chan struct{})}}
+	s := &Symbolizer{options: SymbolizerOptions{KindBook: book}, exit: make(chan struct{}), pruneDone: make(chan struct{}), pruneTickerTime: time.Nanosecond, resolvers: []ResolverInstance{r}}
+	go s.pruneLoop()
+	<-r.entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := s.StopAuxiliary(ctx); got != context.Canceled { t.Fatal("timeout result changed") }
+	select { case <-s.localStopReady: default: t.Fatal("timeout did not publish local bytes") }
+	if s.localChildInvoked || s.localChildIndex != -1 || r.stops != 0 { t.Fatal("uninvoked child recorded as invoked") }
+	first := s.copyLocalPrune()
+	var diagnostic pruneDiagnostic
+	if err := json.Unmarshal(first, &diagnostic); err != nil || diagnostic.LoopState != "first-timeout" { t.Fatal("wrong first prune outcome") }
+	close(r.release)
+	<-s.pruneDone
+	_ = s.StopAuxiliary(context.Background())
+	if !bytes.Equal(first, s.copyLocalPrune()) || s.localChildInvoked { t.Fatal("late completion upgraded first result") }
+}
+
+type hostilePruneDiagnosticError struct{}
+
+func (hostilePruneDiagnosticError) Error() string { panic("Error called") }
+func (hostilePruneDiagnosticError) Unwrap() error { panic("Unwrap called") }
+func (hostilePruneDiagnosticError) String() string { panic("String called") }
+
+func TestPruneDiagnosticProjectsDetachedFrozenRows(t *testing.T) {
+	var observations [4]libpf.KindObservation
+	var present [4]bool
+	for i := range observations {
+		present[i] = true
+		observations[i] = libpf.KindObservation{
+			Binding: libpf.AuxiliaryBinding{Source: libpf.AuxiliarySourcePruneCycle + libpf.AuxiliarySource(i), Session: "session", HostTGID: 42, Birth: 43, Generation: 44},
+			Counts: libpf.KindLedger{Admitted: uint64(i + 2), Completed: uint64(i), Failed: 3, Aborted: 4, Skipped: 5, Incomplete: 6, InFlight: 2, Overflow: i == 2},
+			Outcome: libpf.SourceLocalNonfinal, HeldWork: true, Err: hostilePruneDiagnosticError{},
+		}
+	}
+	observations[0].Counts.Admitted = math.MaxUint64
+	d := projectPruneDiagnostic(pruneLoopFirstTimeout, true, true, observations, present)
+	observations[0].Binding.Session = "changed"
+	observations[0].Counts.InFlight = 0
+	if d.Unit != "admitted-prune-callback" || d.LoopState != "first-timeout" || !d.BookPresent || !d.BookFrozen {
+		t.Fatalf("prune header: %+v", d)
+	}
+	for i, row := range d.Rows {
+		if !row.Observed || row.Source != uint64(i+5) || !row.HasBinding || row.Binding.Session != "session" || row.Binding.Source != uint64(i+5) || row.Binding.HostTGID != 42 || row.Binding.Birth != 43 || row.Binding.Generation != 44 || row.Counts.Completed != uint64(i) || row.Counts.Failed != 3 || row.Counts.Aborted != 4 || row.Counts.Skipped != 5 || row.Counts.Incomplete != 6 || row.Counts.InFlight != 2 || row.Counts.Overflow != (i == 2) || row.Outcome != uint64(libpf.SourceLocalNonfinal) || !row.HeldWork || !row.ObservationErrorPresent {
+			t.Fatalf("prune row %d: %+v", i, row)
+		}
+	}
+	raw, err := json.Marshal(d)
+	if err != nil || !strings.Contains(string(raw), `"admitted":18446744073709551615`) || len(raw) > 32768 {
+		t.Fatalf("prune JSON: %s, %v", raw, err)
+	}
+	assertPruneDiagnosticScalars(t, reflect.TypeOf(d))
+}
+
+func TestPruneDiagnosticMissingAndIndependentOwners(t *testing.T) {
+	var observations [4]libpf.KindObservation
+	var present [4]bool
+	observations[0].Counts.Admitted = 9
+	present[0] = true
+	missing := projectPruneDiagnostic(pruneLoopNotStarted, false, false, observations, present)
+	unfrozen := projectPruneDiagnostic(pruneLoopUnknown, true, false, observations, present)
+	one := projectPruneDiagnostic(pruneLoopUnknown, true, true, observations, present)
+	observations[0].Counts.Admitted = 3
+	observations[0].Binding.Session = strings.Repeat("x", 257)
+	two := projectPruneDiagnostic(pruneLoopUnknown, true, true, observations, present)
+	if missing.LoopState != "not-started" || missing.BookPresent || missing.Rows[0].Observed || !unfrozen.BookPresent || unfrozen.BookFrozen || unfrozen.Rows[0].Observed || one.LoopState != "unknown" || one.Rows[0].Counts.Admitted != 9 || one.Rows[0].HasBinding || two.Rows[0].Counts.Admitted != 3 || two.Rows[0].HasBinding || !two.Rows[0].BindingUnrepresentable {
+		t.Fatalf("missing or independent observations: missing=%+v unfrozen=%+v one=%+v two=%+v", missing, unfrozen, one, two)
+	}
+}
+
+func assertPruneDiagnosticScalars(t *testing.T, typ reflect.Type) {
+	t.Helper()
+	switch typ.Kind() {
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ { assertPruneDiagnosticScalars(t, typ.Field(i).Type) }
+	case reflect.Array:
+		assertPruneDiagnosticScalars(t, typ.Elem())
+	case reflect.Bool, reflect.String, reflect.Uint32, reflect.Uint64:
+	default:
+		t.Fatalf("diagnostic contains non-scalar %v", typ)
+	}
+}
 
 type heldPruneResolver struct {
 	ResolverInstance
@@ -17,7 +200,8 @@ type heldPruneResolver struct {
 }
 
 func TestAuxiliaryStopWithoutStartedPruningSealsAdmission(t *testing.T) {
-	s := &Symbolizer{exit: make(chan struct{})}
+	book := periodiccaller.NewKindBook()
+	s := &Symbolizer{exit: make(chan struct{}), options: SymbolizerOptions{KindBook: book}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := s.stopPruning(ctx); err != nil {
@@ -27,6 +211,10 @@ func TestAuxiliaryStopWithoutStartedPruningSealsAdmission(t *testing.T) {
 	if s.pruneLoopStarted || s.pruneDone != nil {
 		t.Fatal("prune worker admitted after stop")
 	}
+	_, err := s.KindObservation(libpf.AuxiliarySourcePruneCycle)
+	if err == nil || !strings.Contains(err.Error(), "auxiliary snapshot not yet frozen") {
+		t.Fatalf("expected not yet frozen error, got %v", err)
+	}
 }
 
 func (r *heldPruneResolver) PruneOldObjects(time.Time, time.Duration) {
@@ -34,9 +222,51 @@ func (r *heldPruneResolver) PruneOldObjects(time.Time, time.Duration) {
 	<-r.release
 }
 
+type heldPruneStopSpy struct {
+	*heldPruneResolver
+	stops int
+}
+
+func (r *heldPruneStopSpy) StopAuxiliary(context.Context) error {
+	r.stops++
+	return nil
+}
+
+func TestAuxiliaryStopPruneFailureSkipsResolver(t *testing.T) {
+	r := &heldPruneStopSpy{heldPruneResolver: &heldPruneResolver{entered: make(chan struct{}), release: make(chan struct{})}}
+	s := &Symbolizer{
+		options:         SymbolizerOptions{KindBook: periodiccaller.NewKindBook()},
+		exit:            make(chan struct{}),
+		pruneDone:       make(chan struct{}),
+		pruneTickerTime: time.Nanosecond,
+		resolvers:       []ResolverInstance{r},
+	}
+	go s.pruneLoop()
+	<-r.entered
+	t.Cleanup(func() {
+		close(r.release)
+		<-s.pruneDone
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.StopAuxiliary(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("expected prune cancellation, got %v", err)
+	}
+	if r.stops != 0 {
+		t.Errorf("resolver stopped after prune failure: %d", r.stops)
+	}
+}
+
 func TestAuxiliaryStopJoinsActualPruneCallback(t *testing.T) {
+	book := periodiccaller.NewKindBook()
 	r := &heldPruneResolver{entered: make(chan struct{}), release: make(chan struct{})}
-	s := &Symbolizer{exit: make(chan struct{}), pruneDone: make(chan struct{}), pruneTickerTime: time.Nanosecond, resolvers: []ResolverInstance{r}}
+	s := &Symbolizer{
+		options:         SymbolizerOptions{KindBook: book},
+		exit:            make(chan struct{}),
+		pruneDone:       make(chan struct{}),
+		pruneTickerTime: time.Nanosecond,
+		resolvers:       []ResolverInstance{r},
+	}
 	go s.pruneLoop()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -50,6 +280,21 @@ func TestAuxiliaryStopJoinsActualPruneCallback(t *testing.T) {
 	if err := s.stopPruning(expired); !errors.Is(err, context.Canceled) {
 		t.Fatal("held prune callback certified as joined", err)
 	}
+
+	obs1, err1 := s.KindObservation(libpf.AuxiliarySourcePruneCycle)
+	if err1 == nil || !strings.Contains(err1.Error(), "auxiliary kind identity unknown") {
+		t.Fatalf("expected identity unknown error, got %v", err1)
+	}
+	if !obs1.HeldWork {
+		t.Fatal("expected HeldWork to be true while callback held")
+	}
+	if obs1.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("expected SourceLocalNonfinal, got %v", obs1.Outcome)
+	}
+	if obs1.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("expected empty binding, got %v", obs1.Binding)
+	}
+
 	close(r.release)
 	if err := s.stopPruning(ctx); err != nil {
 		t.Fatal(err)
@@ -58,5 +303,93 @@ func TestAuxiliaryStopJoinsActualPruneCallback(t *testing.T) {
 	case <-s.pruneDone:
 	default:
 		t.Fatal("prune completion missing")
+	}
+
+	obs2, err2 := s.KindObservation(libpf.AuxiliarySourcePruneCycle)
+	if obs1 != obs2 {
+		t.Fatalf("observation changed after late join: before=%+v after=%+v", obs1, obs2)
+	}
+	if (err1 == nil) != (err2 == nil) || (err1 != nil && err1.Error() != err2.Error()) {
+		t.Fatalf("observation error changed after late join: before=%v after=%v", err1, err2)
+	}
+}
+
+type fakeRecordingResolver struct {
+	lastBook *periodiccaller.KindBook
+}
+
+func (f *fakeRecordingResolver) Priority() int { return 0 }
+
+func (f *fakeRecordingResolver) NewInstance(opts SymbolizerOptions) (ResolverInstance, error) {
+	f.lastBook = opts.KindBook
+	return nil, nil
+}
+
+func TestNewSymbolizer_KindBookSharing(t *testing.T) {
+	fake := &fakeRecordingResolver{}
+	registryLock.Lock()
+	origResolvers := resolvers
+	resolvers = []Resolver{fake}
+	registryLock.Unlock()
+	t.Cleanup(func() {
+		registryLock.Lock()
+		resolvers = origResolvers
+		registryLock.Unlock()
+	})
+
+	callerBook := periodiccaller.NewKindBook()
+
+	s1, err := NewSymbolizer(SymbolizerOptions{KindBook: callerBook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1.options.KindBook == nil {
+		t.Fatal("expected NewSymbolizer to create KindBook")
+	}
+	if s1.options.KindBook == callerBook {
+		t.Fatal("expected NewSymbolizer to create distinct KindBook, not adopt caller book")
+	}
+	if fake.lastBook != s1.options.KindBook {
+		t.Fatalf("expected resolver factory to receive symbolizer owned book, got %p vs %p", fake.lastBook, s1.options.KindBook)
+	}
+
+	s2, err := NewSymbolizer(SymbolizerOptions{KindBook: callerBook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.options.KindBook == nil {
+		t.Fatal("expected NewSymbolizer to create KindBook")
+	}
+	if s2.options.KindBook == callerBook {
+		t.Fatal("expected NewSymbolizer to create distinct KindBook, not adopt caller book")
+	}
+	if s2.options.KindBook == s1.options.KindBook {
+		t.Fatal("expected separate NewSymbolizer calls to create distinct KindBooks")
+	}
+	if fake.lastBook != s2.options.KindBook {
+		t.Fatalf("expected resolver factory to receive symbolizer owned book, got %p vs %p", fake.lastBook, s2.options.KindBook)
+	}
+
+	// Show freeze/stop of one cannot seal other's ledger/admissions/getter phase.
+	s1.options.KindBook.Freeze(false, libpf.AuxiliaryBinding{}, nil)
+
+	// s1 is frozen: admissions must be rejected and getter returns frozen observation.
+	if _, err := s1.options.KindBook.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false); err == nil || !strings.Contains(err.Error(), "kind book frozen") {
+		t.Fatalf("expected s1 admission to be rejected when frozen, got %v", err)
+	}
+	if _, err := s1.KindObservation(libpf.AuxiliarySourcePruneCycle); err != nil {
+		t.Fatalf("expected s1 observation to be available when frozen, got error %v", err)
+	}
+
+	// s2 must remain unfrozen: admissions remain open and getter returns not yet frozen error.
+	op2, err := s2.options.KindBook.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+	if err != nil {
+		t.Fatalf("expected s2 admissions to remain open, got %v", err)
+	}
+	if op2 != nil {
+		_ = op2.Complete()
+	}
+	if _, err := s2.KindObservation(libpf.AuxiliarySourcePruneCycle); err == nil || !strings.Contains(err.Error(), "auxiliary snapshot not yet frozen") {
+		t.Fatalf("expected s2 to report not yet frozen error, got %v", err)
 	}
 }

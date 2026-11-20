@@ -1,0 +1,863 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"math"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+	"golang.org/x/sys/unix"
+)
+
+func makePIDTID(pid, tid libpf.PID) libpf.PIDTID {
+	return libpf.PIDTID((uint64(pid) << 32) | uint64(tid))
+}
+
+type stubPIDIntervals struct{}
+
+func (stubPIDIntervals) MonitorInterval() time.Duration       { return time.Hour }
+func (stubPIDIntervals) TracePollInterval() time.Duration     { return time.Hour }
+func (stubPIDIntervals) PIDCleanupInterval() time.Duration    { return time.Hour }
+func (stubPIDIntervals) ExecutableUnloadDelay() time.Duration { return time.Hour }
+
+type stubEbpfHandlerForPIDProcess struct {
+	pmebpf.EbpfHandler
+	mu          sync.Mutex
+	removedPIDs []libpf.PID
+}
+
+func (s *stubEbpfHandlerForPIDProcess) RemoveReportedPID(pid libpf.PID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removedPIDs = append(s.removedPIDs, pid)
+}
+
+type testPIDProcessLifetime struct {
+	session     string
+	hostTGID    uint32
+	birth       uint64
+	validateErr error
+}
+
+func (l *testPIDProcessLifetime) Session() string  { return l.session }
+func (l *testPIDProcessLifetime) HostTGID() uint32 { return l.hostTGID }
+func (l *testPIDProcessLifetime) Birth() uint64    { return l.birth }
+func (l *testPIDProcessLifetime) Validate() error  { return l.validateErr }
+
+func setupTestPIDProcessTracer(t *testing.T, hostTGID uint32) (*Tracer, *periodiccaller.OwnedScope, *testPIDProcessLifetime) {
+	lt := &testPIDProcessLifetime{
+		session:  "session-l2b-pid-process",
+		hostTGID: hostTGID,
+		birth:    2026110801,
+	}
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := scope.Stop(ctx)
+		expired := ctx.Err()
+		cancel()
+		if expired != nil { t.Error("legacy scope cleanup timed out") }
+		if err != nil && (scope.Failure() == nil || !errors.Is(err, scope.Failure())) { t.Errorf("legacy scope cleanup: %v", err) }
+	})
+	expected := libpf.AuxiliaryBinding{
+		Source:     libpf.AuxiliarySourcePeriodicCaller,
+		Session:    lt.session,
+		HostTGID:   lt.hostTGID,
+		Birth:      lt.birth,
+		Generation: 1, /* model-only fixture scalar */
+	}
+
+	ch := make(chan libpf.PIDTID, 20)
+	processMgr := &pm.ProcessManager{}
+
+	tracer := &Tracer{
+		auxiliaryScope: scope,
+		processManager: processMgr,
+		pidEvents:      ch,
+		intervals:      stubPIDIntervals{},
+	}
+	tracer.pidProcess = &pidProcess{
+		scope:           scope,
+		expectedBinding: expected,
+		origChannel:     ch,
+		origPM:          processMgr,
+		outcome:         PIDProcessNotSealed,
+	}
+	return tracer, scope, lt
+}
+
+// localPIDProcessModel evaluates only the existing local count reducer; it does not seal a covered source.
+func localPIDProcessModel(tr *Tracer) (PIDProcessObservation, error) {
+	p := tr.pidProcess
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sealFinalizeLocked(tr)
+	return PIDProcessObservation{Binding: p.expectedBinding, Counts: p.counts, Outcome: p.outcome, Err: p.stickyErr}, p.stickyErr
+}
+
+func TestPIDProcessObservation_UnconfiguredTracerReportsNotConfigured(t *testing.T) {
+	var nilTracer *Tracer
+	obs, err := nilTracer.PIDProcessObservation()
+	require.NoError(t, err)
+	require.NoError(t, obs.Err)
+	require.Equal(t, PIDProcessNotConfigured, obs.Outcome)
+	require.False(t, obs.Counts.Overflow)
+
+	// Allocated but never prepared (no pidProcess) stays unconfigured: no seal, no proof.
+	tr := &Tracer{}
+	obs2, err2 := tr.PIDProcessObservation()
+	require.NoError(t, err2)
+	require.NoError(t, obs2.Err)
+	require.Equal(t, PIDProcessNotConfigured, obs2.Outcome)
+	require.False(t, obs2.Counts.Overflow)
+}
+
+func TestPIDProcess_PositivePermissionReceive(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12345)
+	mapped := make(chan struct{})
+	var mappedOnce sync.Once
+
+	// Set processFactory to return a real process fake returning os.ErrPermission on GetMappings.
+	// This exercises REAL processPIDEvents receive calling REAL SynchronizeOrdinaryReported.
+	tr.pidProcess.processFactory = func(pid libpf.PID, tid libpf.PID) process.Process {
+		return &stubProcessWithMappings{
+			pid: pid,
+			err: os.ErrPermission,
+			onMappings: func() { mappedOnce.Do(func() { close(mapped) }) },
+		}
+	}
+
+	pidTid := makePIDTID(12345, 12345)
+	tr.pidEvents <- pidTid
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	launched := false
+	t.Cleanup(func() {
+		cancel()
+		if launched { select { case <-done: case <-time.After(2*time.Second): t.Error("PID worker cleanup timed out") } }
+	})
+	launched = true
+	go func() {
+		tr.processPIDEvents(ctx)
+		close(done)
+	}()
+	select { case <-mapped: case <-time.After(2*time.Second): t.Fatal("PID worker did not reach mappings") }
+
+	cancel()
+	select { case <-done: case <-time.After(2*time.Second): t.Fatal("PID worker did not return") }
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.PermissionIgnored)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+	require.False(t, obs.Counts.Overflow)
+}
+
+func TestPIDProcess_EachTerminalBranch(t *testing.T) {
+	branches := []pm.OrdinarySyncBranch{
+		pm.ExitWaiting,
+		pm.PermissionIgnored,
+		pm.NoMappings,
+		pm.NotExistExited,
+		pm.ESRCHExited,
+		pm.OtherMappingErrorExited,
+		pm.MappingsError,
+		pm.PartialOrEmpty,
+		pm.OrdinaryNil,
+		pm.Context,
+	}
+
+	tr, _, _ := setupTestPIDProcessTracer(t, 2000)
+
+	for i, branch := range branches {
+		b := branch
+		tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+			var err error
+			if b == pm.Context {
+				err = context.Canceled
+			} else if b == pm.MappingsError {
+				err = errors.New("mappings sync err")
+			}
+			report(b, err)
+		}
+
+		pidTid := makePIDTID(libpf.PID(1000+i), libpf.PID(1000+i))
+		tr.observePIDProcess(pidTid)
+	}
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(10), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.ExitWaiting)
+	require.Equal(t, uint64(1), obs.Counts.PermissionIgnored)
+	require.Equal(t, uint64(1), obs.Counts.NoMappings)
+	require.Equal(t, uint64(1), obs.Counts.NotExistExited)
+	require.Equal(t, uint64(1), obs.Counts.ESRCHExited)
+	require.Equal(t, uint64(1), obs.Counts.OtherMappingErrorExited)
+	require.Equal(t, uint64(1), obs.Counts.MappingsError)
+	require.Equal(t, uint64(1), obs.Counts.PartialOrEmpty)
+	require.Equal(t, uint64(1), obs.Counts.OrdinaryNil)
+	require.Equal(t, uint64(1), obs.Counts.Context)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+}
+
+func TestPIDProcess_PartialThenMappingsError_OneTerminal(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 5000)
+
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		// Partial that later returns syncErr reports MappingsError once
+		report(pm.MappingsError, errors.New("sync error"))
+	}
+
+	tr.observePIDProcess(makePIDTID(5000, 5000))
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.MappingsError)
+	require.Equal(t, uint64(0), obs.Counts.PartialOrEmpty)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+}
+
+func TestPIDProcess_DuplicateKeyCountsTwice(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 6000)
+
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		report(pm.PermissionIgnored, nil)
+	}
+
+	// Send duplicate key
+	pidTid := makePIDTID(6000, 6000)
+	tr.observePIDProcess(pidTid)
+	tr.observePIDProcess(pidTid)
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(2), obs.Counts.Received)
+	require.Equal(t, uint64(2), obs.Counts.PermissionIgnored)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+}
+
+func TestPIDProcess_ForeignPIDProcessed(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 7000)
+
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		report(pm.NoMappings, nil)
+	}
+
+	// Foreign PID (not 7000)
+	foreignPIDTid := makePIDTID(8888, 8888)
+	tr.observePIDProcess(foreignPIDTid)
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.NoMappings)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+}
+
+func TestPIDProcess_CancelExitOnlyReadyArm(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 8000)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Pre-canceled context
+
+	// Empty channel: ctx.Done is the ONLY ready non-ticker arm.
+	tr.processPIDEvents(ctx)
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(0), obs.Counts.Received)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+
+	// Sending after seal demonstrates buffer was not drained post-seal.
+	tr.pidEvents <- makePIDTID(8001, 8001)
+	require.Equal(t, 1, len(tr.pidEvents))
+}
+
+func TestPIDProcess_PrecanceledCtxConservesBufferedCounts(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 8500)
+
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		report(pm.PermissionIgnored, nil)
+	}
+
+	// Queue 5 items
+	for i := 1; i <= 5; i++ {
+		tr.pidEvents <- makePIDTID(libpf.PID(8500+i), libpf.PID(8500+i))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Pre-canceled
+
+	tr.processPIDEvents(ctx)
+
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+
+	terminals := obs.Counts.ExitWaiting +
+		obs.Counts.PermissionIgnored +
+		obs.Counts.NoMappings +
+		obs.Counts.NotExistExited +
+		obs.Counts.ESRCHExited +
+		obs.Counts.OtherMappingErrorExited +
+		obs.Counts.MappingsError +
+		obs.Counts.PartialOrEmpty +
+		obs.Counts.OrdinaryNil +
+		obs.Counts.Context
+	require.Equal(t, obs.Counts.Received, terminals)
+	require.True(t, obs.Counts.Received <= 5)
+}
+
+func TestPIDProcess_IdentityOrPointerMismatchFailsSeal(t *testing.T) {
+	// 1. Channel pointer mismatch
+	tr1, _, _ := setupTestPIDProcessTracer(t, 9001)
+	tr1.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr1.observePIDProcess(makePIDTID(9001, 9001))
+	tr1.pidEvents = make(chan libpf.PIDTID, 10) // Changed channel pointer!
+	require.Error(t, tr1.sealPIDProcess())
+
+	obs1, err1 := tr1.PIDProcessObservation()
+	require.Error(t, err1)
+	require.Contains(t, err1.Error(), "pointer mismatch at seal")
+	require.Equal(t, PIDProcessFailed, obs1.Outcome)
+	require.Equal(t, uint64(1), obs1.Counts.Received)
+	require.Equal(t, uint64(1), obs1.Counts.OrdinaryNil)
+
+	// 2. ProcessManager pointer mismatch
+	tr2, _, _ := setupTestPIDProcessTracer(t, 9002)
+	tr2.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr2.observePIDProcess(makePIDTID(9002, 9002))
+	tr2.processManager = &pm.ProcessManager{} // Changed PM pointer!
+	require.Error(t, tr2.sealPIDProcess())
+
+	obs2, err2 := tr2.PIDProcessObservation()
+	require.Error(t, err2)
+	require.Contains(t, err2.Error(), "pointer mismatch at seal")
+	require.Equal(t, PIDProcessFailed, obs2.Outcome)
+	require.Equal(t, uint64(1), obs2.Counts.Received)
+	require.Equal(t, uint64(1), obs2.Counts.OrdinaryNil)
+}
+
+func TestPIDProcess_UnretainedHostTGIDMutationRejected(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 9003)
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr.observePIDProcess(makePIDTID(9003, 9003))
+	tr.pidProcess.expectedBinding.HostTGID += 100 // Mutated HostTGID!
+	require.Error(t, tr.sealPIDProcess())
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auxiliary stop ownership unavailable")
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.OrdinaryNil)
+}
+
+func TestPIDProcess_UnretainedGenerationMutationRejected(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 9004)
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr.observePIDProcess(makePIDTID(9004, 9004))
+	tr.pidProcess.expectedBinding.Generation += 10 // Mutated Generation!
+	require.Error(t, tr.sealPIDProcess())
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auxiliary stop ownership unavailable")
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.OrdinaryNil)
+}
+
+func TestPIDProcess_ParentCancelledFailsBeforeLiveQuery(t *testing.T) {
+	lt := &testPIDProcessLifetime{
+		session:  "session-l2b-pid-process",
+		hostTGID: 9005,
+		birth:    2026110801,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	scope := periodiccaller.NewOwnedScope(ctx, nil)
+	t.Cleanup(func() {
+		cancel()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := scope.Stop(cleanupCtx); expired := cleanupCtx.Err(); cleanupCancel()
+		if expired != nil { t.Error("parent scope cleanup timed out") }
+		if err == nil || !errors.Is(scope.ParentErr(), context.Canceled) { t.Errorf("parent scope cleanup: %v", err) }
+	})
+	require.Error(t, scope.BindLifetime(lt))
+
+	tr := &Tracer{
+		auxiliaryScope: scope,
+		processManager: &pm.ProcessManager{},
+		pidEvents:      make(chan libpf.PIDTID, 10),
+		intervals:      stubPIDIntervals{},
+	}
+	tr.preparePIDProcess()
+	require.NotNil(t, tr.pidProcess)
+
+	cancel() // Cancel parent context before seal!
+
+	require.Error(t, tr.sealPIDProcess())
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPIDProcess_ParentScopeFailureFailsBeforeLiveQuery(t *testing.T) {
+	tr, scope, _ := setupTestPIDProcessTracer(t, 9006)
+
+	// Record sticky failure on parent scope before seal!
+	cause := errors.New("sentinel parent failure")
+	scope.Fail(cause)
+
+	require.Error(t, tr.sealPIDProcess())
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.ErrorIs(t, err, cause)
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+}
+
+func TestPIDProcess_UnretainedSealSkipsValidationHook(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 9007)
+	tr.pidProcess.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil) }
+	tr.observePIDProcess(makePIDTID(9007, 9007))
+
+	hookCalled := false
+	hookLockAvailable := false
+	tr.pidProcess.validationHook = func() {
+		hookCalled = true
+		// If invoked, the hook must not run under the ledger lock.
+		gotLock := tr.pidProcess.mu.TryLock()
+		hookLockAvailable = gotLock
+		if gotLock {
+			tr.pidProcess.mu.Unlock()
+		}
+	}
+
+	require.Error(t, tr.sealPIDProcess())
+	require.False(t, hookCalled, "unretained seal must not query validation")
+	if hookCalled { require.True(t, hookLockAvailable, "p.mu must not be held during live validation") }
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.OrdinaryNil)
+}
+
+func TestPIDProcess_OverflowStickyStillSyncs(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 11000)
+
+	syncCalls := 0
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		syncCalls++
+		if report != nil {
+			report(pm.PermissionIgnored, nil)
+		}
+	}
+
+	// Set Received to MaxUint64
+	tr.pidProcess.counts.Received = math.MaxUint64
+
+	// Receive event: overflow occurs, but sync still called
+	pidTid := makePIDTID(11000, 11000)
+	tr.observePIDProcess(pidTid)
+
+	require.Equal(t, 1, syncCalls, "overflow must still sync ordinary")
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.True(t, obs.Counts.Overflow)
+}
+
+func TestPIDProcess_PreReturnObservationNotSealed(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 12000)
+
+	obs, err := tr.PIDProcessObservation()
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessNotSealed, obs.Outcome)
+}
+
+func TestPIDProcess_ConservedExitLocalConservedNonfinal(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 13000)
+
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		report(pm.OrdinaryNil, nil)
+	}
+
+	tr.observePIDProcess(makePIDTID(13000, 13000))
+	obs, err := localPIDProcessModel(tr)
+	require.NoError(t, err)
+	require.Equal(t, PIDProcessLocalConservedNonfinal, obs.Outcome)
+	require.Equal(t, uint64(1), obs.Counts.Received)
+	require.Equal(t, uint64(1), obs.Counts.OrdinaryNil)
+	require.Equal(t, uint64(0), obs.Counts.InFlight)
+	require.False(t, obs.Counts.Overflow)
+}
+
+func TestPIDProcess_LegacySynchronizeProcessUnchanged(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 14000)
+
+	called := false
+	tr.pidProcess.syncOrdinaryOverride = func(pr process.Process, report func(pm.OrdinarySyncBranch, error)) {
+		called = true
+		require.NotNil(t, report, "wrapper must supply report callback to syncChecked")
+	}
+
+	tr.observePIDProcess(makePIDTID(14000, 14000))
+	require.True(t, called)
+}
+
+func TestPIDProcess_MutantConservationFailure_FailsClosed(t *testing.T) {
+	tr, _, _ := setupTestPIDProcessTracer(t, 15000)
+
+	// Mutant: Injected mismatch where Received=2 but only 1 terminal recorded
+	tr.pidProcess.counts.Received = 2
+	tr.pidProcess.counts.OrdinaryNil = 1
+	tr.pidProcess.counts.InFlight = 0
+
+	require.Error(t, tr.sealPIDProcess())
+
+	obs, err := tr.PIDProcessObservation()
+	require.Error(t, err)
+	require.Equal(t, PIDProcessFailed, obs.Outcome)
+	require.Contains(t, err.Error(), "conservation mismatch")
+}
+
+type stubProcessWithMappings struct {
+	process.Process
+	pid   libpf.PID
+	err   error
+	calls int
+	onMappings func()
+}
+
+func (p *stubProcessWithMappings) PID() libpf.PID {
+	return p.pid
+}
+
+func (p *stubProcessWithMappings) GetExe() (libpf.String, error) {
+	return libpf.NullString, errors.New("stub exe error")
+}
+
+func (p *stubProcessWithMappings) GetMappings() ([]process.Mapping, uint32, error) {
+	p.calls++
+	if p.onMappings != nil { p.onMappings() }
+	return nil, 0, p.err
+}
+
+func TestPIDProcessCoveredStopModel(t *testing.T) {
+	if PIDProcessLocalConservedNonfinal != 3 || PIDProcessObservedSealed != 4 { t.Fatal("PID process outcome values changed") }
+	for _, mode := range []string{"positive", "mismatch", "channel", "manager", "identity", "generation", "late-failure", "parent-cancel"} {
+		t.Run(mode, func(t *testing.T) { runPIDProcessCoveredStopModel(t, mode) })
+	}
+}
+
+func TestPIDProcessBlockedFinalizerModel(t *testing.T) {
+	for _, mode := range []string{"block-config", "block-pid"} {
+		t.Run(mode, func(t *testing.T) { runPIDProcessCoveredStopModel(t, mode) })
+	}
+}
+
+func TestPIDProcessCombinedMailboxStopModel(t *testing.T) {
+	runPIDProcessCoveredStopModel(t, "combined")
+}
+
+func TestPIDProcessCombinedMailboxCancelledStopModel(t *testing.T) {
+	runPIDProcessCoveredStopModel(t, "combined-block-config")
+}
+
+func runPIDProcessCoveredStopModel(t *testing.T, mode string) {
+	t.Helper()
+			oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+			mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "process-model", tgid: 1234, birth: 5678}}
+			heldProbe := &stopFactsBlockProbe{armed: true, name: "never", nth: 1, entered: make(chan struct{}), release: make(chan struct{})}
+			held := &stopFactsBlockingLifetime{TraceDefinitionLifetime: mock, probe: heldProbe}
+			counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+			infos := map[*cebpf.Map]traceDefinitionMapInfo{
+				counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+				config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+				perf: {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 103},
+				pid: {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+			}
+			var mu sync.Mutex
+			closed := make(map[*cebpf.Map]int)
+			traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) { info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; return info, nil }
+			traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) { info, ok := infos[m]; if !ok { return nil, unix.EINVAL }; clone := &cebpf.Map{}; infos[clone] = info; return clone, nil }
+			traceDefinitionMapCloser = func(m *cebpf.Map) error { mu.Lock(); closed[m]++; mu.Unlock(); return nil }
+			parent, cancelParent := context.WithCancel(context.Background())
+			scope := periodiccaller.NewOwnedScope(parent, nil)
+			stopCtx, cancelStop := context.WithCancel(context.Background())
+			stopDone := make(chan struct{})
+			stopLaunched := false
+			var asyncStopErr error
+			var releaseOnce sync.Once
+			lookupReturned := make(chan struct{})
+			blockName := "config-lookup"
+			if mode == "block-pid" { blockName = "pid" }
+			blockProbe := &stopFactsBlockProbe{name: blockName, nth: 1, entered: make(chan struct{}), release: make(chan struct{})}
+			var owner *definitionOwner
+			workerDone := make(chan struct{})
+			workerLaunched := false
+			var workerErr error
+			t.Cleanup(func() {
+				releaseOnce.Do(func() { close(blockProbe.release) })
+				cancelStop()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := scope.Stop(ctx); scopeDone := ctx.Err() == nil; cancel()
+				if !scopeDone { t.Error("scope cleanup timed out") }
+				if err != nil && !(mode == "mismatch" && strings.Contains(err.Error(), "auxiliary stop pid map changed")) && !((mode == "channel" || mode == "manager") && strings.Contains(err.Error(), "pid process enrollment changed")) && !(mode == "generation" && strings.Contains(err.Error(), "trace definition target configuration changed")) && !(mode == "identity" && scope.Failure() != nil && errors.Is(err, scope.Failure())) && !(mode == "late-failure" && errors.Is(err, unix.EACCES)) && !((mode == "block-config" || mode == "block-pid" || mode == "combined-block-config") && errors.Is(err, context.Canceled)) { t.Errorf("scope cleanup: %v", err) }
+				joined := !workerLaunched
+				if workerLaunched { select { case <-workerDone: joined = true; case <-time.After(2*time.Second): t.Error("worker cleanup timed out") } }
+				stopJoined := !stopLaunched
+				if stopLaunched { select { case <-stopDone: stopJoined = true; case <-time.After(2*time.Second): t.Error("stop cleanup timed out") } }
+				ownerJoined := mode != "combined-block-config" || !stopLaunched
+				if mode == "combined-block-config" && stopLaunched && stopJoined { select { case <-owner.scopeJoinDone: ownerJoined = true; case <-time.After(2*time.Second): t.Error("owner join cleanup timed out") } }
+				physicalDone := owner == nil
+				if owner != nil && scopeDone {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					err := owner.closeWithContext(ctx); cancel(); if err != nil { t.Errorf("owner cleanup: %v", err) }
+					select { case <-owner.closeReqDone: physicalDone = true; case <-time.After(2*time.Second): t.Error("owner cleanup timed out") }
+				}
+				cancelParent()
+				if joined && stopJoined && ownerJoined && scopeDone && physicalDone { traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+			})
+			maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+			var err error
+			owner, err = acquireDefinitionOwner(parent, held, maps)
+			if err != nil { var pending *traceDefinitionOwnerError; if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }; t.Fatalf("acquire owner: %v", err) }
+			clones := []*cebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+			if len(infos) != 8 { t.Fatal("expected four acquired clones") }
+			if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("scope bind: %v", err) }
+			native := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			fresh := traceDefinitionConfig{PID: 1234, Enabled: 1, Birth: 5678, Generation: ^uint64(0)}
+			mismatch, infoCalls, lookupCalls, beforeWorker := false, 0, 0, false
+			ops := traceDefinitionMapOps{
+				info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) { select { case <-workerDone: default: beforeWorker = true }; infoCalls++; info, ok := infos[m]; if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }; if m == clones[3] { blockProbe.call("pid"); if mismatch { info.ID++ } }; return info, nil },
+				lookup: func(m *cebpf.Map, key, value any) error { select { case <-workerDone: default: beforeWorker = true }; out, ok := value.(*traceDefinitionConfig); if !ok || m != clones[1] || key != uint32(0) { return unix.EINVAL }; if mode == "combined-block-config" { defer close(lookupReturned) }; lookupCalls++; blockProbe.call("config-lookup"); *out = fresh; return nil },
+				update: func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error { return unix.EINVAL }, close: traceDefinitionMapCloser,
+			}
+			owner.ops = ops
+			// MODEL: fixed source construction fields refer to actual acquired clone wrappers.
+			source := &traceDefinitionSource{owner: owner, lifetime: owner.HeldLifetime(), origCounter: counts, origConfig: config, origPerf: perf, counter: clones[0], config: clones[1], perf: clones[2], configID: 102, nativeConfig: native, ops: owner.ops,
+				binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "process-model", HostTGID: 1234, Birth: 5678, CounterMapID: 101, PerfMapID: 103, PossibleCPUs: 2, Generation: native.Generation}}
+			channel := make(chan libpf.PIDTID, 1)
+			manager := &pm.ProcessManager{}
+			tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps, pidEvents: channel, processManager: manager, intervals: stubPIDIntervals{}}
+			if mode == "combined" || mode == "combined-block-config" {
+				tracer.preparePIDMailbox(&Config{TraceDefinitionLifetime: held})
+				if tracer.pidMailbox == nil || tracer.pidMailbox.stickyErr != nil { t.Fatal("covered mailbox enrollment failed") }
+				key := makePIDTID(1234, 1234)
+				if err := tracer.pidMailbox.admit(key); err != nil { t.Fatalf("mailbox admit: %v", err) }
+				tracer.pidMailbox.recordQueued(key)
+			}
+			tracer.preparePIDProcess()
+			p := tracer.pidProcess
+			if p == nil || p.stickyErr != nil || p.expectedBinding.Generation == native.Generation { t.Fatal("covered process enrollment failed") }
+			p.processFactory = func(pid libpf.PID, tid libpf.PID) process.Process { return &stubProcessWithMappings{pid: pid} }
+			processed := make(chan struct{})
+			var processedOnce sync.Once
+			p.syncOrdinaryOverride = func(_ process.Process, report func(pm.OrdinarySyncBranch, error)) { report(pm.OrdinaryNil, nil); processedOnce.Do(func() { close(processed) }) }
+			if mode == "connected" {
+				if !scope.ExecuteCallback(func() {}) { t.Fatal("scope callback rejected") }
+				workerLaunched = scope.Go(func() { defer close(workerDone); tracer.processPIDEvents(scope.Context()) })
+			} else {
+				workerLaunched = scope.Go(func() {
+					defer close(workerDone)
+					if !scope.ExecuteCallback(func() { tracer.observePIDProcess(makePIDTID(1234, 1234)) }) { workerErr = errors.New("scope callback rejected") }
+				})
+			}
+			if !workerLaunched { t.Fatal("scope worker rejected") }
+			if mode == "connected" {
+				tracer.pidEvents <- makePIDTID(1234, 1234)
+				select { case <-processed: case <-time.After(2*time.Second): t.Fatal("worker did not process event") }
+				p.mu.Lock(); sealed := p.sealed; p.mu.Unlock()
+				if sealed { t.Fatal("worker sealed before stop") }
+				select { case <-workerDone: t.Fatal("worker returned before stop"); default: }
+			} else {
+				select { case <-workerDone: case <-time.After(2*time.Second): t.Fatal("worker did not return") }
+				if workerErr != nil { t.Fatal(workerErr) }
+			}
+			if mode == "channel" { tracer.pidEvents = make(chan libpf.PIDTID, 1) }
+			if mode == "manager" { tracer.processManager = &pm.ProcessManager{} }
+			if mode == "identity" { mock.tgid = 1235 }
+			if mode == "generation" { fresh.Generation = 42 }
+			if mode == "late-failure" { if err := scope.AddFinalizer(func() error { return unix.EACCES }); err != nil { t.Fatalf("late finalizer: %v", err) } }
+			if mode == "combined-block-config" {
+				blockProbe.mu.Lock(); blockProbe.armed = true; blockProbe.mu.Unlock()
+				stopLaunched = true
+				go func() { asyncStopErr = tracer.StopAuxiliary(stopCtx); close(stopDone) }()
+				select { case <-blockProbe.entered: case <-time.After(2*time.Second): t.Fatal("mailbox lookup did not enter") }
+				heldProbe.mu.Lock(); heldAtEntry := heldProbe.calls; heldProbe.mu.Unlock()
+				cancelStop()
+				select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("cancelled combined stop did not return") }
+				if !errors.Is(asyncStopErr, context.Canceled) { t.Fatalf("combined stop lost cancellation: %v", asyncStopErr) }
+				owner.mu.Lock(); admissionSealed := owner.readoutSealed; owner.mu.Unlock()
+				mu.Lock(); n := len(closed); mu.Unlock()
+				if !admissionSealed || n != 0 || mock.holds.Load() != 2 || owner.Closing() || owner.Quarantined() || owner.Closed() { t.Fatal("blocked callback lost ownership or admission remained open") }
+				if scope.ExecuteCallback(func() { t.Error("stopped scope reenrolled callback") }) { t.Fatal("stopped scope accepted callback") }
+				mailBefore, mailErr := tracer.PIDMailboxObservation(); processBefore, processErr := tracer.PIDProcessObservation()
+				if !errors.Is(mailErr, context.Canceled) || !errors.Is(processErr, context.Canceled) || mailBefore.Outcome == PIDMailboxObservedSealed || processBefore.Outcome == PIDProcessObservedSealed || tracer.pidMailbox.localSnapshot.ready.Load() { t.Fatal("blocked combined stop published positive facts") }
+				if infoCalls != 3 || lookupCalls != 1 { t.Fatal("unexpected primitives before blocked lookup") }
+				releaseOnce.Do(func() { close(blockProbe.release) })
+				select { case <-lookupReturned: case <-time.After(2*time.Second): t.Fatal("mailbox lookup did not return") }
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				joinErr := scope.Stop(ctx); expired := ctx.Err(); cancel()
+				if expired != nil || !errors.Is(joinErr, context.Canceled) { t.Fatalf("combined scope join: %v", joinErr) }
+				select { case <-owner.scopeJoinDone: case <-time.After(2*time.Second): t.Fatal("combined owner join timed out") }
+				select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("combined physical close timed out") }
+				heldProbe.mu.Lock(); heldAfter := heldProbe.calls; heldProbe.mu.Unlock()
+				if heldAfter != heldAtEntry || infoCalls != 3 || lookupCalls != 1 { t.Fatal("later stop primitive ran after cancellation") }
+				if !tracer.pidMailbox.localSnapshot.ready.Load() || tracer.pidMailbox.localSnapshot.value.Outcome != PIDMailboxFailed || !p.localSnapshot.ready.Load() || p.localSnapshot.value.Outcome != PIDProcessFailed { t.Fatal("combined finalizers did not retain failure") }
+				mailCached, processCached := tracer.pidMailbox.localSnapshot.value, p.localSnapshot.value
+				mailAfter, mailErr := tracer.PIDMailboxObservation(); processAfter, processErr := tracer.PIDProcessObservation(); scopeAfter, scopeErr := tracer.AuxiliaryObservation(); kindAfter, kindErr := tracer.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+				if !errors.Is(mailErr, context.Canceled) || !errors.Is(processErr, context.Canceled) || !errors.Is(scopeErr, context.Canceled) || !errors.Is(kindErr, context.Canceled) || mailAfter.Outcome == PIDMailboxObservedSealed || processAfter.Outcome == PIDProcessObservedSealed || scopeAfter.Outcome == libpf.AuxiliaryFinal { t.Fatal("combined failure was upgraded") }
+				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second); repeatErr := tracer.StopAuxiliary(ctx); expired = ctx.Err(); cancel()
+				if expired != nil || !errors.Is(repeatErr, context.Canceled) { t.Fatalf("repeat combined stop: %v", repeatErr) }
+				mailAgain, mailErr := tracer.PIDMailboxObservation(); processAgain, processErr := tracer.PIDProcessObservation(); scopeAgain, scopeErr := tracer.AuxiliaryObservation(); kindAgain, kindErr := tracer.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+				if !errors.Is(mailErr, context.Canceled) || !errors.Is(processErr, context.Canceled) || !errors.Is(scopeErr, context.Canceled) || !errors.Is(kindErr, context.Canceled) || mailAgain.Outcome != mailAfter.Outcome || processAgain.Outcome != processAfter.Outcome || scopeAgain.Outcome != scopeAfter.Outcome || scopeAgain.Counts != scopeAfter.Counts || kindAgain.Outcome != kindAfter.Outcome || kindAgain.Counts != kindAfter.Counts || tracer.pidMailbox.localSnapshot.value != mailCached || p.localSnapshot.value != processCached { t.Fatal("combined cached failure changed") }
+				heldProbe.mu.Lock(); heldRepeat := heldProbe.calls; heldProbe.mu.Unlock()
+				mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+				if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 || heldRepeat != heldAfter || infoCalls != 3 || lookupCalls != 1 { t.Fatal("combined repeat changed resources or queried model") }
+				return
+			}
+			if mode == "block-config" || mode == "block-pid" {
+				blockProbe.mu.Lock(); blockProbe.armed = true; blockProbe.mu.Unlock()
+				stopLaunched = true
+				go func() { asyncStopErr = scope.Stop(stopCtx); close(stopDone) }()
+				select { case <-blockProbe.entered: case <-time.After(2*time.Second): t.Fatal("selected process readout did not enter") }
+				heldProbe.mu.Lock(); heldAtEntry := heldProbe.calls; heldProbe.mu.Unlock()
+				cancelStop()
+				select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("cancelled process stop did not return") }
+				if !errors.Is(asyncStopErr, context.Canceled) { t.Fatalf("stop lost cancellation: %v", asyncStopErr) }
+				before, beforeErr := p.Observation()
+				if !errors.Is(beforeErr, context.Canceled) || before.Outcome == PIDProcessObservedSealed || before.Counts.Received != 1 || before.Counts.OrdinaryNil != 1 || p.localSnapshot.ready.Load() { t.Fatal("blocked process published positive facts") }
+				mu.Lock(); n := len(closed); mu.Unlock()
+				if n != 0 || mock.holds.Load() != 2 || owner.Closing() || owner.Quarantined() || owner.Closed() { t.Fatal("blocked process lost its owners") }
+				if scope.ExecuteCallback(func() { t.Error("stopped scope reenrolled callback") }) { t.Fatal("stopped scope accepted callback") }
+				releaseOnce.Do(func() { close(blockProbe.release) })
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				joinErr := scope.Stop(ctx); expired := ctx.Err(); cancel()
+				if expired != nil || !errors.Is(joinErr, context.Canceled) { t.Fatalf("scope join: %v", joinErr) }
+				if !p.localSnapshot.ready.Load() || p.localSnapshot.value.Outcome != PIDProcessFailed { t.Fatal("process did not retain a failed local seal") }
+				cached := p.localSnapshot.value
+				after, afterErr := p.Observation()
+				if after.Outcome == PIDProcessObservedSealed || !errors.Is(afterErr, context.Canceled) || p.localSnapshot.value != cached { t.Fatal("late process result upgraded") }
+				if err := p.seal(tracer); err == nil { t.Fatal("repeat seal lost failure") }
+				heldProbe.mu.Lock(); heldAfter := heldProbe.calls; heldProbe.mu.Unlock()
+				expectedInfo := 3; if mode == "block-pid" { expectedInfo = 4 }
+				if heldAfter != heldAtEntry || infoCalls != expectedInfo || lookupCalls != 1 || p.localSnapshot.value != cached { t.Fatal("a later process primitive ran") }
+				mu.Lock(); n = len(closed); mu.Unlock()
+				if n != 0 || mock.holds.Load() != 1 { t.Fatal("scope join prematurely closed owner") }
+				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+				err = owner.closeWithContext(ctx); cancel(); if err != nil { t.Fatalf("owner close: %v", err) }
+				select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close timed out") }
+				mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+				if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("model resources not released exactly once") }
+				return
+			}
+			mismatch = mode == "mismatch"
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			var stopErr error
+			if mode == "combined" { stopErr = tracer.StopAuxiliary(ctx) } else { stopErr = scope.Stop(ctx) }
+			expired := ctx.Err(); cancel()
+			if expired != nil { t.Fatalf("scope stop deadline: %v", expired) }
+			if mode == "combined" {
+				if stopErr != nil || !scope.Joined() { t.Fatalf("combined stop: %v", stopErr) }
+				select { case <-owner.closeReqDone: default: t.Fatal("owner physical close not complete") }
+				heldProbe.mu.Lock(); heldBefore := heldProbe.calls; heldProbe.mu.Unlock()
+				infoBefore, lookupBefore := infoCalls, lookupCalls
+				mail, mailErr := tracer.PIDMailboxObservation()
+				processObs, processErr := tracer.PIDProcessObservation()
+				scopeObs, scopeErr := tracer.AuxiliaryObservation()
+				if mailErr != nil || processErr != nil || scopeErr != nil || mail.Outcome != PIDMailboxObservedSealed || processObs.Outcome != PIDProcessObservedSealed || scopeObs.Outcome != libpf.AuxiliaryFinal || scopeObs.HeldWork { t.Fatal("combined local observations not sealed") }
+				if !mail.UnpolledResidualUnknown || mail.Counts.Admitted != 1 || mail.Counts.Queued != 1 || mail.Counts.TargetAdmitted != 1 || processObs.Counts.Received != 1 || processObs.Counts.OrdinaryNil != 1 || processObs.Counts.InFlight != 0 { t.Fatal("combined accounting incorrect") }
+				if mail.Binding.Generation != processObs.Binding.Generation || mail.Binding.Generation == native.Generation { t.Fatal("scope generation was not retained") }
+				mail.Counts.Admitted++; processObs.Counts.Received++; scopeObs.Counts.Failed++
+				mailAgain, mailErr := tracer.PIDMailboxObservation(); processAgain, processErr := tracer.PIDProcessObservation(); scopeAgain, scopeErr := tracer.AuxiliaryObservation()
+				if mailErr != nil || processErr != nil || scopeErr != nil || mailAgain.Counts.Admitted != 1 || processAgain.Counts.Received != 1 || scopeAgain.Counts.Failed != 0 { t.Fatal("combined observation copy mutated cache") }
+				heldProbe.mu.Lock(); heldAfter := heldProbe.calls; heldProbe.mu.Unlock()
+				if beforeWorker || infoCalls != infoBefore || lookupCalls != lookupBefore || heldAfter != heldBefore { t.Fatal("post-close observations queried model resources") }
+				mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+				if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("combined owner resources not released once") }
+				return
+			}
+			if mode == "connected" { select { case <-workerDone: case <-time.After(2*time.Second): t.Fatal("worker did not return after stop") } }
+			heldProbe.mu.Lock(); heldCalls := heldProbe.calls; heldProbe.mu.Unlock()
+			obs, obsErr := p.Observation()
+			expectedInfo, expectedLookup := 4, 1
+			if mode == "identity" { expectedInfo, expectedLookup = 0, 0 }
+			if mode == "generation" { expectedInfo = 3 }
+			if beforeWorker || infoCalls != expectedInfo || lookupCalls != expectedLookup { t.Fatal("covered readout did not follow worker return") }
+			if obs.Counts.Received != 1 || obs.Counts.OrdinaryNil != 1 || obs.Counts.InFlight != 0 { t.Fatal("ordinary process accounting incorrect") }
+			switch mode {
+			case "mismatch": if stopErr == nil || obsErr == nil || obs.Outcome != PIDProcessFailed || !strings.Contains(stopErr.Error(), "auxiliary stop pid map changed") { t.Fatal("fresh PID mismatch accepted") }
+			case "channel": if stopErr == nil || obsErr == nil || obs.Outcome != PIDProcessFailed || !strings.Contains(stopErr.Error(), "pid process enrollment changed") { t.Fatal("changed channel accepted") }
+			case "manager": if stopErr == nil || obsErr == nil || obs.Outcome != PIDProcessFailed || !strings.Contains(stopErr.Error(), "pid process enrollment changed") { t.Fatal("changed manager accepted") }
+			case "identity": if stopErr == nil || obsErr == nil || obs.Outcome != PIDProcessFailed { t.Fatal("changed lifetime identity accepted") }
+			case "generation": if stopErr == nil || obsErr == nil || obs.Outcome != PIDProcessFailed || !strings.Contains(stopErr.Error(), "trace definition target configuration changed") { t.Fatal("changed native generation accepted") }
+			case "late-failure": if !errors.Is(stopErr, unix.EACCES) || !errors.Is(obsErr, unix.EACCES) || obs.Outcome != PIDProcessFailed || !p.localSnapshot.ready.Load() || p.localSnapshot.value.Outcome != PIDProcessObservedSealed { t.Fatal("late failure did not veto local seal") }
+			default: if stopErr != nil || obsErr != nil || obs.Outcome != PIDProcessObservedSealed { t.Fatalf("covered local seal: %v / %v", stopErr, obsErr) }
+			}
+			cached := p.localSnapshot.value
+			obs.Binding.Session = "changed"; obs.Counts.Received++
+			again, againErr := p.Observation()
+			if again.Binding.Session != "process-model" || again.Counts.Received != 1 || p.localSnapshot.value != cached { t.Fatal("observation altered cached values") }
+			if mode == "late-failure" && !errors.Is(againErr, unix.EACCES) { t.Fatal("repeat observation lost failure") }
+			repeatErr := p.seal(tracer)
+			if mode == "mismatch" && (repeatErr == nil || !strings.Contains(repeatErr.Error(), "auxiliary stop pid map changed")) { t.Fatal("repeat lost mismatch") }
+			if (mode == "channel" || mode == "manager") && (repeatErr == nil || !strings.Contains(repeatErr.Error(), "pid process enrollment changed")) { t.Fatal("repeat lost resource association failure") }
+			if (mode == "identity" || mode == "generation") && repeatErr == nil { t.Fatal("repeat lost identity failure") }
+			if (mode == "positive" || mode == "connected" || mode == "parent-cancel" || mode == "late-failure") && repeatErr != nil { t.Fatalf("repeat seal: %v", repeatErr) }
+			if infoCalls != expectedInfo || lookupCalls != expectedLookup || p.localSnapshot.value != cached { t.Fatal("repeat seal queried or changed cache") }
+			ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			err = owner.closeWithContext(ctx); cancel(); if err != nil { t.Fatalf("owner close: %v", err) }
+			select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner close timed out") }
+			if mode == "parent-cancel" { cancelParent(); after, err := p.Observation(); if !errors.Is(err, context.Canceled) || after.Outcome != PIDProcessFailed || p.localSnapshot.value != cached { t.Fatal("parent cancellation did not overlay local copy") } }
+			if mode == "positive" || mode == "connected" { after, err := p.Observation(); if err != nil || after.Outcome != PIDProcessObservedSealed { t.Fatal("clean retirement changed the frozen observation") } }
+			heldProbe.mu.Lock(); afterHeldCalls := heldProbe.calls; heldProbe.mu.Unlock()
+			if infoCalls != expectedInfo || lookupCalls != expectedLookup || afterHeldCalls != heldCalls { t.Fatal("post-close observation queried model resources") }
+			mu.Lock(); valid := len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0; for _, clone := range clones { valid = valid && closed[clone] == 1 }; mu.Unlock()
+			if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("owner resources not released once") }
+}
+
+func TestPIDProcessUnretainedPreparationFails(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := scope.Stop(ctx); expired := ctx.Err(); cancel()
+		if expired != nil { t.Error("scope cleanup timed out") }
+		if err == nil { t.Error("unretained scope failure was lost") }
+	})
+	tracer := &Tracer{auxiliaryScope: scope, pidEvents: make(chan libpf.PIDTID, 1), processManager: &pm.ProcessManager{}}
+	tracer.preparePIDProcess()
+	obs, err := tracer.PIDProcessObservation()
+	if err == nil || obs.Outcome != PIDProcessFailed || scope.Failure() == nil { t.Fatal("unretained process preparation became eligible") }
+}

@@ -37,10 +37,10 @@ class PolicyCombinePropertyTest {
     }
 
     @Test
-    fun `combining policies correctly intersects landlock paths`() =
-        runBlocking {
-        // We will generate 3 random policies and combine them.
-        checkAll(policyArb, policyArb, policyArb) { p1, p2, p3 ->
+    fun `combining policies correctly intersects landlock paths`(): Unit =
+        runBlocking<Unit> {
+            // We will generate 3 random policies and combine them.
+            checkAll(policyArb, policyArb, policyArb) { p1, p2, p3 ->
             val combined = Policy.combine(p1, p2, p3)
 
             // If none of the policies enforce landlock, the combined shouldn't (unless one has paths)

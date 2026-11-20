@@ -1,0 +1,42 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import (
+	"errors"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+type bindingResolverFixture struct {
+	ResolverInstance
+	binding libpf.TraceDefinitionBinding
+	err     error
+	calls   int
+}
+
+func (f *bindingResolverFixture) TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error) {
+	f.calls++
+	return f.binding, f.err
+}
+
+func TestDefinitionBindingForwardsOptionalResolver(t *testing.T) {
+	missing := struct{ ResolverInstance }{}
+	f := &bindingResolverFixture{binding: libpf.TraceDefinitionBinding{Session: "prepared", CounterMapID: 12}}
+	s := &Symbolizer{resolvers: []ResolverInstance{missing, f}}
+	got, err := s.TraceDefinitionBinding()
+	if err != nil || got != f.binding || f.calls != 1 {
+		t.Fatalf("binding=%+v calls=%d err=%v", got, f.calls, err)
+	}
+	sentinel := errors.New("native sentinel")
+	f.err = sentinel
+	_, err = s.TraceDefinitionBinding()
+	if err != sentinel || f.calls != 2 {
+		t.Fatalf("error=%v calls=%d", err, f.calls)
+	}
+	s.resolvers = []ResolverInstance{missing}
+	if _, err := s.TraceDefinitionBinding(); err != ErrStructuredResolverUnavailable {
+		t.Fatalf("missing capability: %v", err)
+	}
+}

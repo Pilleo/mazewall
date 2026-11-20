@@ -33,6 +33,10 @@ func RunObservedControlled(ctx context.Context, cfg Config, writer io.Writer, co
 }
 
 func runObserved(ctx context.Context, cfg Config, writer io.Writer) error {
+	return runObservedWith(ctx, cfg, writer, Run)
+}
+
+func runObservedWith(ctx context.Context, cfg Config, writer io.Writer, run func(context.Context, Config, io.Writer) error) error {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return err
@@ -46,7 +50,7 @@ func runObserved(ctx context.Context, cfg Config, writer io.Writer) error {
 	if err := sink.Write(ctx, r); err != nil {
 		return err
 	}
-	err = Run(ctx, cfg, writer)
+	err = run(ctx, cfg, writer)
 	if err == nil || errors.Is(err, errReadoutPending) {
 		return err
 	}
