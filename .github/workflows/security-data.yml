@@ -73,7 +73,7 @@ jobs:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
               run: |
                   set -o pipefail
-                  ./gradlew dependencyCheckUpdate -Pmazewall.securitySnapshotUpdate=true --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500 -Dnvd.api.delay=1000 2>&1 | tee security-update.log
+                  ./gradlew dependencyCheckUpdate -Pmazewall.securitySnapshotUpdate=true --info --no-configuration-cache --no-daemon -Dorg.gradle.jvmargs="-Xms512m -Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError" -Dnvd.api.results.per.page=500 -Dnvd.api.delay=1000 2>&1 | tee security-update.log
                   python3 scripts/security_snapshot.py check-records security-update.log
             - name: Verify Updated Security Ownership
               id: updated_ownership
