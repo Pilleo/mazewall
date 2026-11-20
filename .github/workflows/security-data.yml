@@ -1,7 +1,8 @@
 name: Security Data
 on:
     schedule:
-        - cron: '0 * * * *'
+        - cron: '17 * * * *'
+        - cron: '47 * * * *'
     workflow_dispatch:
 concurrency:
     group: security-data-updater
