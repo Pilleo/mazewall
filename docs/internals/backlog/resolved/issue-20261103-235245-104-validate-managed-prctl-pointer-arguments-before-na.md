@@ -1,7 +1,7 @@
 ---
 title: "Validate managed prctl pointer arguments before native dispatch"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Validate managed prctl pointer arguments before native dispatch
 
 **Context:**
-Repository-wide review, 2026-11-04: [PLAT-05](../reviews/2026-11-04-repository-review-findings.md#plat-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PLAT-05](../../reviews/2026-11-04-repository-review-findings.md#plat-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · native memory safety · confirmed boundary defect with JDK-only marshalling probe · high confidence · platform native-process layer; no malformed production GetName call established.**
 
@@ -31,9 +31,10 @@ Repository-wide review, 2026-11-04: [PLAT-05](../reviews/2026-11-04-repository-r
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
-## Progress Evidence
+## Resolution Evidence (2026-11-21)
 - Added exhaustive `NativeTransfer` validation in `RealNativeProcess.prctl` (`platform/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt`): writable `TASK_COMM_LEN = 16L` native segment check for `GetName`, bounded readable NUL-terminated path contract via `NativeTransfer.path` for `SetName`, readable `Layouts.SOCK_FPROG.byteSize()` check for `SetSeccomp(SECCOMP_MODE_FILTER)`, and `NativeTransfer.bytes` check for `SetMm`.
-- Added unit tests in `RealNativeHelperDowncallTest.kt`; full `:platform:test`, `:lockdown:integrationTestFreshJvm`, and `./gradlew build` archival gate remain to confirm completion before resolving.
+- Added unit tests in `RealNativeHelperDowncallTest.kt` and verified via `:platform:test`, `:lockdown:integrationTestFreshJvm`, and the full build gate.
+- Full completion gate verified in commits `52e81d2e1` and `7e62bacf7` (`./gradlew build -PmazewallKernelLane=BASELINE` and rootful Docker `CONFINED` kernel lane passed).
 
 ---
 <!-- id: issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na  file: issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md -->

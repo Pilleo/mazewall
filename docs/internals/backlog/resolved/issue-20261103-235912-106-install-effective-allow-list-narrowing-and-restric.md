@@ -1,7 +1,7 @@
 ---
 title: "Install effective allow-list narrowing and restrictive default escalation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: ["issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed"]
 component: "core"
@@ -21,7 +21,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Install effective allow-list narrowing and restrictive default escalation
 
 **Context:**
-Repository-wide review, 2026-11-04: [BPF-01](../reviews/2026-11-04-repository-review-findings.md#bpf-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [BPF-01](../../reviews/2026-11-04-repository-review-findings.md#bpf-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · confirmed correctness/security defect, host-reproduced · high confidence · core explicit process/thread installation. NEW residual of the resolved stacking work.**
 
@@ -42,7 +42,7 @@ Repository-wide review, 2026-11-04: [BPF-01](../reviews/2026-11-04-repository-re
 
 ## Effective-action design follow-up — 2026-11-05
 
-[Recursive review A-01](../reviews/2026-11-05-state-complexity-review.md)
+[Recursive review A-01](../../reviews/2026-11-05-state-complexity-review.md)
 revalidates the existing owner and adds an explicit-versus-opposite-default
 acceptance case. `ContainmentStateRegistry.kt:100–108` merges explicit entries
 without comparing them with the other state's default. For a restrictive process
@@ -65,10 +65,10 @@ kernel schedule; supported installation ordering remains part of qualification.
   syscall defaults, quarantine, filter depth and existing supported APIs. A
   syscall-only projection cannot certify argument-level equivalence.
 - Keep `ContainerState` an immutable snapshot, not another lifecycle hierarchy;
-  its [resolved snapshot decision](resolved/issue-20260821-150006-container-state-is-snapshot-not-lifecycle.md)
+  its [resolved snapshot decision](issue-20260821-150006-container-state-is-snapshot-not-lifecycle.md)
   remains valid. Existing canonical-ordering dependency is unchanged.
 
-## Progress Evidence
+## Resolution Evidence (2026-11-21)
 - Kept `ContainerState` as an immutable snapshot with authoritative `(defaultAction, syscallActions)` projection (`effectiveAction`, derived `allowedSyscalls`, and `withAppliedFilter`) while intersecting explicit entries against the opposite state's effective action/default in `ContainmentStateRegistry.mergeStates` and publishing only the applied fragment in `ContainmentRegistryEffect.SeccompInstalled`.
 - Added closed `FilterInstallationPlanner.PlanDecision` (`AlreadySatisfied` | `Install(fragment, nextProjection, newBlocks, newDefaultAction)`) using `SeccompAction.stricter`, installing narrowed allow-list blocks and stricter default escalations (`ACT_LOG -> ACT_ERRNO`, `ACT_ERRNO -> ACT_KILL_*`, explicit `ACT_LOG` exception removal) while preserving first-policy payload tie-breaking (`ACT_ERRNO(EACCES)` <-> `ACT_ERRNO(EPERM)`, `ACT_TRACE(1)` <-> `ACT_TRACE(2)` remain `AlreadySatisfied`), argument-inspection rules, and JVM-floor protections.
 - Wired `ProcessFilterInstaller` and `ContainedExecutors` through `FilterInstallationPlanner.plan` and `ContainmentRegistryEffect.SeccompInstalled`, eagerly initialized `BpfFilter` comparators (`bySyscallNr`, `byKernelReturnCode`) to prevent lazy comparator classloading after `openat`-denying filters, aligned union-aware `SelfVerificationPlan` with unconditional `clone3 -> ENOSYS`, `BpfFilter.getJvmCriticalNrs(arch)` allow floor, stacked `UnsafePrctlInspector`/`MmapExecInspector` protections, and valid `nr >= 0` checks, and warmed the union self-verification path in `InstallSelfVerifier.warmup()`.
@@ -78,7 +78,7 @@ kernel schedule; supported installation ordering remains part of qualification.
   - `./gradlew :enforcer:integrationTestFreshJvm --tests "io.mazewall.seccomp.AllowListTest" --console=plain` (`4` tests, `0` skipped, `0` failures).
   - `./gradlew :enforcer:test :lockdown:test :lockdown:integrationTestFreshJvm --console=plain` (`:enforcer:test`: `1670` tests, `2` pre-existing `LandlockFailureModeTest` assumption-skipped, `0` failures; `:lockdown:test`: `17` tests, `0` failures; `:lockdown:integrationTestFreshJvm`: `2` tests, `0` failures).
   - `./gradlew :lockdownConsumerCheck --console=plain` (`Executed: 1`, `Skipped: 0`, `Failed: 0`).
-- Remaining before archival: run full `./gradlew build` completion gate.
+- Full completion gate verified in commits `52e81d2e1` and `7e62bacf7` (`./gradlew build -PmazewallKernelLane=BASELINE` and rootful Docker `CONFINED` kernel lane passed).
 
 ---
 <!-- id: issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric  file: issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md -->

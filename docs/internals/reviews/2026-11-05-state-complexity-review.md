@@ -324,7 +324,7 @@ sections and focused scope metadata. No resolved issue was reopened.
 | Finding | Action | Canonical owner |
 |---|---|---|
 | 1 / C-01 | NEW, high | [Executor collection lifetime](../backlog/issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) |
-| 2 / A-01 | EXTEND | [Effective installed actions](../backlog/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
+| 2 / A-01 | EXTEND | [Effective installed actions](../backlog/resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
 | 3 / C-02 | EXTEND | [Measured behavior binding](../backlog/issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) |
 | 4 / D-01 | EXTEND | [Tier E resource ownership](../backlog/issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md) |
 | 5 / B-02 | EXTEND | [Owned worker generations](../backlog/issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic.md) |
@@ -346,9 +346,9 @@ so another restatement was deliberately not appended.
 
 | Surface | Technique worth implementing/preserving | Existing owner |
 |---|---|---|
-| Policy raw construction/copy | Owned immutable collections, stable equality/cache keys | [Policy snapshots](../backlog/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
+| Policy raw construction/copy | Owned immutable collections, stable equality/cache keys | [Policy snapshots](../backlog/resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
 | Process scope/filesystem intent | Validated construction, not a caller-selected phantom marker | [Validated process scope](../backlog/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
-| Installation result | Failure-first rejection; controlled outcome independent of irreversible progress | [Receipt outcomes](../backlog/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
+| Installation result | Failure-first rejection; controlled outcome independent of irreversible progress | [Receipt outcomes](../backlog/resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
 | In-process and Portal invocation | `Running(worker)` payload; keep lock and result/physical-end separation | [Phase-owned worker](../backlog/issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) |
 | Broker close preparation | `AlreadyClosed | Wait(operation) | Execute(operation,…)` | [Exclusive close outcomes](../backlog/issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md) |
 | Portal codegen | One position-safe immutable schema drives declarations, codecs and fingerprint | [CG02 schema](../backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md), [CG03 identity](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |

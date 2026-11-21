@@ -1,7 +1,7 @@
 ---
 title: "Use canonical action ordering throughout installed policy planning and state"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: ["issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in"]
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Use canonical action ordering throughout installed policy planning and state
 
 **Context:**
-Repository-wide review, 2026-11-04: [BPF-03](../reviews/2026-11-04-repository-review-findings.md#bpf-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [BPF-03](../../reviews/2026-11-04-repository-review-findings.md#bpf-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · confirmed source defect, host-reproduced · high confidence · core stacked policy enforcement; permitting impact requires an applicable ptracer. NEW residual of known ordering corrections.**
 
@@ -31,11 +31,11 @@ Repository-wide review, 2026-11-04: [BPF-03](../reviews/2026-11-04-repository-re
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
-## Progress Evidence
+## Resolution Evidence (2026-11-21)
 - Replaced `.priority` comparisons with `.restrictivenessRank()` across `FilterInstallationPlanner.kt`, `ContainerState.kt`, and `ContainmentStateRegistry.kt`, guarded `ContainerState.withNewSeccompPolicy` against weakening existing explicit syscall actions, and removed the remaining `.priority` comparison in `PolicyDefinition.kt`.
 - Resolved the canonical `ACT_NOTIFY` over `ACT_TRACE` ordering dependency in `issue-20261103-235911-795`.
 - Added table-driven escalation/non-escalation and bidirectional merge tests in `FilterInstallationPlannerTest.kt`, `ContainerStateTest.kt`, and `ContainmentStateRegistryTest.kt`; verified `./gradlew :enforcer:test` (`1664` tests, `2` pre-existing `LandlockFailureModeTest` assumption-skipped, `0` failed) and `:enforcer:ktlintCheck :enforcer:checkKotlinAbi`.
-- Remaining before archival: run full `./gradlew build` completion gate.
+- Full completion gate verified in commits `52e81d2e1` and `7e62bacf7` (`./gradlew build -PmazewallKernelLane=BASELINE` and rootful Docker `CONFINED` kernel lane passed).
 
 ---
 <!-- id: issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed  file: issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md -->

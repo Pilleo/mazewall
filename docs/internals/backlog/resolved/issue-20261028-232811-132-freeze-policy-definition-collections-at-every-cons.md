@@ -1,7 +1,7 @@
 ---
 title: "Freeze policy definition collections at every construction boundary"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -34,18 +34,19 @@ Host-only reproduction: direct construction and a built definition copy(syscallA
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[BPF-04](../reviews/2026-11-04-repository-review-findings.md#bpf-04) freshly reproduces
+[BPF-04](../../reviews/2026-11-04-repository-review-findings.md#bpf-04) freshly reproduces
 raw collection mutation and traces copy/cache-key exposure. Builder/canonical/owned snapshots
 are already frozen; kernel-installed programs do not mutate. Cover every raw/copy collection,
 Java-visible view and stable cache identity under the existing compatibility decision.
 
 ---
-## Progress Evidence (2026-11-21)
+## Resolution Evidence (2026-11-21)
 
 - Converted `PolicyDefinition` (`enforcer/src/main/kotlin/io/mazewall/enforcer/api/PolicyDefinition.kt`, shared with `:lockdown` via `PrepareLockdownCoreSources`) from `data class` to `class` owning defensive `java.util.Map.copyOf`, `java.util.Set.copyOf`, and `java.util.List.copyOf` snapshots for all 5 collection properties (`syscallActions`, `allowedFsReadPaths`, `allowedFsWritePaths`, `customViolationPhrases`, `customViolationRegexes`) at every construction and `copy` boundary.
 - Implemented `component1`–`component11` (`internal operator fun component9` preserving `enforceLandlock` internal visibility), `copy`, `equals`, `hashCode`, and `toString` with zero binary ABI changes (`enforcer/api/enforcer.api` and `lockdown/api/lockdown.api` diffs empty), and updated `config/detekt/detekt.yml` `LongParameterList` excludes (`**/PolicyDefinition.kt`) matching the prior `ignoreDataClasses: true` exemption.
 - Added Kotlin and Java regressions in `enforcer/src/test/kotlin/io/mazewall/PolicyBuilderContractTest.kt` and `enforcer/src/test/java/io/mazewall/MazewallJavaApiTest.java` covering raw constructor & `copy` snapshot immutability, Java-visible unmodifiable views, and `PolicyCompilationCache` key stability after caller mutation.
 - Verified sequentially: `./gradlew :enforcer:ktlintCheck :lockdown:ktlintCheck :enforcer:detektMain :lockdown:detektMain :detektWarningRatchet :enforcer:checkKotlinAbi :lockdown:checkKotlinAbi :verifySupportedApiSurface :verifyPackageTopology --no-daemon --console=plain` (`65` tasks, passed), `./gradlew :enforcer:ktlintTestSourceSetCheck :enforcer:test --tests io.mazewall.enforcer.api.PolicyBuilderContractTest --tests io.mazewall.enforcer.api.CanonicalPolicyArtifactTest --tests io.mazewall.MazewallJavaApiTest :lockdown:test --no-daemon --console=plain` (`PolicyBuilderContractTest` `6`, `CanonicalPolicyArtifactTest` `6`, `MazewallJavaApiTest` `13`, `:lockdown:test` `17`, all `0` failed/`0` skipped).
 
+- Full completion gate verified in commits `52e81d2e1` and `7e62bacf7` (`./gradlew build -PmazewallKernelLane=BASELINE` and rootful Docker `CONFINED` kernel lane passed).
 ---
 <!-- id: issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons  file: issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md -->

@@ -54,8 +54,8 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | PLAT-01 | P1 | W01 | [issue-20261103-234851-768](../backlog/issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) |
 | PLAT-02 | P2 | W01 | [issue-20261103-235243-934](../backlog/issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) |
 | PLAT-03 | P1 | W01 | [issue-20261103-235244-414](../backlog/issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) |
-| PLAT-04 | P2 | W01 | [issue-20261103-235244-769](../backlog/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) |
-| PLAT-05 | P2 | W01 | [issue-20261103-235245-104](../backlog/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) |
+| PLAT-04 | P2 | W01 | [issue-20261103-235244-769](../backlog/resolved/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) |
+| PLAT-05 | P2 | W01 | [issue-20261103-235245-104](../backlog/resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) |
 | PLAT-06 | P2 | W01 | [issue-20261103-235245-538](../backlog/issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) |
 | PLAT-07 | P2 | W01 | [issue-20261103-235246-003](../backlog/issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) |
 | PN05-01 | P2 | W05 | [issue-20261103-235246-361](../backlog/issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) |
@@ -81,9 +81,9 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | PCG-10 | P2 | W07 | [issue-20261103-235254-619](../backlog/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) |
 | SPR-02 | P2 | W13 | [issue-20261103-235255-089](../backlog/issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) |
 | BUILD-01 | P1 | W12 | [issue-20261103-235255-561](../backlog/issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) |
-| BUILD-02 | P2 | W11 | [issue-20261103-235256-009](../backlog/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) |
+| BUILD-02 | P2 | W11 | [issue-20261103-235256-009](../backlog/resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) |
 | TEST-01 | P2 | W11 | [issue-20261103-235256-471](../backlog/issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) |
-| TEST-02 | P2 | W11 | [issue-20261103-235256-949](../backlog/issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) |
+| TEST-02 | P2 | W11 | [issue-20261103-235256-949](../backlog/resolved/issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) |
 | TEST-03 | P2 | W19 | [issue-20261103-235257-446](../backlog/issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) |
 | TEST-04 | P2 | W16 | [issue-20261103-235257-865](../backlog/issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) |
 | TEST-05 | P2 | W11 | [issue-20261103-235258-396](../backlog/issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) |
@@ -104,9 +104,9 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | EVID-08 | P2 | W14 | [issue-20261103-235401-320](../backlog/issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) |
 | EVID-09 | P2 | W14 | [issue-20261103-235401-641](../backlog/issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) |
 | KD-E2 | P2 | W15 | [issue-20261103-235402-001](../backlog/issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) |
-| PLAT-08 | P1 | W01 | [issue-20261103-235911-795](../backlog/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) |
-| BPF-01 | P1 | W02 | [issue-20261103-235912-106](../backlog/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
-| BPF-03 | P1 | W02 | [issue-20261103-235912-401](../backlog/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) |
+| PLAT-08 | P1 | W01 | [issue-20261103-235911-795](../backlog/resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) |
+| BPF-01 | P1 | W02 | [issue-20261103-235912-106](../backlog/resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
+| BPF-03 | P1 | W02 | [issue-20261103-235912-401](../backlog/resolved/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) |
 | BPF-06 | P2 | W02 | [issue-20261103-235912-625](../backlog/issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) |
 | PN-E2 | P2 | W05 | [issue-20261103-235912-820](../backlog/issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) |
 | BUILD-RUN | P1 | W04 | [issue-20261103-235434-538](../backlog/issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) |
@@ -119,14 +119,14 @@ remain those in the detailed finding register; a mapping is not a closure claim.
 
 | Finding | Current owner priority | Package | Exact owner |
 |---|---|---|---|
-| BPF-04 | P1 | W02 | [issue-20261028-232811-132](../backlog/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
+| BPF-04 | P1 | W02 | [issue-20261028-232811-132](../backlog/resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
 | BPF-05 | P1 | W02 | [issue-20261028-232810-687](../backlog/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
-| BPF-08 | P2 | W02 | [issue-20261103-123347-795](../backlog/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) |
-| BPF-09 / TEST-06 | P2 | W11 | [issue-20261103-123359-606](../backlog/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) |
+| BPF-08 | P2 | W02 | [issue-20261103-123347-795](../backlog/resolved/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) |
+| BPF-09 / TEST-06 | P2 | W11 | [issue-20261103-123359-606](../backlog/resolved/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) |
 | LIF-01 | P1 | W03 | [issue-20261007-092325-883](../backlog/issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic.md) |
 | LIF-02 | P1 | W03 | [issue-20261007-111005-986](../backlog/issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain.md) |
 | LIF-03 | P1 | W03 | [issue-20261007-092325-883](../backlog/issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic.md) |
-| LIF-04 | P1 | W02 | [issue-20261028-232811-964](../backlog/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
+| LIF-04 | P1 | W02 | [issue-20261028-232811-964](../backlog/resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
 | LIF-Q1 | P1 | W03 | [issue-20261008-034648-678](../backlog/issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio.md) |
 | LIF-Q2 | P1 | W03 | [issue-20261028-230730-555](../backlog/issue-20261028-230730-555-define-the-supported-operation-contract-for-owned-.md) |
 | PN05-03 | P1 | W05 | [issue-20260926-121505-981](../backlog/issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md) |

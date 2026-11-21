@@ -1,7 +1,7 @@
 ---
 title: "Add JPMS module-info, sources/javadoc JARs, lockdown virtual-thread error message, and complete 5-syscall plus NATIVE_IMAGE kernel tests"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -21,9 +21,10 @@ mazewall-lockdown lacks module-info.class / Automatic-Module-Name (forcing --ena
 **Needed:**
 1. Add lockdown module-info.java and Automatic-Module-Name, enable withSourcesJar()/withJavadocJar() and extend verifyLockdownPublication, fix virtual-thread message in ProcessFilterInstaller, and add kernel integration tests for memfd_create/io_uring_setup/io_uring_enter/execveat and NATIVE_IMAGE PROT_EXEC denial.
 
-## Progress Evidence
+## Resolution Evidence (2026-11-21)
 - Added `lockdown/src/main/java/module-info.java` (`module io.mazewall.lockdown` exporting only `io.mazewall.lockdown`), set `Automatic-Module-Name` to `io.mazewall.lockdown`, enabled `withSourcesJar()`/`withJavadocJar()`, relocated internalized core classes to `io.mazewall.lockdown.internal.*` (eliminating Java keyword package `platform.native` and split-package hazards), and extended `VerifyLockdownPublication` with `ModuleFinder` package/export checks plus sources/javadoc JAR checks.
 - Updated `ProcessFilterInstaller` virtual-thread error text, verified `MazewallLockdownIntegrationTest` (`memfd_create`, `io_uring_setup`, `io_uring_enter`, `execveat`, `execve`, disallowed `prctl`, `clone3 -> ENOSYS`, JPMS `--module-path` subprocess) and `MazewallLockdownNativeImageIntegrationTest` (isolated `-Xint` subprocess confirming `mmap`/`mprotect(PROT_EXEC)` `EPERM` + `execve` `EPERM` + `HOTSPOT_JIT` rejection).
 
+- Full completion gate verified in commits `52e81d2e1` and `7e62bacf7` (`./gradlew build -PmazewallKernelLane=BASELINE` and rootful Docker `CONFINED` kernel lane passed).
 ---
 <!-- id: issue-20261120-151800-231-add-jpms-module-info-sources-javadoc-jars-lockdown  file: issue-20261120-151800-231-add-jpms-module-info-sources-javadoc-jars-lockdown.md -->

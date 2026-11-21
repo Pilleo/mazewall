@@ -28,7 +28,7 @@ Track the 0.1.0 release of one supported process-wide external-program lockdown 
 
 **Related existing owners:**
 - [issue-20261028-230731-560](issue-20261028-230731-560-decouple-core-release-qualification-from-optional-.md) (decouple core release qualification from optional integrations)
-- [issue-20261028-232811-964](issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) (reject contradictory installation receipts)
+- [issue-20261028-232811-964](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) (reject contradictory installation receipts)
 - [issue-20261028-230730-359](issue-20261028-230730-359-publish-qualified-platform-envelopes-for-each-cont.md) (qualified platform envelopes)
 
 **Needed:**
