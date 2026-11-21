@@ -208,6 +208,13 @@ preserved. Broker process/native retirement continues to use its own lifecycle.
   wire validation under `ProcessBroker.invokeValidated` while the worker checkout remains
   exclusively owned, deferring trusted host DTO constructors until after wire exhaustion so corrupt
   responses always retire the exact offending worker and terminally lose `STATEFUL_SINGLETON` groups.
+- Generated host stubs (`ProcessBroker.newRequestWriter()`) and worker dispatchers
+  (`PortalRequestWriter.forReply()`) stream into the shared bounded `PortalRequestWriter`,
+  enforcing configured request/reply byte limits (`PortalFrame.MAX_PAYLOAD` or broker/scoped limits
+  via `PortalRequestWriter.withReplyLimit(...)`), per-collection cardinality
+  (`PortalCodec.MAX_COLLECTION_ELEMENTS = 16_384`), and aggregate element-traversal budgets with
+  checked `Long` arithmetic before buffer allocation, growth, or further element traversal (and
+  counting resize, trim, and snapshot scratch buffers in the writer's peak allocation budget).
 
 ## Initial service modes
 

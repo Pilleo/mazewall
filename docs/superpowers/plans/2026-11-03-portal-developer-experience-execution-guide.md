@@ -393,20 +393,20 @@ observed. The earlier source review alone does not close this issue.
 ## CG06 — Bounded encoding before allocation
 
 **Read first:** Current encode concatenation in `PortalStubGenerator.kt`,
-`PortalCodec.kt` and [CG06](../../internals/backlog/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md).
+`PortalCodec.kt` and [CG06](../../internals/backlog/resolved/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md).
 
-- [ ] Reproduce a 16,385-element collection and an over-limit reply. Then use a small
+- [x] Reproduce a 16,385-element collection and an over-limit reply. Then use a small
   configured byte limit to make routine tests fast; do not attempt to cause an OOM.
-- [ ] Add counting getters/iterators and allocation/growth observations at existing
+- [x] Add counting getters/iterators and allocation/growth observations at existing
   test seams. The rejection must occur before over-budget growth or unnecessary
   element traversal, not after an oversized array has already been created.
-- [ ] Implement one shared bounded writer (`PortalRequestWriter.kt` is the planned
+- [x] Implement one shared bounded writer (`PortalRequestWriter.kt` is the planned
   file). Before writing/growing, use checked length/count arithmetic. Bound the
   aggregate nested value, not just every individual field. Account for UTF-8 bytes,
   prefixes, scratch storage and ownership-transfer copies.
-- [ ] Use it in existing synchronous request **and worker-reply** encoding. P03 later
+- [x] Use it in existing synchronous request **and worker-reply** encoding. P03 later
   owns submission/admission integration; it must reuse this writer, not add another.
-- [ ] Compare valid old/new wire bytes at empty, exact-limit and nested boundaries.
+- [x] Compare valid old/new wire bytes at empty, exact-limit and nested boundaries.
   Test limit-plus-one, numeric overflow and a user getter that throws. A user getter
   can itself block/allocate; library bounds do not make arbitrary host code safe.
 

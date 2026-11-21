@@ -37,7 +37,10 @@ class ResolvedPortalContractTest {
         val source = PortalStubGenerator.generate(CollectionContract::class.java).joinToString("\n") { it.toString() }
 
         kotlin.test.assertTrue(source.contains("collectionCount()"), source)
-        kotlin.test.assertTrue(source.contains("flatMap"), source)
+        kotlin.test.assertTrue(source.contains("writer.list("), source)
+        kotlin.test.assertTrue(source.contains("writer.map("), source)
+        kotlin.test.assertFalse(source.contains("flatMap"), source)
+        kotlin.test.assertFalse(source.contains("PortalCodec.concat"), source)
     }
 
     @Test

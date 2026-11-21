@@ -6,16 +6,19 @@ import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.portal.Capability
+import io.mazewall.portal.PortalCallException
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalCodec
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalGenerationMeasurement
 import io.mazewall.portal.PortalInstanceMode
+import io.mazewall.portal.PortalInvocationEvidence
 import io.mazewall.portal.PortalKind
 import io.mazewall.portal.PortalMalformedPayloadException
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalParentAuthorization
 import io.mazewall.portal.PortalPayload
+import io.mazewall.portal.PortalRequestWriter
 import io.mazewall.portal.PortalRuntimeLimits
 import io.mazewall.portal.PortalServiceManifestCodec
 import io.mazewall.portal.PortalWorkerArtifact
@@ -856,6 +859,264 @@ class PortalCodegenFunctionalTest {
     }
 
     @Test
+    fun `generated request and reply encoding enforce bounds before allocation and traversal`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(
+            apiJar,
+            listOf("fixture.BoundedEncodeService"),
+            compileGenerated = true,
+        )
+        projectDir.resolve("src/portalWorker/kotlin/fixture/Main.kt").writeText(
+            """
+            package fixture
+            import io.mazewall.portal.PortalCallException
+            import io.mazewall.portal.PortalCodec
+            import io.mazewall.portal.PortalFrame
+            import io.mazewall.portal.PortalInvocationEvidence
+            import io.mazewall.portal.PortalMethod
+            import io.mazewall.portal.PortalRequestWriter
+            private fun idFor(name: String): PortalMethod.Generated {
+                val method = BoundedEncodeService::class.java.methods.single { it.name == name }
+                val key = BoundedEncodeService::class.java.name + "#" + method.name + "#" + method.parameterTypes.joinToString(",") { it.name }
+                return PortalMethod.Generated((key.hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000)
+            }
+            fun main() {
+                var elementReads = 0
+                val counting16385 = object : java.util.AbstractList<Int>() {
+                    override val size: Int = PortalCodec.MAX_COLLECTION_ELEMENTS + 1
+                    override fun get(index: Int): Int {
+                        elementReads++
+                        return index
+                    }
+                }
+                val counting4Strings = object : java.util.AbstractList<String>() {
+                    override val size: Int = 4
+                    override fun get(index: Int): String {
+                        elementReads++
+                        return "x".repeat(20)
+                    }
+                }
+                val service = object : BoundedEncodeService {
+                    override fun listInts(values: List<Int>): List<Int> =
+                        if (values.size == 1) counting16385 else List(PortalCodec.MAX_COLLECTION_ELEMENTS) { 1 }
+                    override fun echoString(value: String): String = value
+                    override fun echoStrings(values: List<String>): List<String> = counting4Strings
+                    override fun sendLists(values: List<String>): Int = values.size
+                    override fun sendThrowingPojo(value: ThrowingGetterPojo): Int = 0
+                }
+
+                // Exact 16,384-element reply succeeds; 16,385 fails before reading any elements.
+                val exactReply = BoundedEncodeServicePortalDispatcher.handle(
+                    service,
+                    idFor("listInts"),
+                    PortalCodec.encodeInt(0),
+                    emptyList(),
+                )
+                check(PortalCodec.Reader(exactReply).collectionCount() == PortalCodec.MAX_COLLECTION_ELEMENTS)
+                val overCount = try {
+                    BoundedEncodeServicePortalDispatcher.handle(
+                        service,
+                        idFor("listInts"),
+                        PortalCodec.concat(listOf(PortalCodec.encodeInt(1), PortalCodec.encodeInt(0))),
+                        emptyList(),
+                    )
+                    error("expected 16,385 reply rejection")
+                } catch (e: PortalCallException) {
+                    e
+                }
+                check(overCount.evidence == PortalInvocationEvidence.NOT_STARTED)
+                check(elementReads == 0) { "expected 0 element reads before rejection, saw " + elementReads }
+
+                // Reply exceeding 8 MiB rejects before creating an over-limit encoded array.
+                val giant = "a".repeat(PortalFrame.MAX_PAYLOAD - 3)
+                val hugeReply = try {
+                    BoundedEncodeServicePortalDispatcher.handle(
+                        service,
+                        idFor("echoString"),
+                        PortalCodec.encodeString(giant),
+                        emptyList(),
+                    )
+                    error("expected >8 MiB string reply rejection")
+                } catch (e: PortalCallException) {
+                    e
+                }
+                check(hugeReply.evidence == PortalInvocationEvidence.NOT_STARTED)
+
+                // Small reply byte limit rejects >64B string and stops counting List<String> mid-traversal before element 3.
+                PortalRequestWriter.withReplyLimit(64) {
+                    val strAborted = try {
+                        BoundedEncodeServicePortalDispatcher.handle(
+                            service,
+                            idFor("echoString"),
+                            PortalCodec.encodeString("x".repeat(61)),
+                            emptyList(),
+                        )
+                        error("expected 64-byte string reply limit failure")
+                    } catch (e: PortalCallException) {
+                        e
+                    }
+                    check(strAborted.evidence == PortalInvocationEvidence.NOT_STARTED)
+
+                    elementReads = 0
+                    val listAborted = try {
+                        BoundedEncodeServicePortalDispatcher.handle(
+                            service,
+                            idFor("echoStrings"),
+                            PortalCodec.encodeInt(0),
+                            emptyList(),
+                        )
+                        error("expected 64-byte list reply limit failure")
+                    } catch (e: PortalCallException) {
+                        e
+                    }
+                    check(listAborted.evidence == PortalInvocationEvidence.NOT_STARTED)
+                    check(elementReads == 3) { "expected stop at element 2 (3 reads), saw " + elementReads }
+
+                    val exact = BoundedEncodeServicePortalDispatcher.handle(
+                        service,
+                        idFor("echoString"),
+                        PortalCodec.encodeString("x".repeat(60)),
+                        emptyList(),
+                    )
+                    check(PortalCodec.Reader(exact).string().length == 60)
+                }
+                println("BOUNDED_DISPATCHER_OK")
+            }
+            """.trimIndent(),
+        )
+
+        val result = runner("classes", "roundTrip").build()
+        assertBuilt(result, ":compileKotlin")
+        assertBuilt(result, ":compilePortalWorkerKotlin")
+        assertTrue(result.output.contains("BOUNDED_DISPATCHER_OK"), result.output)
+
+        // Now verify compiled host stub and compiled dispatcher across a live ProcessBroker socket pair.
+        val generation = PortalWorkerGeneration("a".repeat(64), "b".repeat(64), "c".repeat(64))
+        var dispatchedRequests = 0
+        val peerThreads = mutableListOf<Thread>()
+        val dummyBundle = Files.write(projectDir.resolve("dummy-bounded-worker.zip"), ByteArray(0))
+        val launcher =
+            object : ProcessLauncher by RealProcessLauncher {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                    preparation: JvmLaunchPreparation,
+                ): Process {
+                    val mainIdx = args.indexOf(PortalWorkerMain::class.java.name)
+                    val epPath = args[mainIdx + 1]
+                    val child = ProcessBuilder("cat").redirectErrorStream(true).start()
+                    val peer =
+                        Thread {
+                            PortalChannel(RealSocketManager.connect(epPath)).use { channel ->
+                                val authFrame = channel.receive(10_000).first
+                                val lines =
+                                    authFrame.payload
+                                        .copyToByteArray()
+                                        .toString(Charsets.UTF_8)
+                                        .removeSuffix("\n")
+                                        .split('\n')
+                                val session = lines[1].removePrefix("session=")
+                                val launch = lines[3].removePrefix("launch=")
+                                val resources = lines[4].removePrefix("resources=")
+                                val deadline = Deadline.afterMillis(10_000)
+                                channel.sendControl(PortalParentAuthorization(session, child.pid(), launch, resources).acknowledgement(), deadline)
+                                channel.sendControl(PortalWorkerReady(session, child.pid(), generation, launch, resources).frame(), deadline)
+                                while (!Thread.currentThread().isInterrupted) {
+                                    val req = runCatching { channel.receive(10_000).first }.getOrNull() ?: break
+                                    dispatchedRequests++
+                                    channel.send(PortalFrame(PortalKind.Response, req.requestId, req.method, PortalPayload(req.payload.copyToByteArray()), 0))
+                                }
+                            }
+                        }
+                    peer.isDaemon = true
+                    peer.start()
+                    peerThreads += peer
+                    return child
+                }
+            }
+
+        val broker =
+            ProcessBroker(
+                launcher = launcher,
+                workerClasspath = projectDir.toString(),
+                workerLaunch = PortalWorkerLaunch(emptyList(), PortalWorkerArtifact(dummyBundle, "0".repeat(64)), PortalGenerationMeasurement { _, _, _ -> generation }),
+                limits = PortalRuntimeLimits(maxRequestBytes = 32, startupTimeoutMs = 5_000, callTimeoutMs = 5_000, closeTimeoutMs = 2_000),
+            )
+        try {
+            broker.start()
+            val classesDir = projectDir.resolve("build/classes/kotlin/main").toUri().toURL()
+            val apiClassLoader = URLClassLoader(arrayOf(apiJar.toUri().toURL()), javaClass.classLoader)
+            URLClassLoader(arrayOf(classesDir), apiClassLoader).use { loader ->
+                val serviceInterface = loader.loadClass("fixture.BoundedEncodeService")
+                val pojoClass = loader.loadClass("fixture.ThrowingGetterPojo")
+                val stubClass = loader.loadClass("fixture.BoundedEncodeServicePortalStub")
+                val stub = stubClass.getConstructor(ProcessBroker::class.java).newInstance(broker)
+
+                val sendListsMethod = serviceInterface.getMethod("sendLists", List::class.java)
+                val echoStringMethod = serviceInterface.getMethod("echoString", String::class.java)
+                val sendPojoMethod = serviceInterface.getMethod("sendThrowingPojo", pojoClass)
+
+                // 16,385 and 40-element lists reject before iterating or dispatching.
+                var elementReads = 0
+                val overCount = object : java.util.AbstractList<String>() {
+                    override val size: Int = 40
+
+                    override fun get(index: Int): String {
+                        elementReads++
+                        return "a"
+                    }
+                }
+                val countEx = assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                    sendListsMethod.invoke(stub, overCount)
+                }
+                val callFailure = countEx.targetException as PortalCallException
+                assertEquals(PortalInvocationEvidence.NOT_STARTED, callFailure.evidence)
+                assertEquals(0, elementReads)
+                assertEquals(0, dispatchedRequests)
+
+                // Multi-element list stops mid-traversal once an item pushes over the 32-byte limit.
+                val midList = object : java.util.AbstractList<String>() {
+                    override val size: Int = 4
+
+                    override fun get(index: Int): String {
+                        elementReads++
+                        return if (index == 2) "x".repeat(30) else "a"
+                    }
+                }
+                val midEx = assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                    sendListsMethod.invoke(stub, midList)
+                }
+                assertEquals(PortalInvocationEvidence.NOT_STARTED, (midEx.targetException as PortalCallException).evidence)
+                assertEquals(3, elementReads, "element 3 must never be visited after element 2 exceeds budget")
+                assertEquals(0, dispatchedRequests)
+
+                // Oversized string rejects before dispatch; exact 32-byte string dispatches and returns.
+                val strEx = assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                    echoStringMethod.invoke(stub, "a".repeat(29))
+                }
+                assertEquals(PortalInvocationEvidence.NOT_STARTED, (strEx.targetException as PortalCallException).evidence)
+                assertEquals(0, dispatchedRequests)
+
+                assertEquals("a".repeat(28), echoStringMethod.invoke(stub, "a".repeat(28)))
+                assertEquals(1, dispatchedRequests)
+
+                // Throwing POJO getter propagates exact IllegalStateException without dispatching.
+                val throwingPojo = pojoClass.getConstructor(String::class.java, Boolean::class.javaPrimitiveType).newInstance("ok", true)
+                val getterEx = assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                    sendPojoMethod.invoke(stub, throwingPojo)
+                }
+                assertTrue(getterEx.targetException is IllegalStateException)
+                assertEquals("user getter exploded", getterEx.targetException.message)
+                assertEquals(1, dispatchedRequests)
+            }
+        } finally {
+            broker.close()
+            peerThreads.forEach { it.interrupt() }
+            peerThreads.forEach { it.join(1_000) }
+        }
+    }
+
+    @Test
     fun `generation synchronizes A B to A to empty without stale outputs`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(apiJar, listOf("fixture.A", "fixture.B"))
@@ -1355,6 +1616,36 @@ class PortalCodegenFunctionalTest {
         sources.resolve("Nested_14_CollisionOuter_7_Service.java").writeText(
             "package fixture; public interface Nested_14_CollisionOuter_7_Service { String echo(String value); }",
         )
+        sources.resolve("ThrowingGetterPojo.java").writeText(
+            """
+            package fixture;
+            public final class ThrowingGetterPojo {
+                private final String name;
+                private final boolean failOnRead;
+                public ThrowingGetterPojo(String name, boolean failOnRead) {
+                    this.name = name;
+                    this.failOnRead = failOnRead;
+                }
+                public String getName() {
+                    if (failOnRead) throw new IllegalStateException("user getter exploded");
+                    return name;
+                }
+                public boolean isFailOnRead() { return failOnRead; }
+            }
+            """.trimIndent(),
+        )
+        sources.resolve("BoundedEncodeService.java").writeText(
+            """
+            package fixture;
+            public interface BoundedEncodeService {
+                java.util.List<Integer> listInts(java.util.List<Integer> values);
+                String echoString(String value);
+                java.util.List<String> echoStrings(java.util.List<String> values);
+                int sendLists(java.util.List<String> values);
+                int sendThrowingPojo(ThrowingGetterPojo value);
+            }
+            """.trimIndent(),
+        )
         val classes = root.resolve("api-classes").createDirectories()
         val compiler = checkNotNull(ToolProvider.getSystemJavaCompiler())
         val exit =
@@ -1379,6 +1670,8 @@ class PortalCodegenFunctionalTest {
                 sources.resolve("NestedDtos.java").toString(),
                 sources.resolve("CollisionOuter.java").toString(),
                 sources.resolve("Nested_14_CollisionOuter_7_Service.java").toString(),
+                sources.resolve("ThrowingGetterPojo.java").toString(),
+                sources.resolve("BoundedEncodeService.java").toString(),
             )
         assertEquals(0, exit)
         val jar = root.resolve("api.jar")

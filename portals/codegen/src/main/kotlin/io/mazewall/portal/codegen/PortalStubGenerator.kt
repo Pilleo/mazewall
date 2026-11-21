@@ -40,6 +40,7 @@ public object PortalStubGenerator {
     private val portalMethod = ClassName("io.mazewall.portal", "PortalMethod")
     private val generatedPortalMethod = portalMethod.nestedClass("Generated")
     private val portalCodec = ClassName("io.mazewall.portal", "PortalCodec")
+    private val requestWriter = ClassName("io.mazewall.portal", "PortalRequestWriter")
     private val declaredExceptionMapper = ClassName("io.mazewall.portal", "PortalDeclaredExceptionMapper")
     private val remoteCallException = ClassName("io.mazewall.portal", "PortalRemoteCallException")
     private val capability = ClassName("io.mazewall.portal", "Capability")
@@ -129,26 +130,30 @@ public object PortalStubGenerator {
             )
         }
 
-        val payloadParts =
-            method.parameters
-                .filterNot { it.kind is BoundaryTypes.Kind.ReadFd }
-                .map { encode(it.kind, CodeBlock.of("%N", parameterNames.getValue(it)), it.nullable) }
+        val encodedParameters = method.parameters.filterNot { it.kind is BoundaryTypes.Kind.ReadFd }
         val granted =
             method.parameters
                 .filter { it.kind is BoundaryTypes.Kind.ReadFd }
                 .map { CodeBlock.of("%N", parameterNames.getValue(it)) }
-        val payloadExpression =
-            if (payloadParts.isEmpty()) {
-                CodeBlock.of("ByteArray(0)")
-            } else {
-                CodeBlock
-                    .builder()
-                    .add("%T.concat(listOf(", portalCodec)
-                    .add(payloadParts.joinToCode())
-                    .add("))")
-                    .build()
+        if (encodedParameters.isEmpty()) {
+            spec.addStatement("val %N = ByteArray(0)", payloadName)
+        } else {
+            val writerName = names.newName("writer", HostLocal.Writer)
+            spec.addStatement("val %N = this.%N.newRequestWriter()", writerName, brokerName)
+            encodedParameters.forEach { parameter ->
+                spec.addCode(
+                    writeEncoded(
+                        kind = parameter.kind,
+                        writer = CodeBlock.of("%N", writerName),
+                        expression = CodeBlock.of("%N", parameterNames.getValue(parameter)),
+                        nullable = parameter.nullable,
+                        names = names,
+                        isLocalVariable = true,
+                    ),
+                )
             }
-        spec.addStatement("val %N = %L", payloadName, payloadExpression)
+            spec.addStatement("val %N = %N.toByteArray()", payloadName, writerName)
+        }
         val invocationHeader =
             CodeBlock
                 .builder()
@@ -292,61 +297,16 @@ public object PortalStubGenerator {
                 .beginControlFlow("when (%N.wire)", methodName)
 
         schema.methods.forEach { method ->
-            val kotlinTypes = resolveMethodKotlinTypes(schema.service, method.method)
-            val names = outerNames.copy()
-            val argumentNames = method.parameters.associateWith { names.newName(it.sourceName, it) }
-            val readerName = names.newName("reader", DispatcherLocal.Reader)
-            val returnName = names.newName("ret", DispatcherLocal.Return)
-            val methodContext = "${service.name}.${method.method.name}"
-            val expectedCapabilities = method.parameters.count { it.kind is BoundaryTypes.Kind.ReadFd }
-            var descriptorIndex = 0
-            handle.beginControlFlow("%N ->", constants.getValue(method.method))
-            handle.addStatement(
-                "%T.requireCapabilityCount(%N.size, %L, %S)",
-                portalCodec,
-                grantedName,
-                expectedCapabilities,
-                methodContext,
+            addDispatcherMethodBranch(
+                handle = handle,
+                service = service,
+                method = method,
+                constantName = constants.getValue(method.method),
+                outerNames = outerNames,
+                implName = implName,
+                payloadName = payloadName,
+                grantedName = grantedName,
             )
-            handle.addStatement("val %N = %T(%N, %S)", readerName, codecReader, payloadName, methodContext)
-            method.parameters.forEachIndexed { index, parameter ->
-                val argumentName = argumentNames.getValue(parameter)
-                if (parameter.kind is BoundaryTypes.Kind.ReadFd) {
-                    handle.addComment("Capability slot %L: %N", descriptorIndex, argumentName)
-                    handle.addStatement("val %N = %N[%L]", argumentName, grantedName, descriptorIndex++)
-                } else {
-                    handle.addStatement(
-                        "val %N = %N.inContext(%S) { %L }",
-                        argumentName,
-                        readerName,
-                        parameter.sourceName,
-                        decode(
-                            parameter.kind,
-                            CodeBlock.of("%N", readerName),
-                            parameter.nullable,
-                            kotlinTypes.parameters.getOrNull(index),
-                            kotlinTypes.bindings,
-                        ),
-                    )
-                }
-            }
-            handle.addStatement("%N.requireExhausted()", readerName)
-            val arguments = argumentNames.values.map { CodeBlock.of("%N", it) }.joinToCode()
-            if (method.returnKind is BoundaryTypes.Kind.UnitT) {
-                handle.addStatement("%N.%N(%L)", implName, method.method.name, arguments)
-                handle.addStatement("return ByteArray(0)")
-            } else {
-                handle.addStatement(
-                    "val %N: %T = %N.%N(%L)",
-                    returnName,
-                    typeName(method.returnType, kotlinTypes.returnType, kotlinTypes.bindings).copy(nullable = method.returnNullable),
-                    implName,
-                    method.method.name,
-                    arguments,
-                )
-                handle.addStatement("return %L", encode(method.returnKind, CodeBlock.of("%N", returnName), method.returnNullable))
-            }
-            handle.endControlFlow()
         }
         handle.addStatement("else -> error(%P)", "unknown generated portal method \${$methodName.wire}")
         handle.endControlFlow()
@@ -367,6 +327,85 @@ public object PortalStubGenerator {
                 .addFunction(handle.build())
                 .build()
         return FileSpec.builder(service.packageName, name).addType(type).build()
+    }
+
+    private fun addDispatcherMethodBranch(
+        handle: FunSpec.Builder,
+        service: Class<*>,
+        method: PortalMethodSchema,
+        constantName: String,
+        outerNames: NameAllocator,
+        implName: String,
+        payloadName: String,
+        grantedName: String,
+    ) {
+        val kotlinTypes = resolveMethodKotlinTypes(service, method.method)
+        val names = outerNames.copy()
+        val argumentNames = method.parameters.associateWith { names.newName(it.sourceName, it) }
+        val readerName = names.newName("reader", DispatcherLocal.Reader)
+        val returnName = names.newName("ret", DispatcherLocal.Return)
+        val methodContext = "${service.name}.${method.method.name}"
+        val expectedCapabilities = method.parameters.count { it.kind is BoundaryTypes.Kind.ReadFd }
+        var descriptorIndex = 0
+        handle.beginControlFlow("%N ->", constantName)
+        handle.addStatement(
+            "%T.requireCapabilityCount(%N.size, %L, %S)",
+            portalCodec,
+            grantedName,
+            expectedCapabilities,
+            methodContext,
+        )
+        handle.addStatement("val %N = %T(%N, %S)", readerName, codecReader, payloadName, methodContext)
+        method.parameters.forEachIndexed { index, parameter ->
+            val argumentName = argumentNames.getValue(parameter)
+            if (parameter.kind is BoundaryTypes.Kind.ReadFd) {
+                handle.addComment("Capability slot %L: %N", descriptorIndex, argumentName)
+                handle.addStatement("val %N = %N[%L]", argumentName, grantedName, descriptorIndex++)
+            } else {
+                handle.addStatement(
+                    "val %N = %N.inContext(%S) { %L }",
+                    argumentName,
+                    readerName,
+                    parameter.sourceName,
+                    decode(
+                        parameter.kind,
+                        CodeBlock.of("%N", readerName),
+                        parameter.nullable,
+                        kotlinTypes.parameters.getOrNull(index),
+                        kotlinTypes.bindings,
+                    ),
+                )
+            }
+        }
+        handle.addStatement("%N.requireExhausted()", readerName)
+        val arguments = argumentNames.values.map { CodeBlock.of("%N", it) }.joinToCode()
+        if (method.returnKind is BoundaryTypes.Kind.UnitT) {
+            handle.addStatement("%N.%N(%L)", implName, method.method.name, arguments)
+            handle.addStatement("return ByteArray(0)")
+        } else {
+            val replyWriterName = names.newName("writer", DispatcherLocal.Writer)
+            handle.addStatement(
+                "val %N: %T = %N.%N(%L)",
+                returnName,
+                typeName(method.returnType, kotlinTypes.returnType, kotlinTypes.bindings).copy(nullable = method.returnNullable),
+                implName,
+                method.method.name,
+                arguments,
+            )
+            handle.addStatement("val %N = %T.forReply()", replyWriterName, requestWriter)
+            handle.addCode(
+                writeEncoded(
+                    kind = method.returnKind,
+                    writer = CodeBlock.of("%N", replyWriterName),
+                    expression = CodeBlock.of("%N", returnName),
+                    nullable = method.returnNullable,
+                    names = names,
+                    isLocalVariable = true,
+                ),
+            )
+            handle.addStatement("return %N.toByteArray()", replyWriterName)
+        }
+        handle.endControlFlow()
     }
 
     private fun constantNames(methods: List<PortalMethodSchema>): Map<Method, String> {
@@ -492,20 +531,32 @@ public object PortalStubGenerator {
             else -> type.asTypeName()
         }
 
-    private fun encode(
+    private fun writeEncoded(
         kind: BoundaryTypes.Kind,
+        writer: CodeBlock,
         expression: CodeBlock,
         nullable: Boolean = false,
+        names: NameAllocator,
+        isLocalVariable: Boolean = true,
     ): CodeBlock {
         if (nullable) {
-            return CodeBlock.of(
-                "if (%L == null) %T.encodeBoolean(false) else %T.concat(listOf(%T.encodeBoolean(true), %L))",
-                expression,
-                portalCodec,
-                portalCodec,
-                portalCodec,
-                encode(kind, expression),
-            )
+            val nonNullName = names.newName("nonNull", Any())
+            return CodeBlock
+                .builder()
+                .add("%L.nullable(%L) { %N ->\n", writer, expression, nonNullName)
+                .indent()
+                .add(
+                    writeEncoded(
+                        kind = kind,
+                        writer = writer,
+                        expression = CodeBlock.of("%N", nonNullName),
+                        nullable = false,
+                        names = names,
+                        isLocalVariable = true,
+                    ),
+                ).unindent()
+                .add("}\n")
+                .build()
         }
         return when (kind) {
             BoundaryTypes.Kind.BooleanT,
@@ -518,68 +569,130 @@ public object PortalStubGenerator {
             BoundaryTypes.Kind.CharT,
             BoundaryTypes.Kind.StringT,
             BoundaryTypes.Kind.BytesT,
-            -> encodeScalar(kind, expression)
+            -> writeEncodedScalar(kind, writer, expression)
             BoundaryTypes.Kind.UuidT,
             BoundaryTypes.Kind.InstantT,
             BoundaryTypes.Kind.BigDecimalT,
-            -> CodeBlock.of("%T.encodeString(%L.toString())", portalCodec, expression)
-            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%T.encodeString(%L.name)", portalCodec, expression)
+            -> CodeBlock.of("%L.string(%L.toString())\n", writer, expression)
+            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%L.string(%L.name)\n", writer, expression)
             BoundaryTypes.Kind.ReadFd -> error("ReadFd is not encoded in the payload")
-            is BoundaryTypes.Kind.InputSnapshot ->
-                CodeBlock.of(
-                    "%T.capture(%L, %L).use { %T.encodeBytes(it.bytes()) }",
-                    io.mazewall.portal.PortalInputSnapshot::class,
-                    expression,
-                    kind.maximumBytes,
-                    portalCodec,
-                )
-            BoundaryTypes.Kind.UnitT -> CodeBlock.of("ByteArray(0)")
-            is BoundaryTypes.Kind.RecordT -> {
-                val encoded = kind.components.map { component -> encode(component.kind, propertyRead(expression, component)) }
-                CodeBlock
-                    .builder()
-                    .add("%T.concat(listOf(", portalCodec)
-                    .add(encoded.joinToCode())
-                    .add("))")
-                    .build()
-            }
-            is BoundaryTypes.Kind.ListT ->
-                CodeBlock.of(
-                    "%T.concat(listOf(%T.encodeInt(%L.size)) + %L.map { item -> %L })",
-                    portalCodec,
-                    portalCodec,
-                    expression,
-                    expression,
-                    encode(kind.element, CodeBlock.of("item")),
-                )
-            is BoundaryTypes.Kind.MapT ->
-                CodeBlock.of(
-                    "%T.concat(listOf(%T.encodeInt(%L.size)) + %L.entries.flatMap { entry -> listOf(%L, %L) })",
-                    portalCodec,
-                    portalCodec,
-                    expression,
-                    expression,
-                    encode(kind.key, CodeBlock.of("entry.key")),
-                    encode(kind.value, CodeBlock.of("entry.value")),
-                )
+            is BoundaryTypes.Kind.InputSnapshot -> CodeBlock.of("%L.inputSnapshot(%L, %L)\n", writer, expression, kind.maximumBytes)
+            BoundaryTypes.Kind.UnitT -> CodeBlock.of("")
+            is BoundaryTypes.Kind.RecordT -> writeEncodedRecord(kind, writer, expression, names, isLocalVariable)
+            is BoundaryTypes.Kind.ListT -> writeEncodedList(kind, writer, expression, names)
+            is BoundaryTypes.Kind.MapT -> writeEncodedMap(kind, writer, expression, names)
         }
     }
 
-    private fun encodeScalar(
+    private fun writeEncodedRecord(
+        kind: BoundaryTypes.Kind.RecordT,
+        writer: CodeBlock,
+        expression: CodeBlock,
+        names: NameAllocator,
+        isLocalVariable: Boolean,
+    ): CodeBlock {
+        val builder = CodeBlock.builder()
+        val receiver = if (isLocalVariable) {
+            expression
+        } else {
+            val recordName = names.newName("record", Any())
+            builder.add("val %N = %L\n", recordName, expression)
+            CodeBlock.of("%N", recordName)
+        }
+        kind.components.forEach { component ->
+            builder.add(
+                writeEncoded(
+                    kind = component.kind,
+                    writer = writer,
+                    expression = propertyRead(receiver, component),
+                    nullable = false,
+                    names = names,
+                    isLocalVariable = false,
+                ),
+            )
+        }
+        return builder.build()
+    }
+
+    private fun writeEncodedList(
+        kind: BoundaryTypes.Kind.ListT,
+        writer: CodeBlock,
+        expression: CodeBlock,
+        names: NameAllocator,
+    ): CodeBlock {
+        val itemName = names.newName("item", Any())
+        return CodeBlock
+            .builder()
+            .add("%L.list(%L) { %N ->\n", writer, expression, itemName)
+            .indent()
+            .add(
+                writeEncoded(
+                    kind = kind.element,
+                    writer = writer,
+                    expression = CodeBlock.of("%N", itemName),
+                    nullable = false,
+                    names = names,
+                    isLocalVariable = true,
+                ),
+            ).unindent()
+            .add("}\n")
+            .build()
+    }
+
+    private fun writeEncodedMap(
+        kind: BoundaryTypes.Kind.MapT,
+        writer: CodeBlock,
+        expression: CodeBlock,
+        names: NameAllocator,
+    ): CodeBlock {
+        val keyName = names.newName("key", Any())
+        val valueName = names.newName("value", Any())
+        return CodeBlock
+            .builder()
+            .add("%L.map(%L, { %N ->\n", writer, expression, keyName)
+            .indent()
+            .add(
+                writeEncoded(
+                    kind = kind.key,
+                    writer = writer,
+                    expression = CodeBlock.of("%N", keyName),
+                    nullable = false,
+                    names = names,
+                    isLocalVariable = true,
+                ),
+            ).unindent()
+            .add("}, { %N ->\n", valueName)
+            .indent()
+            .add(
+                writeEncoded(
+                    kind = kind.value,
+                    writer = writer,
+                    expression = CodeBlock.of("%N", valueName),
+                    nullable = false,
+                    names = names,
+                    isLocalVariable = true,
+                ),
+            ).unindent()
+            .add("})\n")
+            .build()
+    }
+
+    private fun writeEncodedScalar(
         kind: BoundaryTypes.Kind,
+        writer: CodeBlock,
         expression: CodeBlock,
     ): CodeBlock =
         when (kind) {
-            BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%T.encodeBoolean(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.ByteT -> CodeBlock.of("%T.encodeByte(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.ShortT -> CodeBlock.of("%T.encodeShort(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.IntT -> CodeBlock.of("%T.encodeInt(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.LongT -> CodeBlock.of("%T.encodeLong(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.FloatT -> CodeBlock.of("%T.encodeFloat(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.DoubleT -> CodeBlock.of("%T.encodeDouble(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.CharT -> CodeBlock.of("%T.encodeChar(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.StringT -> CodeBlock.of("%T.encodeString(%L)", portalCodec, expression)
-            BoundaryTypes.Kind.BytesT -> CodeBlock.of("%T.encodeBytes(%L)", portalCodec, expression)
+            BoundaryTypes.Kind.BooleanT -> CodeBlock.of("%L.boolean(%L)\n", writer, expression)
+            BoundaryTypes.Kind.ByteT -> CodeBlock.of("%L.byte(%L)\n", writer, expression)
+            BoundaryTypes.Kind.ShortT -> CodeBlock.of("%L.short(%L)\n", writer, expression)
+            BoundaryTypes.Kind.IntT -> CodeBlock.of("%L.int(%L)\n", writer, expression)
+            BoundaryTypes.Kind.LongT -> CodeBlock.of("%L.long(%L)\n", writer, expression)
+            BoundaryTypes.Kind.FloatT -> CodeBlock.of("%L.float(%L)\n", writer, expression)
+            BoundaryTypes.Kind.DoubleT -> CodeBlock.of("%L.double(%L)\n", writer, expression)
+            BoundaryTypes.Kind.CharT -> CodeBlock.of("%L.char(%L)\n", writer, expression)
+            BoundaryTypes.Kind.StringT -> CodeBlock.of("%L.string(%L)\n", writer, expression)
+            BoundaryTypes.Kind.BytesT -> CodeBlock.of("%L.bytes(%L)\n", writer, expression)
             is BoundaryTypes.Kind.EnumT,
             BoundaryTypes.Kind.ReadFd,
             is BoundaryTypes.Kind.InputSnapshot,
@@ -878,11 +991,11 @@ public object PortalStubGenerator {
         val bindings: Map<KTypeParameter, KType>,
     )
 
-    private enum class HostLocal { Payload, Result, Reader, Decoded, Build }
+    private enum class HostLocal { Payload, Result, Reader, Decoded, Build, Writer }
 
     private enum class DispatcherOuter { Impl, Method, Payload, Granted }
 
-    private enum class DispatcherLocal { Reader, Return }
+    private enum class DispatcherLocal { Reader, Return, Writer }
 }
 
 private fun List<CodeBlock>.joinToCode(): CodeBlock {

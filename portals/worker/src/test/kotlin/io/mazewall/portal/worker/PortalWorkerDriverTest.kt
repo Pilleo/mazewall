@@ -11,6 +11,7 @@ import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.portal.Capability
+import io.mazewall.portal.PortalCallException
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalIncompleteFrameException
 import io.mazewall.portal.PortalKind
@@ -20,6 +21,8 @@ import io.mazewall.portal.PortalPayload
 import io.mazewall.portal.PortalReadTimeoutException
 import io.mazewall.portal.PortalRemoteFailure
 import io.mazewall.portal.PortalRemoteFailureCodec
+import io.mazewall.portal.PortalRequestWriter
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertSame
@@ -204,6 +207,42 @@ class PortalWorkerDriverTest {
         assertEquals(PortalWorkerState.Stopped, driver.state)
         assertTrue(transport.closed)
         assertThrows(IllegalStateException::class.java) { capability.borrow { it.value } }
+    }
+
+    @Test
+    fun `bounded reply encoding failure produces error frame and keeps worker alive for next request`() {
+        val transport =
+            FakeTransport(
+                listOf(
+                    PortalWorkerReceive.Frame(PortalFrame(PortalKind.Request, 1, PortalMethod.Echo, PortalPayload(ByteArray(0)), 0)),
+                    PortalWorkerReceive.Frame(PortalFrame(PortalKind.Request, 2, PortalMethod.Echo, PortalPayload(ByteArray(0)), 0)),
+                    PortalWorkerReceive.PeerClosed,
+                ),
+            )
+        var calls = 0
+        val driver =
+            PortalWorkerDriver(transport) { _, _, _ ->
+                calls++
+                if (calls == 1) {
+                    val writer = PortalRequestWriter(maxBytes = 16)
+                    writer.string("this reply exceeds 16 bytes")
+                    writer.toByteArray()
+                } else {
+                    byteArrayOf(42)
+                }
+            }
+
+        driver.run()
+
+        assertEquals(2, calls)
+        assertEquals(2, transport.sent.size)
+        assertEquals(PortalKind.Error, transport.sent[0].kind)
+        val remote = PortalRemoteFailureCodec.decode(transport.sent[0].payload.copyToByteArray())
+        assertEquals(PortalCallException::class.java.name, remote.type)
+        assertTrue(remote.message.contains("exceed"), remote.message)
+        assertEquals(PortalKind.Response, transport.sent[1].kind)
+        assertArrayEquals(byteArrayOf(42), transport.sent[1].payload.copyToByteArray())
+        assertEquals(PortalWorkerState.Stopped, driver.state)
     }
 
     private fun request(capabilities: List<Capability.ReadFd> = emptyList()) = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, PortalPayload(ByteArray(0)), capabilities.size)

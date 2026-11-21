@@ -15,7 +15,7 @@ import java.util.UUID
  * Built-in ECHO/CHECKSUM frames stay raw; do not mix the two layouts.
  */
 public object PortalCodec {
-    private const val MAX_COLLECTION_ELEMENTS: Int = 16_384
+    public const val MAX_COLLECTION_ELEMENTS: Int = 16_384
     private const val SHORT_BYTES: Int = 2
     private const val INT_BYTES: Int = 4
     private const val LONG_BYTES: Int = 8
@@ -64,6 +64,9 @@ public object PortalCodec {
     public fun encodeString(value: String): ByteArray = encodeBytes(value.toByteArray(StandardCharsets.UTF_8))
 
     public fun encodeBytes(value: ByteArray): ByteArray {
+        require(value.size <= Int.MAX_VALUE - INT_BYTES) {
+            "byte array length ${value.size} overflows portal frame length"
+        }
         val out = ByteBuffer.allocate(INT_BYTES + value.size).order(ByteOrder.BIG_ENDIAN)
         out.putInt(value.size)
         out.put(value)

@@ -97,12 +97,16 @@ class PortalStubGeneratorTest {
         assertTrue(stub.contains("ProcessBroker"))
         assertTrue(stub.contains("broker.invoke"))
         assertTrue(stub.contains("PortalMethod.Generated"))
-        assertTrue(stub.contains("PortalCodec.encodeString"))
+        assertTrue(stub.contains("broker.newRequestWriter()"), stub)
+        assertTrue(stub.contains("writer.string("), stub)
+        assertFalse(stub.contains("PortalCodec.concat("), stub)
         assertTrue(stub.contains("GREET_METHOD_ID"))
         assertFalse(stub.contains("Impl("))
         assertTrue(dispatcher.contains("SampleGreeterPortalDispatcher"))
         assertTrue(dispatcher.contains(".greet"))
         assertTrue(dispatcher.contains("method: PortalMethod.Generated"))
+        assertTrue(dispatcher.contains("PortalRequestWriter.forReply()"), dispatcher)
+        assertFalse(dispatcher.contains("PortalCodec.concat("), dispatcher)
         assertTrue(dispatcher.contains("GREET_METHOD_ID"))
         assertFalse(dispatcher.contains("Impl("))
     }
@@ -141,8 +145,9 @@ class PortalStubGeneratorTest {
     fun `record components are allowed`() {
         val files = PortalStubGenerator.generate(SampleGeom::class.java)
         val stub = files.single { it.name == "SampleGeomPortalStub" }.toString()
-        assertTrue(stub.contains("p.x") || stub.contains("encodeInt"))
-        assertTrue(stub.contains("PortalCodec.concat"))
+        assertTrue(stub.contains("p.x") || stub.contains("writer.int("))
+        assertTrue(stub.contains("broker.newRequestWriter()"))
+        assertFalse(stub.contains("PortalCodec.concat("))
     }
 
     @Test
@@ -151,7 +156,7 @@ class PortalStubGeneratorTest {
         val stub = files.single { it.name == "SampleFdPortalStub" }.toString()
         val dispatcher = files.single { it.name == "SampleFdPortalDispatcher" }.toString()
         assertTrue(stub.contains("broker.invoke"))
-        assertFalse(stub.contains("encodeString(fd)"))
+        assertFalse(stub.contains("string(fd)"))
         assertTrue(dispatcher.contains("Capability slot 0: fd"), dispatcher)
     }
 
@@ -170,8 +175,8 @@ class PortalStubGeneratorTest {
         val stub = files.single { it.name == "SnapshotStreamPortalStub" }.toString()
         val dispatcher = files.single { it.name == "SnapshotStreamPortalDispatcher" }.toString()
 
-        assertTrue(stub.contains("PortalInputSnapshot.capture(source, 64)"), stub)
-        assertTrue(stub.contains("encodeBytes(it.bytes())"), stub)
+        assertTrue(stub.contains("writer.inputSnapshot(source, 64)"), stub)
+        assertFalse(stub.contains("PortalInputSnapshot.capture("), stub)
         assertTrue(dispatcher.contains("reader.bytes().inputStream()"), dispatcher)
     }
 

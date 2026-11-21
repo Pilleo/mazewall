@@ -1,7 +1,7 @@
 ---
 title: "Bound generated Portal encoding before allocation and traversal"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts"
@@ -37,7 +37,7 @@ CG06: a generated dispatcher encoded 16385 list elements rejected by its own rea
 4. Preserve valid wire bytes and service-error handling. Make the writer reusable by submit-time snapshots while P03 retains admission/deadline ownership and P10 retains measurement-driven optimization.
 
 **Scope and dependencies:**
-- Follows [CG01](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md). [Review CG06](../reviews/2026-11-03-portal-codegen-hardening.md#cg06--enforce-bounds-while-encoding) records actual oversized encoded arrays.
+- Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md). [Review CG06](../../reviews/2026-11-03-portal-codegen-hardening.md#cg06--enforce-bounds-while-encoding) records actual oversized encoded arrays.
 - The writer path is planned, not an existing source file. Reuse a matching writer if P03 implementation has already introduced one; do not create competing encoders.
 - This bounds library-controlled encoding work and allocations. A malicious user getter/iterator can itself block or allocate; no purity or arbitrary callback memory bound is implied.
 
@@ -48,18 +48,30 @@ CG06: a generated dispatcher encoded 16385 list elements rejected by its own rea
 - Golden valid payloads, IDs and supported Java/Kotlin contracts remain compatible. Peak-memory evidence includes temporary copies rather than only final payload size.
 
 **Verification:**
-- [Junior implementation walkthrough: CG06](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg06--bounded-encoding-before-allocation) explains small-budget/counting fixtures, shared writer integration and pre-allocation evidence.
+- [Junior implementation walkthrough: CG06](../../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg06--bounded-encoding-before-allocation) explains small-budget/counting fixtures, shared writer integration and pre-allocation evidence.
 - Run `PortalCodecTest`, `PortalConfiguredTransportBoundsTest` and compiler-backed request/reply boundary cases in `PortalCodegenFunctionalTest`.
 - Run affected module suites and `./gradlew build`, backlog and whitespace checks at implementation completion. A speedup benchmark is not a substitute for bounded-allocation evidence.
 
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[CG06/PCG-06/PRT-07](../reviews/2026-11-04-repository-review-findings.md#cg06) freshly emits
+[CG06/PCG-06/PRT-07](../../reviews/2026-11-04-repository-review-findings.md#cg06) freshly emits
 a 16,385-element list and string response above the 8 MiB cap before rejection. Use one bounded
 writer for requests/replies, checked aggregate arithmetic and small-budget/counting controls;
 measure scratch/copy peaks without intentional OOM. P03 consumes correctness; P10 optimizes
 that same implementation, and P01 includes real encoding/validation cost.
+
+---
+## Resolution Evidence (2026-11-21)
+
+- Implemented shared bounded encoder `PortalRequestWriter` (`portals/runtime/src/main/kotlin/io/mazewall/portal/PortalRequestWriter.kt`) with `maxBytes`, `maxCollectionElements`, `maxTotalElements`, `forReply()`, `withReplyLimit()`, lazy zero-initial allocation, checked `Long` byte/cardinality arithmetic, early UTF-8 measurement abort, single-buffer growth, and peak-allocation accounting covering buffer resizes, `toByteArray()` trim copies, and `inputSnapshot()` scratch storage.
+- Promoted `PortalCodec.MAX_COLLECTION_ELEMENTS = 16_384` to public and added overflow guard in `PortalCodec.encodeBytes`; added `ProcessBroker.newRequestWriter()` honoring `limits.maxRequestBytes`.
+- Updated `PortalStubGenerator` (`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/PortalStubGenerator.kt`) so generated host stubs stream requests via `this.broker.newRequestWriter()` and generated worker dispatchers stream replies via `PortalRequestWriter.forReply()` (retaining `ByteArray(0)` for `Unit`), replacing eager `PortalCodec.encode*`/`concat` temporary arrays and `flatMap` collection allocations.
+- Verified with unit, bounds, worker-driver, and compiler-backed functional tests:
+  - `PortalCodecTest`, `PortalConfiguredTransportBoundsTest` (`:portals:runtime:test`: 35 suites, 165 tests, 0 failures, 0 errors, 0 skipped)
+  - `PortalWorkerDriverTest` (`:portals:worker:test`: 9 suites, 51 tests, 0 failures, 0 errors, 0 skipped)
+  - `PortalStubGeneratorTest`, `PortalCodegenFunctionalTest`, `ResolvedPortalContractTest` (`:portals:codegen:test`: 4 suites, 57 tests, 0 failures, 0 errors, 0 skipped)
+  - `ktlintCheck`, `detektMain`, and `:detektWarningRatchet` (0 added warnings).
 
 ---
 <!-- id: issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-  file: issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md -->

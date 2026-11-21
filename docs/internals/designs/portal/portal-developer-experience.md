@@ -159,10 +159,14 @@ still running. On return from encoding, recheck cancellation/close/expiry before
 queue publication. An unresponsive host getter leaves cleanup incomplete and
 retryable; it never authorizes late guest dispatch.
 
-The writer mirrors the existing binary encoding and checks length/count/overflow
-before growth; it must not first create an unbounded temporary byte array. It is
-host computation: a malicious/blocking application getter is not preempted by
-the child deadline. If encoding returns after expiry, reject without guest entry.
+The shared bounded writer (`PortalRequestWriter`) mirrors the binary `PortalCodec` encoding and
+checks byte length, collection count (`PortalCodec.MAX_COLLECTION_ELEMENTS`), aggregate traversal
+budget, and `Long` arithmetic overflow before allocation or buffer growth rather than building temporary
+byte-array concatenations; generated host stubs (`ProcessBroker.newRequestWriter()`) and worker
+dispatchers (`PortalRequestWriter.forReply()`) now stream requests and replies through it, and P03
+submit-time snapshots reuse it while retaining admission and deadline ownership. Encoding remains
+host computation: a malicious/blocking application getter is not preempted by the child deadline; if
+encoding returns after expiry, reject without guest entry.
 
 The request reservation bounds library-owned encoding/queued buffers, not caller
 input graphs, decoded responses or results retained in completed futures. A wire

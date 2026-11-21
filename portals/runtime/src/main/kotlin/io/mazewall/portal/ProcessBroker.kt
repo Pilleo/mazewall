@@ -205,6 +205,9 @@ public class ProcessBroker internal constructor(
         decodeReply: (ByteArray) -> T,
     ): T = call(method, payload, granted.toList(), decodeReply)
 
+    /** Creates a bounded request writer honoring this broker's configured request payload limit. */
+    public fun newRequestWriter(): PortalRequestWriter = PortalRequestWriter(maxBytes = limits.maxRequestBytes)
+
     public fun checksum(fd: Capability.ReadFd): Int {
         val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd))
         require(payload.size == 4) { "checksum must be 4 bytes" }
