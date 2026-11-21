@@ -46,31 +46,22 @@ internal data class PortalServiceSchema(
                         "portal method id collision on ${service.name}: ${displaySignature(checkNotNull(previous))} and " +
                             "${displaySignature(method)} both map to $id"
                     }
+                    val returnContext = BoundaryTypes.PathContext.returnType(service.name, method.name)
+                    val returnKind = BoundaryTypes.kindOfResult(resolvedTypes.returnType, returnContext)
                     PortalMethodSchema(
                         method = method,
                         id = id,
                         parameters =
                             java.util.List.copyOf(
                                 method.parameters.mapIndexed { index, parameter ->
+                                    val context = BoundaryTypes.PathContext.parameter(service.name, method.name, parameter.name)
                                     val snapshot = parameter.getAnnotation(io.mazewall.portal.PortalInputSnapshotAdapter::class.java)
-                                    val kind =
-                                        if (parameter.type == java.io.InputStream::class.java && snapshot != null) {
-                                            BoundaryTypes.Kind.InputSnapshot(snapshot.maximumBytes)
-                                        } else {
-                                            require(snapshot == null) {
-                                                "portal input snapshot adapter is supported only on an InputStream parameter: " +
-                                                    "${service.name}.${method.name}.${parameter.name}"
-                                            }
-                                            BoundaryTypes.kindOf(resolvedTypes.parameters[index])
-                                        }
-                                    validateCapabilityPlacement(kind, "${service.name}.${method.name}.${parameter.name}", directInbound = true)
+                                    val kind = BoundaryTypes.kindOfParameter(resolvedTypes.parameters[index], context, snapshot)
                                     PortalParameterSchema(parameter.name, resolvedTypes.parameters[index], kind, nullability?.parameters?.get(index) ?: false)
                                 },
                             ),
                         returnType = resolvedTypes.returnType,
-                        returnKind = BoundaryTypes.kindOf(resolvedTypes.returnType).also {
-                            validateCapabilityPlacement(it, "${service.name}.${method.name}.return", directInbound = false)
-                        },
+                        returnKind = returnKind,
                         returnNullable = nullability?.returnNullable ?: false,
                     )
                 }
@@ -96,24 +87,6 @@ internal data class PortalServiceSchema(
                 java.util.List.copyOf(parameters.map { it.type.isMarkedNullable }),
                 function.returnType.isMarkedNullable,
             )
-        }
-
-        private fun validateCapabilityPlacement(
-            kind: BoundaryTypes.Kind,
-            path: String,
-            directInbound: Boolean,
-        ) {
-            if (kind is BoundaryTypes.Kind.ReadFd) {
-                require(directInbound) { "portal boundary $path: Capability.ReadFd is supported only as a direct inbound parameter" }
-            }
-            if (kind is BoundaryTypes.Kind.RecordT) {
-                kind.components.forEach { validateCapabilityPlacement(it.kind, "$path.${it.name}", directInbound = false) }
-            }
-            if (kind is BoundaryTypes.Kind.ListT) validateCapabilityPlacement(kind.element, "$path[]", directInbound = false)
-            if (kind is BoundaryTypes.Kind.MapT) {
-                validateCapabilityPlacement(kind.key, "$path{key}", directInbound = false)
-                validateCapabilityPlacement(kind.value, "$path{value}", directInbound = false)
-            }
         }
 
         private fun resolveOverride(
@@ -242,7 +215,7 @@ internal data class PortalMethodSchema(
     val id: Int,
     val parameters: List<PortalParameterSchema>,
     val returnType: Type,
-    val returnKind: BoundaryTypes.Kind,
+    val returnKind: BoundaryTypes.Kind.Result,
     val returnNullable: Boolean,
 )
 
@@ -268,7 +241,7 @@ private class ResolvedParameterizedType(
 internal data class PortalParameterSchema(
     val sourceName: String,
     val type: java.lang.reflect.Type,
-    val kind: BoundaryTypes.Kind,
+    val kind: BoundaryTypes.Kind.Parameter,
     val nullable: Boolean,
 )
 

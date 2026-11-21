@@ -142,7 +142,7 @@ remain those in the detailed finding register; a mapping is not a closure claim.
 | HS-QUAL | P1 | W10 | [issue-20261005-193140-042](../backlog/issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-.md) |
 | PRT-04 | P1 | W06 | [issue-20261007-201438-646](../backlog/issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an.md) |
 | CG01 | P1 | W07 | [issue-20261103-095305-625](../backlog/resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) |
-| CG02 | P1 | W07 | [issue-20261103-095306-294](../backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) |
+| CG02 | P1 | W07 | [issue-20261103-095306-294](../backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) |
 | CG03 | P1 | W07 | [issue-20261103-095306-992](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |
 | CG04 | P1 | W07 | [issue-20261103-095307-699](../backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) |
 | CG05 | P1 | W07 | [issue-20261103-095308-453](../backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) |

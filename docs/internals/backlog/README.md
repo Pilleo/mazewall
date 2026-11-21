@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 404 | *Total Resolved Issues:* 781
+*Total Active Issues:* 403 | *Total Resolved Issues:* 782
 
-Active status detail: 402 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -249,7 +249,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-101536-562](issue-20261103-101536-562-qualify-portal-process-boundary-usage-safeguards-w.md) | Qualify Portal process-boundary usage safeguards with real consumers | high | portal-runtime |
 | Archived [issue-20261103-101247-569](resolved/issue-20261103-101247-569-add-a-standalone-ordinary-jvm-hotspot-observation-.md) | Add a standalone ordinary-JVM HotSpot observation example | high | core |
 | Archived [issue-20261103-095305-625](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin (resolved 2026-11-21) | high | portal-codegen |
-| [issue-20261103-095306-294](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission | high | portal-codegen |
+| Archived [issue-20261103-095306-294](resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-095306-992](issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) | Fingerprint the complete versioned Portal wire schema | high | portal-codegen |
 | Archived [issue-20261103-095307-699](resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads (resolved 2026-11-21) | high | portal-codegen |
 | Archived [issue-20261103-095308-453](resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation (resolved 2026-11-21) | high | portal-runtime |

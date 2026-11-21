@@ -184,3 +184,57 @@ interface StrictContractService {
         label: String,
     ): Int
 }
+
+abstract class AbstractDto(
+    val count: Int,
+)
+
+interface AbstractDtoService {
+    fun echo(dto: AbstractDto): Int
+}
+
+data class NullableMemberDto(
+    val name: String?,
+)
+
+interface NullableMemberDtoService {
+    fun echo(dto: NullableMemberDto): Int
+}
+
+class EnclosingScope {
+    inner class NonStaticMemberDto(
+        val value: Int,
+    )
+}
+
+interface NonStaticMemberDtoService {
+    fun echo(dto: EnclosingScope.NonStaticMemberDto): Int
+}
+
+interface PrivateConstructorPojoService {
+    fun echo(dto: PrivateConstructorPojo): Int
+}
+
+interface NamesRecordService {
+    fun echo(names: NamesRecord): NamesRecord
+}
+
+interface NamesPojoService {
+    fun echo(pojo: NamesPojo): NamesPojo
+}
+
+data class KotlinGenericDto(
+    val values: List<String>,
+)
+
+interface KotlinGenericDtoService {
+    fun echo(dto: KotlinGenericDto): KotlinGenericDto
+}
+
+data class NullableListMemberDto(
+    val values: List<String?>,
+)
+
+interface NullableListMemberDtoService {
+    fun echo(dto: NullableListMemberDto): Int
+}

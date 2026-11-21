@@ -226,6 +226,43 @@ requires explicit recreation. `STATELESS` permits independently managed,
 explicit capacity replacement, but never replays a call whose completion is
 unknown.
 
+## Boundary type hierarchy and DTO validation (CG02)
+
+`BoundaryTypes.kt` enforces a position-safe sealed hierarchy before any source is emitted:
+
+- `Kind.Value` — copied value types (records, POJOs, scalars, `ByteArray`, `List<T>`, and `Map<K, V>`).
+  Valid in any position.
+- `Kind.Parameter` includes values and direct inbound capabilities (`ReadFd`, `InputSnapshot`).
+  Capabilities are valid only as method parameters, never as return types or DTO members.
+- `Kind.Result` includes values and `UnitT`. Unit is valid only as a method return kind.
+
+Violations are rejected at resolution time with a path string such as:
+`Service.call parameter request field customer.name`
+
+No generator or emitter is ever called with an invalid DTO shape. This ensures that failed
+resolution preserves the previous complete generated output and does not initialize any guest
+implementation.
+
+### Concrete DTO requirements
+
+DTOs must meet these requirements, in addition to using supported component types:
+
+- It is a concrete (non-abstract) class or Java record.
+- If it is a member class: it must be `static` (never a Kotlin `inner class`).
+- Its enclosing class (if any) must be `public`.
+- It has either: a Java record canonical constructor, or exactly one `public` all-args constructor.
+- Each component has a public, type-compatible reader and a usable constructor parameter name.
+- None of its serialisable components are nullable (Kotlin `?` or `@Nullable`).
+- Generic type arguments are fully resolved (e.g. `List<String>` is accepted; raw `List` is not).
+
+### Generic DTO components
+
+Generic member types (e.g. `record Names(List<String> values)`) are resolved through
+`java.lang.reflect.ParameterizedType` before emission. The element type is preserved in the
+validated model and drives the generated codec — a `List<String>` member produces a list reader/writer
+bound to `String`, not an erased `List`. Type variables that cannot be resolved at resolution time
+are rejected.
+
 ## Non-goals
 
 This release excludes Spring, remote/pod/sidecar backends, backend plugins,

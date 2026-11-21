@@ -18,7 +18,7 @@ publication are useful foundations.
 | ID | Finding | Evidence | Issue |
 |---|---|---|---|
 | CG01 | Accepted byte-array/list signatures produce uncompilable Kotlin | Compiled generated sources | [Type agreement](../backlog/resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) |
-| CG02 | DTO validation loses nested type information and admits unconstructible shapes | Compiled generated sources and resolution probe | [Complete validated shapes](../backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) |
+| CG02 | DTO validation loses nested type information and admits unconstructible shapes | Compiled generated sources and resolution probe | [Complete validated shapes](../backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) (resolved) |
 | CG03 | Schema identity does not describe the actual wire layout | Same-name, separate-classloader probe | [Versioned full-schema identity](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |
 | CG04 | Generated decoding accepts malformed/extra data | Compiled dispatcher with service-entry counter | [Strict decoding](../backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) |
 | CG05 | Worker checkout ends before generated response validation | Connected source path; native reproduction pending | [Validation-owned checkout](../backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) |

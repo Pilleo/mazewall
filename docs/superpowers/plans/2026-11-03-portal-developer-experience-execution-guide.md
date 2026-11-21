@@ -267,29 +267,32 @@ source string contains `ByteArray`. Wire bytes and existing IDs remain unchanged
 ## CG02 — Complete validated DTO shapes
 
 **Read first:** `BoundaryTypes.kt`, `PortalServiceSchema.kt`,
-`ResolvedPortalContract.kt` and [CG02](../../internals/backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
+`ResolvedPortalContract.kt` and [CG02](../../internals/backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
 
-- [ ] Add three separate fixtures: an abstract DTO, a Kotlin nullable DTO member,
+- [x] Add three separate fixtures: an abstract DTO, a Kotlin nullable DTO member,
   and `record Names(java.util.List<String> values)`. Record whether each currently
   reaches emission, fails compilation, or loses its generic member information.
-- [ ] Resolve generic types and member nullability before emission. Walk records,
+- [x] Resolve generic types and member nullability before emission. Walk records,
   constructor parameters and readable fields/accessors using their actual generic
   metadata, not just erased `Class` values.
-- [ ] Validate both directions: host/worker must be able to read each component and
+- [x] Validate both directions: host/worker must be able to read each component and
   construct the resulting value legally. Cover inaccessible enclosing classes,
   abstract classes, recursive shapes and unresolved type variables.
-- [ ] Keep copied values, direct inbound capabilities/snapshots and result-only
+- [x] Keep copied values, direct inbound capabilities/snapshots and result-only
   Unit distinct in the validated model. Invalid combinations must not be a pair
   of contradictory flags that downstream code is expected to remember to reject.
-- [ ] For unsupported nullable/nested shapes, reject with a path such as
+- [x] For unsupported nullable/nested shapes, reject with a path such as
   `Service.parse parameter request field customer.name`; do not invent a new wire
   representation. Never execute a getter or constructor while validating its shape.
-- [ ] Compile/round-trip accepted fixtures; negative fixtures must fail resolution
+- [x] Compile/round-trip accepted fixtures; negative fixtures must fail resolution
   before output publication and leave the previous complete generation intact.
 
 ```bash
 ./gradlew :portals:codegen:test --tests '*ResolvedPortalContractTest' --tests '*PortalStubGeneratorTest' --tests '*PortalCodegenFunctionalTest'
 ```
+
+**Resolved:** 2026-11-21 — all fixtures implemented and passing. See
+[resolved issue](../../internals/backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
 
 **Done when:** Every fixture is explicitly supported and executable or rejected at
 resolution with the correct field path. No accepted shape becomes an erased guess.

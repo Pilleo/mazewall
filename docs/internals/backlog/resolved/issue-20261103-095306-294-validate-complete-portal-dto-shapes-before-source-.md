@@ -1,7 +1,7 @@
 ---
 title: "Validate complete Portal DTO shapes before source emission"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts"
@@ -38,8 +38,8 @@ CG02: current resolution accepts abstract DTOs and nullable Kotlin DTO fields th
 4. Drive source declarations and codecs from that model. Reject unsupported nullable/nested shapes with contract/method/parameter-or-result/field paths; retain enough metadata for CG03 fingerprints and P02 diagnostics.
 
 **Scope and dependencies:**
-- Follows [CG01](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md)'s compiler-backed type agreement.
-- [Review CG02](../reviews/2026-11-03-portal-codegen-hardening.md#cg02--resolve-a-complete-position-aware-dto-model) distinguishes reproduced acceptance defects from the erased nested-generic rejection.
+- Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md)'s compiler-backed type agreement.
+- [Review CG02](../../reviews/2026-11-03-portal-codegen-hardening.md#cg02--resolve-a-complete-position-aware-dto-model) distinguishes reproduced acceptance defects from the erased nested-generic rejection.
 - Reuse the current resolver and public entrypoints. This issue tightens validation; new nullable wire representations or arbitrary polymorphic serialization are not required.
 - Runtime DTO constructors/getters remain trusted application code. Shape validation must not execute them or claim to prove them pure. P02 owns the user-facing diagnostic command.
 
@@ -50,18 +50,40 @@ CG02: current resolution accepts abstract DTOs and nullable Kotlin DTO fields th
 - Failed resolution preserves the previous complete generated output and does not initialize guest implementations.
 
 **Verification:**
-- [Junior implementation walkthrough: CG02](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg02--complete-validated-dto-shapes) gives the accepted/rejected fixture sequence, model obligations and commands.
+- [Junior implementation walkthrough: CG02](../../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg02--complete-validated-dto-shapes) gives the accepted/rejected fixture sequence, model obligations and commands.
 - Run `ResolvedPortalContractTest`, `PortalStubGeneratorTest` and compiler-backed positive/negative `PortalCodegenFunctionalTest` cases, then `./gradlew :portals:codegen:test`.
 - Run `./gradlew build`, backlog and whitespace checks at implementation completion; document the accepted/rejected shape matrix.
 
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[CG02/PCG-02](../reviews/2026-11-04-repository-review-findings.md#cg02) freshly confirms
+[CG02/PCG-02](../../reviews/2026-11-04-repository-review-findings.md#cg02) freshly confirms
 accepted abstract/nullable DTO compilation failures and erased generic-member rejection.
 Complete the existing position-aware validated model, including access/constructor/capability
 placement; accepted fixtures must compile and round-trip, rejected ones fail before publication.
 Do not infer trusted getter/constructor purity. CG03 consumes this same model.
 
 ---
+
+## Resolution Evidence (2026-11-21)
+
+Implemented in the working tree based on `b5ccf1f67`.
+
+| Test suite | Tests | Failures |
+|---|---|---|
+| `ResolvedPortalContractTest` | 13 | 0 |
+| `PortalStubGeneratorTest` | 32 | 0 |
+| `PortalCodegenFunctionalTest` (DTO subset) | 2 | 0 |
+| Full `:portals:codegen:test` | all | 0 |
+
+Quality gates: `ktlintCheck` PASSED, `detektWarningRatchet` 0 added warnings.
+An initial direct host build selected `ALL` kernel tests and failed at confined-helper
+startup with `EPERM` on `/proc/self/map_files`. The repository's pre-commit gate uses
+the host `BASELINE` lane and a separate Docker `CONFINED` lane for those tests.
+The host `BASELINE` build, including the Portal runtime integration tests, passed on
+2026-11-22.
+
+Production files changed: `BoundaryTypes.kt`, `PortalServiceSchema.kt`.
+New test fixtures: `NamesRecord.java`, `NamesPojo.java`, `PackagePrivateOuter.java`, `PrivateConstructorPojo.java`.
+
 <!-- id: issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-  file: issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md -->

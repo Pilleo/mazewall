@@ -548,6 +548,16 @@ class PortalStubGeneratorTest {
         }
     }
 
+    @Test
+    fun `record with generic list generates bounded collection reader and writer`() {
+        val files = PortalStubGenerator.generate(io.mazewall.portal.codegen.testapi.NamesRecordService::class.java)
+        val stub = files.single { it.name.endsWith("PortalStub") }.toString()
+        val dispatcher = files.single { it.name.endsWith("PortalDispatcher") }.toString()
+
+        assertTrue(stub.contains("writer.list(names.values())"), stub)
+        assertTrue(dispatcher.contains("reader.inContext(\"values\")"), dispatcher)
+    }
+
     private fun dirWithFile(
         dir: Path,
         fileName: String,

@@ -179,3 +179,21 @@ worker-artifact key without running guest code.
 This initial release deliberately excludes Spring integration, remote workers,
 sidecars, service discovery, host callbacks, bidirectional capabilities,
 automatic retries, and transparent state replication.
+
+## DTO shape rules
+
+Boundary types are validated before any source is emitted. The table below summarises which DTO
+shapes are accepted and which are rejected at resolution time (before any output is published).
+
+| Shape | Accepted | Rejection message |
+|---|---|---|
+| `public record Foo(String x)` or a POJO with a public constructor and compatible public reader | ✅ | — |
+| `record Names(List<String> values)` | ✅ Generic preserved | — |
+| `abstract class Foo` | ❌ | `abstract DTO … is not constructible` |
+| `String? name` / `@Nullable String name` | ❌ | `nullable DTO components are not supported` |
+| Kotlin `inner class Dto` (non-static member) | ❌ | `member type … must be static` |
+| Non-public outer class containing a DTO | ❌ | `enclosing class … must be public` |
+| POJO with no public all-args constructor | ❌ | `need a java record or a single public all-args constructor` |
+
+Errors include the full field path, for example:
+`Service.parse parameter request field customer.name`

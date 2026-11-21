@@ -310,6 +310,7 @@ class PortalCodegenFunctionalTest {
                 KotlinDataDtoService::class.java.name,
                 KotlinJvmRecordDtoService::class.java.name,
                 MethodIdShadowService::class.java.name,
+                io.mazewall.portal.codegen.testapi.NamesRecordService::class.java.name,
             ),
             compileGenerated = true,
         )
@@ -1146,6 +1147,26 @@ class PortalCodegenFunctionalTest {
     }
 
     @Test
+    fun `invalid DTO shapes fail generation with field path and preserve sentinels`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.A", "fixture.B"))
+        runner("generatePortalStubs").build()
+        val before = generatedContents()
+
+        writeFixture(apiJar, listOf("fixture.A", io.mazewall.portal.codegen.testapi.AbstractDtoService::class.java.name))
+        val abstractResult = runner("generatePortalStubs", "--rerun-tasks").buildAndFail()
+        assertTrue(abstractResult.output.contains("abstract DTO io.mazewall.portal.codegen.testapi.AbstractDto is not constructible"), abstractResult.output)
+        assertTrue(abstractResult.output.contains("AbstractDtoService.echo parameter dto"), abstractResult.output)
+        assertEquals(before, generatedContents())
+
+        writeFixture(apiJar, listOf("fixture.A", io.mazewall.portal.codegen.testapi.NullableMemberDtoService::class.java.name))
+        val nullableResult = runner("generatePortalStubs", "--rerun-tasks").buildAndFail()
+        assertTrue(nullableResult.output.contains("nullable DTO components are not supported"), nullableResult.output)
+        assertTrue(nullableResult.output.contains("NullableMemberDtoService.echo parameter dto field name"), nullableResult.output)
+        assertEquals(before, generatedContents())
+    }
+
+    @Test
     fun `generation rejects nested artifacts reserved by a legal top level service`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(
@@ -1520,6 +1541,36 @@ class PortalCodegenFunctionalTest {
                 val recordReader = PortalCodec.Reader(recordResult)
                 check(recordReader.string() == "safe!")
                 check(recordReader.int() == 5)
+                ${if (services.contains(io.mazewall.portal.codegen.testapi.NamesRecordService::class.java.name)) {
+                """
+                val namesImplementation = object : io.mazewall.portal.codegen.testapi.NamesRecordService {
+                    override fun echo(names: io.mazewall.portal.codegen.testapi.NamesRecord) =
+                        io.mazewall.portal.codegen.testapi.NamesRecord(names.values().map { it + "!" })
+                }
+                val namesPayload = PortalCodec.concat(
+                    listOf(
+                        PortalCodec.encodeInt(2),
+                        PortalCodec.encodeString("hello"),
+                        PortalCodec.encodeString("world"),
+                    ),
+                )
+                val namesResult = io.mazewall.portal.codegen.testapi.NamesRecordServicePortalDispatcher.handle(
+                    namesImplementation,
+                    PortalMethod.Generated(
+                        (("io.mazewall.portal.codegen.testapi.NamesRecordService#echo#" +
+                            "io.mazewall.portal.codegen.testapi.NamesRecord").hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000,
+                    ),
+                    namesPayload,
+                    emptyList(),
+                )
+                val namesReader = PortalCodec.Reader(namesResult)
+                check(namesReader.int() == 2)
+                check(namesReader.string() == "hello!")
+                check(namesReader.string() == "world!")
+                """
+            } else {
+                ""
+            }}
                 println("ROUND_TRIP_OK")
             }
             """.trimIndent(),
