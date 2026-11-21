@@ -10,6 +10,7 @@ import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalCodec
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalGenerationMeasurement
+import io.mazewall.portal.PortalInstanceMode
 import io.mazewall.portal.PortalKind
 import io.mazewall.portal.PortalMalformedPayloadException
 import io.mazewall.portal.PortalMethod
@@ -22,6 +23,7 @@ import io.mazewall.portal.PortalWorkerGeneration
 import io.mazewall.portal.PortalWorkerLaunch
 import io.mazewall.portal.PortalWorkerReady
 import io.mazewall.portal.ProcessBroker
+import io.mazewall.portal.ProcessBrokerLifecycle
 import io.mazewall.portal.WorkerBundleMaterializer
 import io.mazewall.portal.codegen.testapi.BinaryAndCollectionService
 import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
@@ -698,20 +700,33 @@ class PortalCodegenFunctionalTest {
                 val stubClass = loader.loadClass("io.mazewall.portal.codegen.testapi.StrictContractServicePortalStub")
                 val stub = stubClass.getConstructor(ProcessBroker::class.java).newInstance(broker) as StrictContractService
 
+                fun awaitReplaced(expectedSpawns: Int) {
+                    val wait = Deadline.afterMillis(5_000)
+                    while ((broker.spawnedWorkers() < expectedSpawns || broker.idleSize() == 0) && wait.remainingMillis() > 0) {
+                        Thread.sleep(10)
+                    }
+                    assertEquals(expectedSpawns, broker.spawnedWorkers())
+                }
+
                 queuedReplies += byteArrayOf(1)
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.unitOp() }
+                awaitReplaced(2)
 
                 queuedReplies += PortalCodec.encodeInt(1) + byteArrayOf(9)
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.echoInt(1) }
+                awaitReplaced(3)
 
                 queuedReplies += byteArrayOf(0, 1)
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.echoInt(1) }
+                awaitReplaced(4)
 
                 queuedReplies += byteArrayOf(2)
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.echoBool(true) }
+                awaitReplaced(5)
 
                 queuedReplies += PortalCodec.encodeInt(2) + byteArrayOf(0xC3.toByte(), 0x28)
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.echoString("ok") }
+                awaitReplaced(6)
 
                 queuedReplies +=
                     PortalCodec.concat(
@@ -724,13 +739,48 @@ class PortalCodegenFunctionalTest {
                         ),
                     )
                 assertThrows(PortalMalformedPayloadException::class.java) { stub.echoMap(emptyMap()) }
+                awaitReplaced(7)
 
+                // Wire validation (including requireExhausted) must defeat host DTO constructor failure
+                // and retire the corrupt worker before any DTO failure escapes.
+                queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("invalid-dto"), PortalCodec.encodeInt(1))) + byteArrayOf(9)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.buildDto("x") }
+                awaitReplaced(8)
+
+                // A valid-wire DTO whose host constructor throws preserves its identity and keeps the healthy worker.
                 queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("invalid-dto"), PortalCodec.encodeInt(1)))
                 val dtoFailure = assertThrows(IllegalArgumentException::class.java) { stub.buildDto("x") }
                 assertEquals("rejected by dto", dtoFailure.message)
+                assertEquals(8, broker.spawnedWorkers())
 
                 queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("ok"), PortalCodec.encodeInt(42)))
                 assertEquals(StrictDto("ok", 42), stub.buildDto("ok"))
+                assertEquals(8, broker.spawnedWorkers())
+
+                // Compiled host stub bound to a stateful singleton broker terminally loses state on malformed wire replies.
+                val singletonBroker =
+                    ProcessBroker(
+                        launcher = launcher,
+                        workerClasspath = projectDir.toString(),
+                        instanceMode = PortalInstanceMode.STATEFUL_SINGLETON,
+                        workerLaunch = PortalWorkerLaunch(emptyList(), PortalWorkerArtifact(dummyBundle, "0".repeat(64)), PortalGenerationMeasurement { _, _, _ -> generation }),
+                        limits = PortalRuntimeLimits(workers = 1, startupTimeoutMs = 5_000, callTimeoutMs = 5_000, closeTimeoutMs = 2_000),
+                    )
+                try {
+                    singletonBroker.start()
+                    val singletonStub = stubClass.getConstructor(ProcessBroker::class.java).newInstance(singletonBroker) as StrictContractService
+                    queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("invalid-dto"), PortalCodec.encodeInt(1)))
+                    assertEquals("rejected by dto", assertThrows(IllegalArgumentException::class.java) { singletonStub.buildDto("x") }.message)
+                    assertEquals(1, singletonBroker.spawnedWorkers())
+
+                    queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("ok"), PortalCodec.encodeInt(42))) + byteArrayOf(9)
+                    assertThrows(PortalMalformedPayloadException::class.java) { singletonStub.buildDto("x") }
+                    assertTrue(singletonBroker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+                    assertEquals(1, singletonBroker.spawnedWorkers())
+                    assertThrows(IllegalStateException::class.java) { singletonStub.echoInt(1) }
+                } finally {
+                    singletonBroker.close()
+                }
             }
 
             // Also verify dispatcher capability-count enforcement with real granted file descriptors.

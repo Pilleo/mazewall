@@ -258,6 +258,59 @@ class PortalRuntimeTest {
         }
     }
 
+    @Test
+    fun `stateful proxy distinguishes business and dto exceptions from malformed wire replies`() {
+        val manifest =
+            sampleManifest("worker").copy(
+                serviceId = PortalServiceId("stateful-echo"),
+                contractName = StatefulEchoService::class.java.name,
+            )
+        val runtime =
+            PortalRuntime.open(
+                PortalRuntimeConfig(
+                    manifests = listOf(manifest),
+                    workerProfiles = mapOf("restricted" to PortalWorkerProfile()),
+                ),
+            )
+        try {
+            val dtoError = IllegalArgumentException("rejected by dto")
+            val calls = AtomicInteger(0)
+            val delegate =
+                object : StatefulEchoService {
+                    override fun call(mode: String): String {
+                        calls.incrementAndGet()
+                        return when (mode) {
+                            "business" -> throw PortalRemoteCallException("fixture.Invalid", "bad input")
+                            "dto" -> throw dtoError
+                            "malformed" -> throw PortalMalformedPayloadException("trailing bytes", "test.call.return")
+                            else -> "ok-$mode"
+                        }
+                    }
+                }
+            val proxy = runtime.createServiceProxy(StatefulEchoService::class.java, manifest, delegate)
+
+            assertEquals("ok-first", proxy.call("first"))
+            val business = assertThrows(PortalRemoteCallException::class.java) { proxy.call("business") }
+            assertEquals(PortalInvocationEvidence.COMPLETED, business.evidence)
+            val actualDtoError = assertThrows(IllegalArgumentException::class.java) { proxy.call("dto") }
+            check(actualDtoError === dtoError)
+            assertEquals("ok-after-errors", proxy.call("after-errors"))
+            assertEquals(PortalServiceHealthState.AVAILABLE, runtime.health().single().state)
+
+            assertThrows(PortalMalformedPayloadException::class.java) { proxy.call("malformed") }
+            assertEquals(PortalServiceHealthState.STATE_LOST, runtime.health().single().state)
+            assertEquals(5, calls.get())
+            assertThrows(PortalStateLostException::class.java) { proxy.call("after-lost") }
+            assertEquals(5, calls.get())
+        } finally {
+            runtime.close()
+        }
+    }
+
+    private interface StatefulEchoService {
+        fun call(mode: String): String
+    }
+
     private fun sampleManifest(artifact: String): PortalServiceManifest =
         PortalServiceManifest(
             serviceId = PortalServiceId("missing"),

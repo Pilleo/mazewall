@@ -18,6 +18,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
@@ -156,6 +157,133 @@ class PreparedPortalOperationIntegrationTest {
             assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
         } finally {
             LinuxNative.resetToDefault()
+            blockClose.set(false)
+            broker.close()
+        }
+    }
+
+    @Test
+    fun `prepared stateful operation loses group on malformed generated reply and preserves reuse on business and host dto failures`() {
+        val dir = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
+        val fixture = validatedReplyBrokerFixture(
+            dir,
+            mode = PortalInstanceMode.STATEFUL_SINGLETON,
+            limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 2, callTimeoutMs = 10_000),
+        )
+        PortalRuntime.open(fixture.config).use { runtime ->
+            val prepared = runtime.prepare(
+                ValidatedReplyService::class.java,
+                PortalServiceId("validated-reply"),
+                PortalOperationCall<ValidatedReplyService, String, String> { service, mode -> service.call(mode) },
+            )
+            val first = prepared
+                .submit("valid")
+                .result()
+                .toCompletableFuture()
+                .get(10, TimeUnit.SECONDS)
+            val healthAfterFirst = runtime.health().single()
+            assertEquals(PortalServiceHealthState.AVAILABLE, healthAfterFirst.state)
+            val originalPid = healthAfterFirst.workerPids.single()
+            assertEquals("pid=$originalPid,calls=1,mode=valid", first)
+            val child = ProcessHandle.of(originalPid).orElseThrow()
+
+            val businessInvocation = prepared.submit("remote-business-error")
+            val businessFailure = kotlin
+                .runCatching {
+                    businessInvocation.result().toCompletableFuture().get(10, TimeUnit.SECONDS)
+                }.exceptionOrNull() as ExecutionException
+            assertIs<PortalRemoteCallException>(businessFailure.cause)
+            assertIs<ExecutionEnd.Finished>(businessInvocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+
+            val dtoInvocation = prepared.submit("host-dto-reject")
+            val dtoFailure = kotlin
+                .runCatching {
+                    dtoInvocation.result().toCompletableFuture().get(10, TimeUnit.SECONDS)
+                }.exceptionOrNull() as ExecutionException
+            assertIs<IllegalArgumentException>(dtoFailure.cause)
+            assertEquals("rejected by dto", dtoFailure.cause?.message)
+            assertIs<ExecutionEnd.Finished>(dtoInvocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+
+            val validAfterErrors = prepared
+                .submit("valid")
+                .result()
+                .toCompletableFuture()
+                .get(10, TimeUnit.SECONDS)
+            assertEquals("pid=$originalPid,calls=4,mode=valid", validAfterErrors)
+            assertEquals(PortalServiceHealthState.AVAILABLE, runtime.health().single().state)
+            assertEquals(listOf(originalPid), runtime.health().single().workerPids)
+
+            val malformedInvocation = prepared.submit("malformed-trailing")
+            val malformedFailure = kotlin
+                .runCatching {
+                    malformedInvocation.result().toCompletableFuture().get(10, TimeUnit.SECONDS)
+                }.exceptionOrNull() as ExecutionException
+            assertIs<PortalMalformedPayloadException>(malformedFailure.cause)
+            val malformedEnd = malformedInvocation.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS)
+            assertIs<ExecutionEnd.Finished>(malformedEnd)
+            assertFalse(child.isAlive, "stateful child must be retired before executionEnd finishes")
+
+            val lostHealth = runtime.health().single()
+            assertEquals(PortalServiceHealthState.STATE_LOST, lostHealth.state)
+            assertEquals(emptyList(), lostHealth.workerPids)
+
+            val rejectedAfterLoss = prepared.submit("valid")
+            val notStarted = rejectedAfterLoss.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            assertIs<ExecutionEnd.NotStarted>(notStarted)
+            assertIs<PortalStateLostException>(notStarted.failure)
+        }
+    }
+
+    @Test
+    fun `cancellation during held reply validation retains physical retirement and admission until cleanup retry`() {
+        val dir = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
+        val fixture = validatedReplyBrokerFixture(
+            dir,
+            mode = PortalInstanceMode.STATELESS,
+            limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 1, callTimeoutMs = 10_000),
+        )
+        val blockClose = AtomicBoolean()
+        val sockets = object : SocketManager by RealSocketManager {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                if (blockClose.get()) throw IllegalStateException("injected pre-native close failure")
+                RealSocketManager.close(fd)
+            }
+        }
+        val broker = ProcessBroker(
+            sockets = sockets,
+            workerClasspath = fixture.brokerClasspath,
+            workerLaunch = fixture.workerLaunch,
+            limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 1, callTimeoutMs = 10_000),
+        )
+        broker.start()
+        val child = ProcessHandle.of(broker.workerPids().single()).orElseThrow()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            val invocation = broker.operations.submit(
+                Callable {
+                    broker.invokeValidated(PortalMethod.Generated(4242), PortalCodec.encodeString("valid")) { bytes ->
+                        entered.countDown()
+                        check(release.await(5, TimeUnit.SECONDS))
+                        PortalCodec.Reader(bytes, "validated.return").let { r -> r.string().also { r.requireExhausted() } }
+                    }
+                },
+            )
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            blockClose.set(true)
+            assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+            assertTrue(runCatching { invocation.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.isFailure)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (child.isAlive && System.nanoTime() < deadline) Thread.yield()
+            assertFalse(child.isAlive, "cancelled child must be reaped despite failed socket cleanup")
+            assertFalse(invocation.executionEnd().toCompletableFuture().isDone)
+            val refused = broker.operations.submit(Callable { broker.echo("must-not-run") })
+            assertIs<ExecutionEnd.NotStarted>(refused.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+            blockClose.set(false)
+            broker.close()
+            assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+        } finally {
+            release.countDown()
             blockClose.set(false)
             broker.close()
         }

@@ -203,8 +203,11 @@ preserved. Broker process/native retirement continues to use its own lifecycle.
   (`0`/`1` booleans, strict UTF-8, duplicate-key-free maps, valid
   UUID/Instant/BigDecimal/enum values), exact expected capability counts, and
   complete payload consumption (`requireExhausted()`) before service entry and
-  before result delivery, raising `PortalMalformedPayloadException` distinctly
-  from business exceptions and trusted DTO constructor validation.
+  before worker-slot release/result delivery, raising `PortalMalformedPayloadException` distinctly
+  from completed business exceptions and trusted DTO constructor validation. Host stubs run
+  wire validation under `ProcessBroker.invokeValidated` while the worker checkout remains
+  exclusively owned, deferring trusted host DTO constructors until after wire exhaustion so corrupt
+  responses always retire the exact offending worker and terminally lose `STATEFUL_SINGLETON` groups.
 
 ## Initial service modes
 

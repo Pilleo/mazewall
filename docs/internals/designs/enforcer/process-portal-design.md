@@ -202,7 +202,16 @@ See [the portal lifecycle diagram](../../../diagrams/portal_lifecycle.puml).
 
 ## Architecture
 
-Broker request transmission produces `AwaitReply`; worker events after `Stopped` produce a
+Broker request transmission produces `AwaitReply`, and response frames enter `ValidatingReply`
+while the broker still holds exclusive ownership of the checked-out worker slot. Generated host
+stubs execute wire decoding and complete payload exhaustion (`PortalCodec.Reader.requireExhausted()`)
+inside `ProcessBroker.invokeValidated` before releasing the worker back to the idle pool, while
+deferring trusted host DTO construction until after wire validation completes. Wire validation
+failures (`PortalMalformedPayloadException`), interruptions, or fatal errors during held validation
+retain physical retirement ownership and recycle/retire that exact worker (terminally losing
+`STATEFUL_SINGLETON` groups without replaying calls or recreating guest state), whereas completed
+remote business exceptions (`PortalRemoteCallException`) and post-wire trusted DTO constructor
+failures preserve their exact exception identity and keep healthy workers reusable. Worker events after `Stopped` produce a
 `PostTerminalObservation` without another send or close effect. The single worker evaluator
 owns dispatch-result transitions. Resource cleanup shares platform's fatal-first,
 identity-deduplicating failure fold while each owner retains its own cleanup deadlines.

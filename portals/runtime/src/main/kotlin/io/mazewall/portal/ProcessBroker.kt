@@ -191,6 +191,20 @@ public class ProcessBroker internal constructor(
         vararg granted: Capability.ReadFd,
     ): ByteArray = call(method, payload, granted.toList())
 
+    /**
+     * Invokes [method] and runs [decodeReply] while this broker holds exclusive ownership of the
+     * checked-out worker slot. Generated wire validation failures ([PortalMalformedPayloadException]
+     * and other [PortalCallException]s) retire that exact worker before release; ordinary host
+     * exceptions thrown after wire decoding preserve their identity without discarding a healthy
+     * worker.
+     */
+    public fun <T> invokeValidated(
+        method: PortalMethod,
+        payload: ByteArray,
+        vararg granted: Capability.ReadFd,
+        decodeReply: (ByteArray) -> T,
+    ): T = call(method, payload, granted.toList(), decodeReply)
+
     public fun checksum(fd: Capability.ReadFd): Int {
         val payload = call(PortalMethod.Checksum, ByteArray(0), listOf(fd))
         require(payload.size == 4) { "checksum must be 4 bytes" }
@@ -263,30 +277,41 @@ public class ProcessBroker internal constructor(
         idle.put(slot)
     }
 
-    @Suppress("TooGenericExceptionCaught") // Every fatal checkout failure must retire its process before preserving the original Error.
     internal fun call(
         method: PortalMethod,
         payload: ByteArray,
         fds: List<Capability.ReadFd>,
-    ): ByteArray {
+    ): ByteArray = call(method, payload, fds) { it }
+
+    internal fun <T> call(
+        method: PortalMethod,
+        payload: ByteArray,
+        fds: List<Capability.ReadFd>,
+        decodeReply: (ByteArray) -> T,
+    ): T {
         check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
         return if (PortalInvocationRetirement.deadline(this) == null) {
-            admission.enter(payload.size, fds.size).use { callAdmitted(method, payload, fds) }
+            admission.enter(payload.size, fds.size).use { callAdmitted(method, payload, fds, decodeReply) }
         } else {
             admission.validate(payload.size, fds.size)
-            callAdmitted(method, payload, fds)
+            callAdmitted(method, payload, fds, decodeReply)
         }
     }
 
     @Suppress("TooGenericExceptionCaught") // fatal admitted calls retire their exact checked-out process before propagation
-    private fun callAdmitted(method: PortalMethod, payload: ByteArray, fds: List<Capability.ReadFd>): ByteArray {
+    private fun <T> callAdmitted(
+        method: PortalMethod,
+        payload: ByteArray,
+        fds: List<Capability.ReadFd>,
+        decodeReply: (ByteArray) -> T,
+    ): T {
         val deadline = PortalInvocationRetirement.deadline(this) ?: Deadline.afterMillis(limits.callTimeoutMs)
         val admittedAt = System.nanoTime()
         val slot = checkoutWorker(deadline)
         val dispatchedAt = System.nanoTime()
         var returnedToPool = false
         var callState: PortalBrokerCallState = PortalBrokerCallState.Idle
-        return try {
+        val outcome = try {
             val id = nextId.getAndIncrement()
             val request = PortalFrame(PortalKind.Request, id, method, PortalPayload(payload), fds.size)
             PortalInvocationRetirement.dispatched(this)
@@ -295,15 +320,22 @@ public class ProcessBroker internal constructor(
                 .state
             slot.channel.sendCapabilities(request, fds, deadline)
             val (reply, extra) = slot.channel.receive(deadline)
-            retireCapabilities(extra).failureOrNull()?.let(::raiseBrokerFailure)
+            retireCapabilities(retainedCapabilities, extra).failureOrNull()?.let(::raiseBrokerFailure)
             val transition = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.ReplyReceived(reply))
             callState = transition.state
             dispatchBrokerCallEffect(
                 transition.effect,
-                onSuccess = { payloadBytes ->
-                    returnToPoolOrDestroy(slot)
-                    returnedToPool = true
-                    payloadBytes
+                onValidatePayload = { payloadBytes ->
+                    validateCheckedOutReply(
+                        payloadBytes = payloadBytes,
+                        decodeReply = decodeReply,
+                        currentState = { callState },
+                        onStateChange = { next -> callState = next },
+                        releaseWorker = {
+                            returnToPoolOrDestroy(slot)
+                            returnedToPool = true
+                        },
+                    )
                 },
                 onRemoteError = { failure ->
                     returnToPoolOrDestroy(slot)
@@ -351,6 +383,7 @@ public class ProcessBroker internal constructor(
                     workerExecution = java.time.Duration.ofNanos(completedAt - dispatchedAt),
                 )
         }
+        return outcome.valueOrThrow()
     }
 
     private fun checkoutWorker(deadline: Deadline): WorkerSlot =
@@ -415,8 +448,8 @@ public class ProcessBroker internal constructor(
         cleanup.attempt("operation dispatch shutdown") { operations.stop() }
         cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
         generationCaptures.cancel()
-        val maintenanceStopped = awaitMaintenance(deadline)
-        retireRetainedCapabilities(cleanup)
+        val maintenanceStopped = awaitMaintenance(maintenance, logger, deadline)
+        retireRetainedCapabilities(retainedCapabilities, cleanup)
         closeRetirement.retireHandoffs(cleanup)
         provisionalSlots.toList().forEach { slot ->
             cleanup.attempt("provisional worker") { destroySlot(slot) }
@@ -483,38 +516,17 @@ public class ProcessBroker internal constructor(
             ClosePreparation.execute(startupCompletion, operation)
         }
 
-    private fun awaitMaintenance(deadline: Deadline): Boolean {
-        val waitMs = maxOf(deadline.remainingMillis().toLong(), 5_000L)
-        val result = runCatching { maintenance.awaitTermination(waitMs, TimeUnit.MILLISECONDS) }
-        if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
-        val stopped = result.getOrDefault(false)
-        if (!stopped) logger.warning("portal maintenance did not terminate before broker cleanup")
-        return stopped
-    }
-
-    private fun retireCapabilities(capabilities: List<Capability.ReadFd>): CapabilityRetirementOutcome {
-        retainedCapabilities.addAll(capabilities)
-        val outcome = Capability.retireAll(capabilities)
-        capabilities.filter(Capability.ReadFd::isRetired).forEach(retainedCapabilities::remove)
-        return outcome
-    }
-
-    private fun retireRetainedCapabilities(cleanup: CleanupCollector) {
-        if (retainedCapabilities.isEmpty()) return
-        cleanup.attempt("received portal capabilities") {
-            retireCapabilities(retainedCapabilities.toList()).failureOrNull()?.let(::raiseBrokerFailure)
-        }
-    }
-
-    /** Pool the slot unless the broker closed meanwhile; destroy orphans either way. */
+    /** Pool the slot unless the broker closed meanwhile; destroy orphans outside the lifecycle lock. */
     private fun returnToPoolOrDestroy(slot: WorkerSlot) {
-        synchronized(lifecycleGate) {
-            if (lifecycle != ProcessBrokerLifecycle.Running) {
-                destroySlot(slot)
-            } else {
+        val pooled = synchronized(lifecycleGate) {
+            if (lifecycle == ProcessBrokerLifecycle.Running) {
                 idle.put(slot)
+                true
+            } else {
+                false
             }
         }
+        if (!pooled) destroySlot(slot)
     }
 
     @Suppress("TooGenericExceptionCaught") // Provisional ownership must roll back on every startup failure.
@@ -1121,13 +1133,105 @@ private fun throwWithCleanupFailure(
     throw primary
 }
 
-private fun dispatchBrokerCallEffect(
+private fun awaitMaintenance(
+    maintenance: java.util.concurrent.ExecutorService,
+    logger: Logger,
+    deadline: Deadline,
+): Boolean {
+    val waitMs = maxOf(deadline.remainingMillis().toLong(), 5_000L)
+    val result = runCatching { maintenance.awaitTermination(waitMs, TimeUnit.MILLISECONDS) }
+    if (result.exceptionOrNull() is InterruptedException) Thread.currentThread().interrupt()
+    val stopped = result.getOrDefault(false)
+    if (!stopped) logger.warning("portal maintenance did not terminate before broker cleanup")
+    return stopped
+}
+
+private fun retireCapabilities(
+    retainedCapabilities: MutableSet<Capability.ReadFd>,
+    capabilities: List<Capability.ReadFd>,
+): CapabilityRetirementOutcome {
+    retainedCapabilities.addAll(capabilities)
+    val outcome = Capability.retireAll(capabilities)
+    capabilities.filter(Capability.ReadFd::isRetired).forEach(retainedCapabilities::remove)
+    return outcome
+}
+
+private fun retireRetainedCapabilities(
+    retainedCapabilities: MutableSet<Capability.ReadFd>,
+    cleanup: CleanupCollector,
+) {
+    if (retainedCapabilities.isEmpty()) return
+    cleanup.attempt("received portal capabilities") {
+        retireCapabilities(retainedCapabilities, retainedCapabilities.toList()).failureOrNull()?.let(::raiseBrokerFailure)
+    }
+}
+
+@Suppress("TooGenericExceptionCaught") // Separates protocol validation failures from trusted host exceptions while keeping checkout owned.
+private fun <T> validateCheckedOutReply(
+    payloadBytes: ByteArray,
+    decodeReply: (ByteArray) -> T,
+    currentState: () -> PortalBrokerCallState,
+    onStateChange: (PortalBrokerCallState) -> Unit,
+    releaseWorker: () -> Unit,
+): BrokerCallOutcome<T> {
+    val outcome = try {
+        BrokerCallOutcome.Value(decodeReply(payloadBytes))
+    } catch (protocolFailure: PortalCallException) {
+        failReplyValidation(currentState(), protocolFailure.message ?: "malformed portal reply", protocolFailure, onStateChange)
+    } catch (interrupted: InterruptedException) {
+        failReplyValidation(currentState(), "portal reply validation interrupted", interrupted, onStateChange)
+    } catch (hostFailure: Exception) {
+        BrokerCallOutcome.HostFailure(hostFailure)
+    }
+    if (Thread.currentThread().isInterrupted) {
+        val interrupted = InterruptedException("portal reply validation interrupted")
+        failReplyValidation(currentState(), "portal reply validation interrupted", interrupted, onStateChange)
+    }
+    val validated = PortalBrokerCallMachine.evaluate(currentState(), PortalBrokerCallEvent.ReplyValidated)
+    check(validated.state == PortalBrokerCallState.Completed && validated.effect == PortalBrokerCallEffect.ReleaseWorker)
+    releaseWorker()
+    onStateChange(validated.state)
+    return outcome
+}
+
+private fun failReplyValidation(
+    currentState: PortalBrokerCallState,
+    reason: String,
+    failure: Throwable,
+    onStateChange: (PortalBrokerCallState) -> Unit,
+): Nothing {
+    val failed = PortalBrokerCallMachine.evaluate(
+        currentState,
+        PortalBrokerCallEvent.ReplyValidationFailed(reason),
+    )
+    onStateChange(failed.state)
+    raiseBrokerFailure(failure)
+}
+
+private sealed interface BrokerCallOutcome<out T> {
+    fun valueOrThrow(): T =
+        when (this) {
+            is Value -> value
+            is HostFailure -> raiseBrokerFailure(failure)
+        }
+
+    data class Value<out T>(
+        val value: T,
+    ) : BrokerCallOutcome<T>
+
+    data class HostFailure(
+        val failure: Exception,
+    ) : BrokerCallOutcome<Nothing>
+}
+
+private fun <T> dispatchBrokerCallEffect(
     effect: PortalBrokerCallEffect,
-    onSuccess: (ByteArray) -> ByteArray,
+    onValidatePayload: (ByteArray) -> BrokerCallOutcome<T>,
     onRemoteError: (PortalRemoteFailure) -> Nothing,
-): ByteArray =
+): BrokerCallOutcome<T> =
     when (effect) {
-    is PortalBrokerCallEffect.ReturnPayload -> onSuccess(effect.payload.copyToByteArray())
+    is PortalBrokerCallEffect.ValidatePayload -> onValidatePayload(effect.payload.copyToByteArray())
+    PortalBrokerCallEffect.ReleaseWorker -> throw PortalCallException("portal RPC produced unexpected release effect")
     is PortalBrokerCallEffect.RemoteError ->
         onRemoteError(
             try {

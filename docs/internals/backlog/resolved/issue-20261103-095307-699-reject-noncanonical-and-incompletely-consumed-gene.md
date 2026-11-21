@@ -39,7 +39,7 @@ CG04: compiled generated dispatchers invoke service code for trailing bytes, non
 
 **Scope and dependencies:**
 - Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md); [review CG04](../../reviews/2026-11-03-portal-codegen-hardening.md#cg04--reject-malformed-data-before-accepting-a-generated-call) records executed malformed-input probes.
-- This issue owns parsing and error classification. [CG05](../issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) owns retaining/retiring the broker checkout around response validation.
+- This issue owns parsing and error classification. [CG05](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) owns retaining/retiring the broker checkout around response validation.
 - Valid wire bytes and completed business-exception behavior stay compatible; previously accepted malformed encodings become explicit failures.
 
 **Acceptance:**

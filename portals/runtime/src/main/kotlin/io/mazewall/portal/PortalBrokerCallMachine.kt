@@ -8,6 +8,10 @@ internal sealed interface PortalBrokerCallState {
         val request: PortalFrame,
     ) : PortalBrokerCallState
 
+    data class ValidatingReply(
+        val request: PortalFrame,
+    ) : PortalBrokerCallState
+
     data object Completed : PortalBrokerCallState
 
     data object Failed : PortalBrokerCallState
@@ -22,13 +26,21 @@ internal sealed interface PortalBrokerCallEvent {
         val reply: PortalFrame,
     ) : PortalBrokerCallEvent
 
+    data object ReplyValidated : PortalBrokerCallEvent
+
+    data class ReplyValidationFailed(
+        val reason: String,
+    ) : PortalBrokerCallEvent
+
     data object TransportFailed : PortalBrokerCallEvent
 }
 
 internal sealed interface PortalBrokerCallEffect {
-    data class ReturnPayload(
+    data class ValidatePayload(
         val payload: PortalPayload,
     ) : PortalBrokerCallEffect
+
+    data object ReleaseWorker : PortalBrokerCallEffect
 
     data class RemoteError(
         val payload: PortalPayload,
@@ -64,20 +76,43 @@ internal object PortalBrokerCallMachine {
         event: PortalBrokerCallEvent,
     ): PortalBrokerCallTransition =
         when (state) {
-        PortalBrokerCallState.Idle -> when (event) {
+            PortalBrokerCallState.Idle -> fromIdle(event)
+            is PortalBrokerCallState.AwaitingReply -> fromAwaitingReply(state, event)
+            is PortalBrokerCallState.ValidatingReply -> fromValidatingReply(event)
+            PortalBrokerCallState.Completed,
+            PortalBrokerCallState.Failed,
+            -> PortalBrokerCallTransition(state, PortalBrokerCallEffect.PostTerminalObservation(state, event))
+        }
+
+    private fun fromIdle(event: PortalBrokerCallEvent): PortalBrokerCallTransition =
+        when (event) {
             is PortalBrokerCallEvent.RequestSent -> PortalBrokerCallTransition(PortalBrokerCallState.AwaitingReply(event.request), PortalBrokerCallEffect.AwaitReply)
             is PortalBrokerCallEvent.ReplyReceived -> protocolViolation("reply received before request")
+            PortalBrokerCallEvent.ReplyValidated -> protocolViolation("reply validated before request")
+            is PortalBrokerCallEvent.ReplyValidationFailed -> protocolViolation(event.reason)
             PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
         }
-        is PortalBrokerCallState.AwaitingReply -> when (event) {
+
+    private fun fromAwaitingReply(
+        state: PortalBrokerCallState.AwaitingReply,
+        event: PortalBrokerCallEvent,
+    ): PortalBrokerCallTransition =
+        when (event) {
             is PortalBrokerCallEvent.RequestSent -> protocolViolation("request sent while awaiting reply")
+            PortalBrokerCallEvent.ReplyValidated -> protocolViolation("reply validated before reply received")
+            is PortalBrokerCallEvent.ReplyValidationFailed -> protocolViolation(event.reason)
             PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
             is PortalBrokerCallEvent.ReplyReceived -> evaluateReply(state.request, event.reply)
         }
-        PortalBrokerCallState.Completed,
-        PortalBrokerCallState.Failed,
-        -> PortalBrokerCallTransition(state, PortalBrokerCallEffect.PostTerminalObservation(state, event))
-    }
+
+    private fun fromValidatingReply(event: PortalBrokerCallEvent): PortalBrokerCallTransition =
+        when (event) {
+            PortalBrokerCallEvent.ReplyValidated -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReleaseWorker)
+            is PortalBrokerCallEvent.ReplyValidationFailed -> protocolViolation(event.reason)
+            PortalBrokerCallEvent.TransportFailed -> failed("portal RPC failed")
+            is PortalBrokerCallEvent.RequestSent -> protocolViolation("request sent while validating reply")
+            is PortalBrokerCallEvent.ReplyReceived -> protocolViolation("duplicate reply while validating reply")
+        }
 
     private fun evaluateReply(
         request: PortalFrame,
@@ -86,7 +121,7 @@ internal object PortalBrokerCallMachine {
         if (reply.requestId != request.requestId) return protocolViolation("request id mismatch")
         if (reply.method != request.method) return protocolViolation("method mismatch")
         return when (reply.kind) {
-            PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.ReturnPayload(reply.payload))
+            PortalKind.Response -> PortalBrokerCallTransition(PortalBrokerCallState.ValidatingReply(request), PortalBrokerCallEffect.ValidatePayload(reply.payload))
             PortalKind.Error -> PortalBrokerCallTransition(PortalBrokerCallState.Completed, PortalBrokerCallEffect.RemoteError(reply.payload))
             PortalKind.Request -> protocolViolation("unexpected request frame")
         }

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 406 | *Total Resolved Issues:* 779
+*Total Active Issues:* 405 | *Total Resolved Issues:* 780
 
-Active status detail: 404 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 403 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -252,7 +252,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-095306-294](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission | high | portal-codegen |
 | [issue-20261103-095306-992](issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) | Fingerprint the complete versioned Portal wire schema | high | portal-codegen |
 | Archived [issue-20261103-095307-699](resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads (resolved 2026-11-21) | high | portal-codegen |
-| [issue-20261103-095308-453](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation | high | portal-runtime |
+| Archived [issue-20261103-095308-453](resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation (resolved 2026-11-21) | high | portal-runtime |
 | [issue-20261103-095309-136](issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) | Bound generated Portal encoding before allocation and traversal | high | portal-runtime |
 | Archived [issue-20261103-095309-827](resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-085927-123](issue-20261103-085927-123-compare-warm-portal-calls-with-executor-and-persis.md) | Compare warm Portal calls with executor and persistent HTTP baselines | high | benchmarks |

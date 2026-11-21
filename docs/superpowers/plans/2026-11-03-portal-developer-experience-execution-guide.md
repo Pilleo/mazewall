@@ -364,21 +364,21 @@ not this parser-only card, proves the offending worker cannot be reused.
 ## CG05 — Validation-owned checkout
 
 **Read first:** `ProcessBroker.kt`, `PortalBrokerCallMachine.kt`,
-`PortalStatefulInvocationGate.kt` and [CG05](../../internals/backlog/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md).
+`PortalStatefulInvocationGate.kt` and [CG05](../../internals/backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md).
 
-- [ ] Begin with a **real child** returning a matching success frame/header but a
+- [x] Begin with a **real child** returning a matching success frame/header but a
   generated body that CG04 rejects. A wrong sequence number or stale generation is
   insufficient: those already exercise a different broker check.
-- [ ] Record the exact worker identity. Pause generated reply validation, submit a
+- [x] Record the exact worker identity. Pause generated reply validation, submit a
   competing call, and prove the same checkout cannot become available while
   validation is incomplete. Use a test barrier, not a guessed sleep.
-- [ ] Move the release/failed-checkout decision into the existing broker call
+- [x] Move the release/failed-checkout decision into the existing broker call
   lifecycle around generated validation. Keep only the narrow bridge needed by
   generated classes in external artifacts. Do not change raw public invoke behavior.
-- [ ] On malformed reply, retire that exact worker. Singleton later calls reject
+- [x] On malformed reply, retire that exact worker. Singleton later calls reject
   without entry; stateless capacity may replace according to existing policy, but
   the failed invocation is never replayed.
-- [ ] Add controls for valid replies, completed business exceptions and trusted host
+- [x] Add controls for valid replies, completed business exceptions and trusted host
   constructor failures, plus cancellation/close while validation is held. Assert
   original failure identity and separate physical cleanup accounting.
 

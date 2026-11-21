@@ -13,15 +13,76 @@ import org.junit.jupiter.api.Test
 
 class PortalBrokerCallMachineTest {
     @Test
-    fun `accepts a response for the active request`() {
+    fun `accepts a response for the active request and releases only after reply validation`() {
         val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, byteArrayOf(1), 0)
         val response = PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, byteArrayOf(2), 0)
 
         val waiting = PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
-        val accepted = PortalBrokerCallMachine.evaluate(waiting.state, PortalBrokerCallEvent.ReplyReceived(response))
+        val validating = PortalBrokerCallMachine.evaluate(waiting.state, PortalBrokerCallEvent.ReplyReceived(response))
 
-        assertTrue(accepted.state is PortalBrokerCallState.Completed)
-        assertEquals(PortalBrokerCallEffect.ReturnPayload(response.payload), accepted.effect)
+        assertEquals(PortalBrokerCallState.ValidatingReply(request), validating.state)
+        assertEquals(PortalBrokerCallEffect.ValidatePayload(response.payload), validating.effect)
+
+        val released = PortalBrokerCallMachine.evaluate(validating.state, PortalBrokerCallEvent.ReplyValidated)
+        assertEquals(PortalBrokerCallState.Completed, released.state)
+        assertEquals(PortalBrokerCallEffect.ReleaseWorker, released.effect)
+    }
+
+    @Test
+    fun `malformed reply validation transitions from ValidatingReply to Failed with ProtocolViolation`() {
+        val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, byteArrayOf(1), 0)
+        val response = PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, byteArrayOf(2), 0)
+        val validating = PortalBrokerCallMachine.evaluate(
+            PortalBrokerCallState.AwaitingReply(request),
+            PortalBrokerCallEvent.ReplyReceived(response),
+        )
+
+        val failed = PortalBrokerCallMachine.evaluate(validating.state, PortalBrokerCallEvent.ReplyValidationFailed("trailing bytes"))
+
+        assertEquals(PortalBrokerCallState.Failed, failed.state)
+        assertEquals(PortalBrokerCallEffect.ProtocolViolation("trailing bytes"), failed.effect)
+        val postTerminal = PortalBrokerCallMachine.evaluate(failed.state, PortalBrokerCallEvent.ReplyValidated)
+        assertEquals(
+            PortalBrokerCallEffect.PostTerminalObservation(PortalBrokerCallState.Failed, PortalBrokerCallEvent.ReplyValidated),
+            postTerminal.effect,
+        )
+    }
+
+    @Test
+    fun `reply validation events out of order and transport failure during validation fail closed`() {
+        val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, ByteArray(0), 0)
+        val response = PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, ByteArray(0), 0)
+
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("reply validated before request"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.ReplyValidated).effect,
+        )
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("bad"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.ReplyValidationFailed("bad")).effect,
+        )
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("reply validated before reply received"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.AwaitingReply(request), PortalBrokerCallEvent.ReplyValidated).effect,
+        )
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("bad"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.AwaitingReply(request), PortalBrokerCallEvent.ReplyValidationFailed("bad")).effect,
+        )
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("request sent while validating reply"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.ValidatingReply(request), PortalBrokerCallEvent.RequestSent(request)).effect,
+        )
+        assertEquals(
+            PortalBrokerCallEffect.ProtocolViolation("duplicate reply while validating reply"),
+            PortalBrokerCallMachine.evaluate(PortalBrokerCallState.ValidatingReply(request), PortalBrokerCallEvent.ReplyReceived(response)).effect,
+        )
+        val transportFailed = PortalBrokerCallMachine.evaluate(
+            PortalBrokerCallState.ValidatingReply(request),
+            PortalBrokerCallEvent.TransportFailed,
+        )
+        assertEquals(PortalBrokerCallState.Failed, transportFailed.state)
+        assertEquals(PortalBrokerCallEffect.RecycleWorker("portal RPC failed"), transportFailed.effect)
     }
 
     @Test
@@ -85,10 +146,11 @@ class PortalBrokerCallMachineTest {
     @Test
     fun `post terminal events are explicit observations`() {
         val request = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, ByteArray(0), 0)
-        val completed = PortalBrokerCallMachine.evaluate(
+        val validating = PortalBrokerCallMachine.evaluate(
             PortalBrokerCallState.AwaitingReply(request),
             PortalBrokerCallEvent.ReplyReceived(PortalFrame(PortalKind.Response, 7, PortalMethod.Echo, ByteArray(0), 0)),
         )
+        val completed = PortalBrokerCallMachine.evaluate(validating.state, PortalBrokerCallEvent.ReplyValidated)
 
         val observed = PortalBrokerCallMachine.evaluate(completed.state, PortalBrokerCallEvent.TransportFailed)
 

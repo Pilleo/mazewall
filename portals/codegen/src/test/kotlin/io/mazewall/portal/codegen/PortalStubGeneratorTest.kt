@@ -257,7 +257,7 @@ class PortalStubGeneratorTest {
                 .toString()
         assertTrue(stub.contains("val payload_"), stub)
         assertTrue(stub.contains("val reader_"), stub)
-        assertTrue(stub.contains("val result_"), stub)
+        assertTrue(stub.contains("result_ ->"), stub)
     }
 
     @Test
@@ -402,10 +402,17 @@ class PortalStubGeneratorTest {
         assertTrue(dispatcher.contains("reader.inContext(\"label\")"), dispatcher)
         assertTrue(dispatcher.contains("reader.requireExhausted()"), dispatcher)
         assertTrue(dispatcher.contains("reader.map("), dispatcher)
+        assertTrue(stub.contains("broker.invokeValidated("), stub)
         assertTrue(stub.contains("PortalCodec.Reader(result,"), stub)
         assertTrue(stub.contains(".requireExhausted()"), stub)
         assertTrue(stub.contains("reader.map("), stub)
         assertTrue(stub.contains("reader.inContext(\"label\")"), stub)
+        assertTrue(stub.contains("({ StrictDto("), stub)
+        assertTrue(stub.contains("return build()"), stub)
+        assertTrue(
+            stub.indexOf("reader.requireExhausted()") < stub.indexOf("return build()"),
+            stub,
+        )
     }
 
     @Test
