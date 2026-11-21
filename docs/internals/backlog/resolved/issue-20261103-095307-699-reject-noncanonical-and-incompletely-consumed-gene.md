@@ -1,7 +1,7 @@
 ---
 title: "Reject noncanonical and incompletely consumed generated Portal payloads"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies:
   - "issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts"
@@ -38,8 +38,8 @@ CG04: compiled generated dispatchers invoke service code for trailing bytes, non
 4. Give malformed-wire failures a distinguishable classification and field/method context without payload logging. Do not misclassify a completed service exception or trusted DTO-constructor exception as wire corruption.
 
 **Scope and dependencies:**
-- Follows [CG01](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md); [review CG04](../reviews/2026-11-03-portal-codegen-hardening.md#cg04--reject-malformed-data-before-accepting-a-generated-call) records executed malformed-input probes.
-- This issue owns parsing and error classification. [CG05](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) owns retaining/retiring the broker checkout around response validation.
+- Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md); [review CG04](../../reviews/2026-11-03-portal-codegen-hardening.md#cg04--reject-malformed-data-before-accepting-a-generated-call) records executed malformed-input probes.
+- This issue owns parsing and error classification. [CG05](../issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) owns retaining/retiring the broker checkout around response validation.
 - Valid wire bytes and completed business-exception behavior stay compatible; previously accepted malformed encodings become explicit failures.
 
 **Acceptance:**
@@ -49,18 +49,24 @@ CG04: compiled generated dispatchers invoke service code for trailing bytes, non
 - Tests execute unmodified compiled generated sources; substring assertions alone cannot satisfy the issue.
 
 **Verification:**
-- [Junior implementation walkthrough: CG04](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg04--strict-decoding) supplies the malformed-payload matrix, entry-count expectations and error-classification controls.
+- [Junior implementation walkthrough: CG04](../../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg04--strict-decoding) supplies the malformed-payload matrix, entry-count expectations and error-classification controls.
 - Run `PortalCodecTest`, generated compile/dispatch functional cases and `PortalWorkerDriverTest`, then the three affected module test suites.
 - Run `./gradlew build`, backlog and whitespace checks at implementation completion. Checkout-reuse/state-loss evidence belongs to CG05.
 
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[CG04/PCG-04](../reviews/2026-11-04-repository-review-findings.md#cg04) freshly reaches
+[CG04/PCG-04](../../reviews/2026-11-04-repository-review-findings.md#cg04) freshly reaches
 service entry with malformed Boolean/UTF-8, duplicate map keys, trailing bytes and nonempty
 zero-argument bodies. Cover full body/capability consumption on request and result, including
 Unit and extra direct capabilities. Use distinct malformed-wire classification; trusted host
 constructor failures are not automatically worker corruption. CG05 retains the exact checkout.
+
+## Resolution Evidence (2026-11-21)
+- Added `PortalMalformedPayloadException` (`UNKNOWN_COMPLETION`, distinct from `PortalRemoteCallException` and host/service `IllegalArgumentException`) in `PortalCallException.kt`, plus strict `PortalCodec.requireCapabilityCount`, `inContext`, canonical `boolean()`, overflow-safe `bytes()` / `requireRemaining()`, strict `UTF-8` `string()`, bounded `collectionCount()`, typed `uuid()` / `instant()` / `bigDecimal()` / `enumValue()`, duplicate-key-rejecting `map()` / `mutableMap()`, and `requireExhausted()` in `PortalCodec.kt`.
+- Updated `PortalWorkerDriver.kt` so `PortalMalformedPayloadException` transitions the worker to `Stopped` (`FatalDispatchFailed`), closes received capabilities once, and emits no business error frame, while ordinary guest exceptions continue producing `PortalRemoteFailure` frames.
+- Updated `PortalStubGenerator.kt` so generated dispatchers and host stubs check capability counts, trace field paths via `inContext`, decode maps/scalars strictly, and assert `requireExhausted()` before worker method entry and before host return (including `Unit`).
+- Verified with `./gradlew :portals:runtime:ktlintCheck :portals:worker:ktlintCheck :portals:codegen:ktlintCheck :portals:runtime:detektMain :portals:worker:detektMain :portals:codegen:detektMain :detektWarningRatchet :portals:runtime:test :portals:worker:test :portals:codegen:test --no-daemon --console=plain` (`portals:runtime`: `159` tests, `portals:worker`: `50` tests, `portals:codegen`: `56` tests; all `0` failures, `0` skipped) and updated `local-service-isolation-design.md` and `portal-service-isolation.md`.
 
 ---
 <!-- id: issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene  file: issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md -->

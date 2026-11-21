@@ -1,31 +1,50 @@
 package io.mazewall.portal.codegen
 
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.process.JvmLaunchPreparation
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalChannel
 import io.mazewall.portal.PortalCodec
 import io.mazewall.portal.PortalFrame
+import io.mazewall.portal.PortalGenerationMeasurement
 import io.mazewall.portal.PortalKind
+import io.mazewall.portal.PortalMalformedPayloadException
 import io.mazewall.portal.PortalMethod
+import io.mazewall.portal.PortalParentAuthorization
 import io.mazewall.portal.PortalPayload
+import io.mazewall.portal.PortalRuntimeLimits
 import io.mazewall.portal.PortalServiceManifestCodec
 import io.mazewall.portal.PortalWorkerArtifact
+import io.mazewall.portal.PortalWorkerGeneration
+import io.mazewall.portal.PortalWorkerLaunch
+import io.mazewall.portal.PortalWorkerReady
+import io.mazewall.portal.ProcessBroker
 import io.mazewall.portal.WorkerBundleMaterializer
 import io.mazewall.portal.codegen.testapi.BinaryAndCollectionService
 import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
 import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
 import io.mazewall.portal.codegen.testapi.MethodIdShadowService
+import io.mazewall.portal.codegen.testapi.StrictContractService
+import io.mazewall.portal.codegen.testapi.StrictDto
+import io.mazewall.portal.openGrantedRead
 import io.mazewall.portal.worker.PortalWorkerMain
 import org.gradle.testkit.runner.BuildResult
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.jar.JarEntry
 import java.util.jar.JarOutputStream
@@ -497,6 +516,293 @@ class PortalCodegenFunctionalTest {
 
         assertTrue(failed.output.contains("portal generated output directories must not overlap"), failed.output)
         assertEquals(before, generatedContents())
+    }
+
+    @Test
+    fun `generated dispatcher and stub decoding reject malformed payloads before service entry`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(
+            apiJar,
+            listOf("fixture.A", StrictContractService::class.java.name),
+            compileGenerated = true,
+        )
+        projectDir.resolve("src/portalWorker/kotlin/fixture/Main.kt").writeText(
+            """
+            package fixture
+            import io.mazewall.portal.Capability
+            import io.mazewall.portal.PortalCodec
+            import io.mazewall.portal.PortalMalformedPayloadException
+            import io.mazewall.portal.PortalMethod
+            import io.mazewall.portal.codegen.testapi.StrictContractService
+            import io.mazewall.portal.codegen.testapi.StrictContractServicePortalDispatcher
+            import io.mazewall.portal.codegen.testapi.StrictDto
+            private fun idFor(name: String): PortalMethod.Generated {
+                val method = StrictContractService::class.java.methods.single { it.name == name }
+                val key = StrictContractService::class.java.name + "#" + method.name + "#" + method.parameterTypes.joinToString(",") { it.name }
+                return PortalMethod.Generated((key.hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000)
+            }
+            private fun expectMalformed(block: () -> Unit) {
+                try {
+                    block()
+                    error("expected PortalMalformedPayloadException")
+                } catch (_: PortalMalformedPayloadException) {
+                }
+            }
+            fun main() {
+                var entries = 0
+                val service = object : StrictContractService {
+                    override fun unitOp() { entries++ }
+                    override fun echoInt(value: Int): Int {
+                        entries++
+                        require(value >= 0) { "service rejected negative value" }
+                        return value
+                    }
+                    override fun echoBool(value: Boolean): Boolean { entries++; return value }
+                    override fun echoString(value: String): String { entries++; return value }
+                    override fun echoMap(values: Map<String, Int>): Map<String, Int> { entries++; return values }
+                    override fun buildDto(label: String): StrictDto { entries++; return StrictDto(label, 7) }
+                    override fun acceptDto(value: StrictDto): Int { entries++; return value.count }
+                    override fun readGrant(fd: Capability.ReadFd, label: String): Int { entries++; return label.length }
+                }
+
+                // 1. Trailing and truncated payloads rejected before service entry.
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("echoInt"), PortalCodec.encodeInt(1) + byteArrayOf(9), emptyList())
+                }
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("echoInt"), byteArrayOf(0, 1), emptyList())
+                }
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("unitOp"), byteArrayOf(1), emptyList())
+                }
+                // 2. Noncanonical boolean byte 2, invalid UTF-8 C3 28, and duplicate map keys.
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("echoBool"), byteArrayOf(2), emptyList())
+                }
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(
+                        service,
+                        idFor("echoString"),
+                        PortalCodec.encodeInt(2) + byteArrayOf(0xC3.toByte(), 0x28),
+                        emptyList(),
+                    )
+                }
+                val dupMap = PortalCodec.concat(
+                    listOf(
+                        PortalCodec.encodeInt(2),
+                        PortalCodec.encodeString("k"),
+                        PortalCodec.encodeInt(1),
+                        PortalCodec.encodeString("k"),
+                        PortalCodec.encodeInt(2),
+                    ),
+                )
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("echoMap"), dupMap, emptyList())
+                }
+                // 3. Missing capability rejected before service entry (extra/exact capabilities covered via real grants below).
+                expectMalformed {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("readGrant"), PortalCodec.encodeString("ok"), emptyList())
+                }
+                check(entries == 0) { "service entered " + entries + " times on malformed requests" }
+
+                // 4. Positive controls and non-wire IllegalArgumentException distinction.
+                check(PortalCodec.Reader(StrictContractServicePortalDispatcher.handle(service, idFor("echoInt"), PortalCodec.encodeInt(5), emptyList())).int() == 5)
+                check(PortalCodec.Reader(StrictContractServicePortalDispatcher.handle(service, idFor("echoBool"), PortalCodec.encodeBoolean(true), emptyList())).boolean())
+                check(PortalCodec.Reader(StrictContractServicePortalDispatcher.handle(service, idFor("echoString"), PortalCodec.encodeString("ok"), emptyList())).string() == "ok")
+                check(StrictContractServicePortalDispatcher.handle(service, idFor("unitOp"), ByteArray(0), emptyList()).isEmpty())
+                check(entries == 4)
+                val businessFailure = try {
+                    StrictContractServicePortalDispatcher.handle(service, idFor("echoInt"), PortalCodec.encodeInt(-1), emptyList())
+                    error("expected business IllegalArgumentException")
+                } catch (e: IllegalArgumentException) {
+                    e
+                }
+                check(businessFailure.message == "service rejected negative value")
+                val dtoFailure = try {
+                    StrictContractServicePortalDispatcher.handle(
+                        service,
+                        idFor("acceptDto"),
+                        PortalCodec.concat(listOf(PortalCodec.encodeString("invalid-dto"), PortalCodec.encodeInt(1))),
+                        emptyList(),
+                    )
+                    error("expected DTO IllegalArgumentException")
+                } catch (e: IllegalArgumentException) {
+                    e
+                }
+                check(dtoFailure.message == "rejected by dto")
+                println("STRICT_DECODE_DISPATCHER_OK")
+            }
+            """.trimIndent(),
+        )
+
+        val result = runner("classes", "roundTrip").build()
+        assertBuilt(result, ":compileKotlin")
+        assertBuilt(result, ":compilePortalWorkerKotlin")
+        assertTrue(result.output.contains("STRICT_DECODE_DISPATCHER_OK"), result.output)
+
+        // Now exercise unmodified compiled StrictContractServicePortalStub against crafted malicious worker replies.
+        val generation = PortalWorkerGeneration("a".repeat(64), "b".repeat(64), "c".repeat(64))
+        val queuedReplies = ConcurrentLinkedQueue<ByteArray>()
+        val peerThreads = mutableListOf<Thread>()
+        val dummyBundle = Files.write(projectDir.resolve("dummy-worker.zip"), ByteArray(0))
+        val launcher =
+            object : ProcessLauncher by RealProcessLauncher {
+                override fun startProcess(
+                    args: List<String>,
+                    redirectErrorStream: Boolean,
+                    preparation: JvmLaunchPreparation,
+                ): Process {
+                    val mainIdx = args.indexOf(PortalWorkerMain::class.java.name)
+                    val epPath = args[mainIdx + 1]
+                    val child = ProcessBuilder("cat").redirectErrorStream(true).start()
+                    val peer =
+                        Thread {
+                            PortalChannel(RealSocketManager.connect(epPath)).use { channel ->
+                                val authFrame = channel.receive(10_000).first
+                                val lines =
+                                    authFrame.payload
+                                        .copyToByteArray()
+                                        .toString(Charsets.UTF_8)
+                                        .removeSuffix("\n")
+                                        .split('\n')
+                                val session = lines[1].removePrefix("session=")
+                                val launch = lines[3].removePrefix("launch=")
+                                val resources = lines[4].removePrefix("resources=")
+                                val deadline = Deadline.afterMillis(10_000)
+                                channel.sendControl(PortalParentAuthorization(session, child.pid(), launch, resources).acknowledgement(), deadline)
+                                channel.sendControl(PortalWorkerReady(session, child.pid(), generation, launch, resources).frame(), deadline)
+                                while (!Thread.currentThread().isInterrupted) {
+                                    val req = runCatching { channel.receive(10_000).first }.getOrNull() ?: break
+                                    val body = queuedReplies.poll() ?: ByteArray(0)
+                                    channel.send(PortalFrame(PortalKind.Response, req.requestId, req.method, PortalPayload(body), 0))
+                                }
+                            }
+                        }
+                    peer.isDaemon = true
+                    peer.start()
+                    peerThreads += peer
+                    return child
+                }
+            }
+        val broker =
+            ProcessBroker(
+                launcher = launcher,
+                workerClasspath = projectDir.toString(),
+                workerLaunch = PortalWorkerLaunch(emptyList(), PortalWorkerArtifact(dummyBundle, "0".repeat(64)), PortalGenerationMeasurement { _, _, _ -> generation }),
+                limits = PortalRuntimeLimits(startupTimeoutMs = 5_000, callTimeoutMs = 5_000, closeTimeoutMs = 2_000),
+            )
+        try {
+            broker.start()
+            val classesDir = projectDir.resolve("build/classes/kotlin/main").toUri().toURL()
+            URLClassLoader(arrayOf(classesDir), javaClass.classLoader).use { loader ->
+                val stubClass = loader.loadClass("io.mazewall.portal.codegen.testapi.StrictContractServicePortalStub")
+                val stub = stubClass.getConstructor(ProcessBroker::class.java).newInstance(broker) as StrictContractService
+
+                queuedReplies += byteArrayOf(1)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.unitOp() }
+
+                queuedReplies += PortalCodec.encodeInt(1) + byteArrayOf(9)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.echoInt(1) }
+
+                queuedReplies += byteArrayOf(0, 1)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.echoInt(1) }
+
+                queuedReplies += byteArrayOf(2)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.echoBool(true) }
+
+                queuedReplies += PortalCodec.encodeInt(2) + byteArrayOf(0xC3.toByte(), 0x28)
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.echoString("ok") }
+
+                queuedReplies +=
+                    PortalCodec.concat(
+                        listOf(
+                            PortalCodec.encodeInt(2),
+                            PortalCodec.encodeString("dup"),
+                            PortalCodec.encodeInt(1),
+                            PortalCodec.encodeString("dup"),
+                            PortalCodec.encodeInt(2),
+                        ),
+                    )
+                assertThrows(PortalMalformedPayloadException::class.java) { stub.echoMap(emptyMap()) }
+
+                queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("invalid-dto"), PortalCodec.encodeInt(1)))
+                val dtoFailure = assertThrows(IllegalArgumentException::class.java) { stub.buildDto("x") }
+                assertEquals("rejected by dto", dtoFailure.message)
+
+                queuedReplies += PortalCodec.concat(listOf(PortalCodec.encodeString("ok"), PortalCodec.encodeInt(42)))
+                assertEquals(StrictDto("ok", 42), stub.buildDto("ok"))
+            }
+
+            // Also verify dispatcher capability-count enforcement with real granted file descriptors.
+            val workerClassesDir = projectDir.resolve("build/classes/kotlin/portalWorker").toUri().toURL()
+            URLClassLoader(arrayOf(workerClassesDir), javaClass.classLoader).use { workerLoader ->
+                val dispatcherClass = workerLoader.loadClass("io.mazewall.portal.codegen.testapi.StrictContractServicePortalDispatcher")
+                val instance = dispatcherClass.getField("INSTANCE").get(null)
+                val handleMethod =
+                    dispatcherClass.getMethod(
+                        "handle",
+                        StrictContractService::class.java,
+                        PortalMethod.Generated::class.java,
+                        ByteArray::class.java,
+                        List::class.java,
+                    )
+                var readEntries = 0
+                val countingService =
+                    object : StrictContractService {
+                        override fun unitOp() = Unit
+
+                        override fun echoInt(value: Int) = value
+
+                        override fun echoBool(value: Boolean) = value
+
+                        override fun echoString(value: String) = value
+
+                        override fun echoMap(values: Map<String, Int>) = values
+
+                        override fun buildDto(label: String) = StrictDto(label, 0)
+
+                        override fun acceptDto(value: StrictDto) = value.count
+
+                        override fun readGrant(
+                            fd: Capability.ReadFd,
+                            label: String,
+                        ): Int {
+                            readEntries++
+                            return label.length
+                        }
+                    }
+                val readGrantMethod = StrictContractService::class.java.methods.single { it.name == "readGrant" }
+                val readGrantId = PortalMethod.Generated(PortalStubGenerator.methodId(StrictContractService::class.java, readGrantMethod))
+                Files.writeString(projectDir.resolve("grant.txt"), "grant-bytes")
+                val grantA = openGrantedRead(projectDir, "grant.txt")
+                val grantB = openGrantedRead(projectDir, "grant.txt")
+                try {
+                    val missingFailure =
+                        assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                            handleMethod.invoke(instance, countingService, readGrantId, PortalCodec.encodeString("ok"), emptyList<Capability.ReadFd>())
+                        }
+                    assertTrue(missingFailure.targetException is PortalMalformedPayloadException)
+                    val extraFailure =
+                        assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                            handleMethod.invoke(instance, countingService, readGrantId, PortalCodec.encodeString("ok"), listOf(grantA, grantB))
+                        }
+                    assertTrue(extraFailure.targetException is PortalMalformedPayloadException)
+                    assertEquals(0, readEntries)
+
+                    val validReply =
+                        handleMethod.invoke(instance, countingService, readGrantId, PortalCodec.encodeString("hello"), listOf(grantA)) as ByteArray
+                    assertEquals(5, PortalCodec.Reader(validReply).int())
+                    assertEquals(1, readEntries)
+                } finally {
+                    grantA.close()
+                    grantB.close()
+                }
+            }
+        } finally {
+            broker.close()
+            peerThreads.forEach { it.interrupt() }
+            peerThreads.forEach { it.join(1_000) }
+        }
     }
 
     @Test

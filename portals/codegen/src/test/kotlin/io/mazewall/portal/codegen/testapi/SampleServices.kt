@@ -154,3 +154,33 @@ interface BinaryAndCollectionService : GenericKotlinCollectionService<ByteArray>
 
     fun echoNested(values: Map<String, List<ByteArray>>): MutableMap<String, MutableList<ByteArray>>
 }
+
+data class StrictDto(
+    val label: String,
+    val count: Int,
+) {
+    init {
+        require(label != "invalid-dto") { "rejected by dto" }
+    }
+}
+
+interface StrictContractService {
+    fun unitOp()
+
+    fun echoInt(value: Int): Int
+
+    fun echoBool(value: Boolean): Boolean
+
+    fun echoString(value: String): String
+
+    fun echoMap(values: Map<String, Int>): Map<String, Int>
+
+    fun buildDto(label: String): StrictDto
+
+    fun acceptDto(value: StrictDto): Int
+
+    fun readGrant(
+        fd: Capability.ReadFd,
+        label: String,
+    ): Int
+}

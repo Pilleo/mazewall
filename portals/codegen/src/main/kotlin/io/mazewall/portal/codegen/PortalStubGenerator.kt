@@ -114,6 +114,8 @@ public object PortalStubGenerator {
         val payloadName = names.newName("payload", HostLocal.Payload)
         val resultName = names.newName("result", HostLocal.Result)
         val readerName = names.newName("reader", HostLocal.Reader)
+        val decodedName = names.newName("decoded", HostLocal.Decoded)
+        val returnContext = "${service.name}.${method.method.name}.return"
         val spec =
             FunSpec
                 .builder(method.method.name)
@@ -157,12 +159,14 @@ public object PortalStubGenerator {
         val remoteName = names.newName("remote", method)
         if (declaredExceptions.isNotEmpty()) spec.beginControlFlow("try")
         if (method.returnKind is BoundaryTypes.Kind.UnitT) {
-            spec.addStatement("%L", invocation)
+            spec.addStatement("val %N = %L", resultName, invocation)
+            spec.addStatement("%T(%N, %S).requireExhausted()", codecReader, resultName, returnContext)
         } else {
             spec.addStatement("val %N = %L", resultName, invocation)
-            spec.addStatement("val %N = %T(%N)", readerName, codecReader, resultName)
+            spec.addStatement("val %N = %T(%N, %S)", readerName, codecReader, resultName, returnContext)
             spec.addStatement(
-                "return %L",
+                "val %N = %L",
+                decodedName,
                 decode(
                     method.returnKind,
                     CodeBlock.of("%N", readerName),
@@ -171,6 +175,8 @@ public object PortalStubGenerator {
                     kotlinTypes.bindings,
                 ),
             )
+            spec.addStatement("%N.requireExhausted()", readerName)
+            spec.addStatement("return %N", decodedName)
         }
         if (declaredExceptions.isNotEmpty()) {
             val allowed =
@@ -217,9 +223,18 @@ public object PortalStubGenerator {
             val argumentNames = method.parameters.associateWith { names.newName(it.sourceName, it) }
             val readerName = names.newName("reader", DispatcherLocal.Reader)
             val returnName = names.newName("ret", DispatcherLocal.Return)
+            val methodContext = "${service.name}.${method.method.name}"
+            val expectedCapabilities = method.parameters.count { it.kind is BoundaryTypes.Kind.ReadFd }
             var descriptorIndex = 0
             handle.beginControlFlow("%N ->", constants.getValue(method.method))
-            handle.addStatement("val %N = %T(%N)", readerName, codecReader, payloadName)
+            handle.addStatement(
+                "%T.requireCapabilityCount(%N.size, %L, %S)",
+                portalCodec,
+                grantedName,
+                expectedCapabilities,
+                methodContext,
+            )
+            handle.addStatement("val %N = %T(%N, %S)", readerName, codecReader, payloadName, methodContext)
             method.parameters.forEachIndexed { index, parameter ->
                 val argumentName = argumentNames.getValue(parameter)
                 if (parameter.kind is BoundaryTypes.Kind.ReadFd) {
@@ -227,8 +242,10 @@ public object PortalStubGenerator {
                     handle.addStatement("val %N = %N[%L]", argumentName, grantedName, descriptorIndex++)
                 } else {
                     handle.addStatement(
-                        "val %N = %L",
+                        "val %N = %N.inContext(%S) { %L }",
                         argumentName,
+                        readerName,
+                        parameter.sourceName,
                         decode(
                             parameter.kind,
                             CodeBlock.of("%N", readerName),
@@ -239,6 +256,7 @@ public object PortalStubGenerator {
                     )
                 }
             }
+            handle.addStatement("%N.requireExhausted()", readerName)
             val arguments = argumentNames.values.map { CodeBlock.of("%N", it) }.joinToCode()
             if (method.returnKind is BoundaryTypes.Kind.UnitT) {
                 handle.addStatement("%N.%N(%L)", implName, method.method.name, arguments)
@@ -538,10 +556,10 @@ public object PortalStubGenerator {
             BoundaryTypes.Kind.StringT,
             BoundaryTypes.Kind.BytesT,
             -> decodeScalar(kind, reader)
-            BoundaryTypes.Kind.UuidT -> CodeBlock.of("%T.fromString(%L.string())", java.util.UUID::class, reader)
-            BoundaryTypes.Kind.InstantT -> CodeBlock.of("%T.parse(%L.string())", java.time.Instant::class, reader)
-            BoundaryTypes.Kind.BigDecimalT -> CodeBlock.of("%T(%L.string())", java.math.BigDecimal::class, reader)
-            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%T.valueOf(%L.string())", kind.typeName, reader)
+            BoundaryTypes.Kind.UuidT -> CodeBlock.of("%L.uuid()", reader)
+            BoundaryTypes.Kind.InstantT -> CodeBlock.of("%L.instant()", reader)
+            BoundaryTypes.Kind.BigDecimalT -> CodeBlock.of("%L.bigDecimal()", reader)
+            is BoundaryTypes.Kind.EnumT -> CodeBlock.of("%L.enumValue(%T::class.java)", reader, kind.typeName)
             BoundaryTypes.Kind.ReadFd -> error("ReadFd is taken from granted FDs")
             is BoundaryTypes.Kind.InputSnapshot -> CodeBlock.of("%L.bytes().inputStream()", reader)
             BoundaryTypes.Kind.UnitT -> CodeBlock.of("Unit")
@@ -549,8 +567,13 @@ public object PortalStubGenerator {
                 CodeBlock
                     .builder()
                     .add("%T(", kind.typeName)
-                    .add("%L", kind.components.map { component -> decode(component.kind, reader) }.joinToCode())
-                    .add(")")
+                    .add(
+                        "%L",
+                        kind.components
+                            .map { component ->
+                                CodeBlock.of("%L.inContext(%S) { %L }", reader, component.name, decode(component.kind, reader))
+                            }.joinToCode(),
+                    ).add(")")
                     .build()
             }
             is BoundaryTypes.Kind.ListT -> {
@@ -565,9 +588,9 @@ public object PortalStubGenerator {
             is BoundaryTypes.Kind.MapT -> {
                 val keyKotlinType = resolvedKotlinType?.arguments?.getOrNull(0)?.type
                 val valueKotlinType = resolvedKotlinType?.arguments?.getOrNull(1)?.type
-                val suffix = if (isMutableKotlinCollection(resolvedKotlinType, "kotlin.collections.MutableMap")) ".toMutableMap()" else ""
+                val method = if (isMutableKotlinCollection(resolvedKotlinType, "kotlin.collections.MutableMap")) "mutableMap" else "map"
                 CodeBlock.of(
-                    "buildMap { repeat(%L.collectionCount()) { put(%L, %L) } }$suffix",
+                    "%L.$method({ %L }, { %L })",
                     reader,
                     decode(kind.key, reader, kotlinType = keyKotlinType, bindings = bindings),
                     decode(kind.value, reader, kotlinType = valueKotlinType, bindings = bindings),
@@ -610,7 +633,7 @@ public object PortalStubGenerator {
         val bindings: Map<KTypeParameter, KType>,
     )
 
-    private enum class HostLocal { Payload, Result, Reader }
+    private enum class HostLocal { Payload, Result, Reader, Decoded }
 
     private enum class DispatcherOuter { Impl, Method, Payload, Granted }
 

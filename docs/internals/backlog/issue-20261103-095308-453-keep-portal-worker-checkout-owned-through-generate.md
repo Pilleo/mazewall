@@ -41,7 +41,7 @@ CG05: source review finds ProcessBroker returns a successful frame worker to the
 4. Distinguish protocol validation from trusted host DTO construction and completed remote business exceptions. Retain the current separation between result delivery and physical retirement across cancellation, close and fatal errors.
 
 **Scope and dependencies:**
-- Follows [CG04](issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md)'s strict decoding/classification.
+- Follows [CG04](resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md)'s strict decoding/classification.
 - [Review CG05](../reviews/2026-11-03-portal-codegen-hardening.md#cg05--keep-response-validation-within-checkout-ownership) is source-confirmed only. A native reproduction remains required; the review's codec probes do not establish worker retirement.
 - Reuse existing broker/pool/stateful-gate owners. P03's generated operations must later use the same boundary, without another checkout owner or arbitrary decoder framework.
 

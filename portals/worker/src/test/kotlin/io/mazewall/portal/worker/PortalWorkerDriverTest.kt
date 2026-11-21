@@ -14,6 +14,7 @@ import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalFrame
 import io.mazewall.portal.PortalIncompleteFrameException
 import io.mazewall.portal.PortalKind
+import io.mazewall.portal.PortalMalformedPayloadException
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalPayload
 import io.mazewall.portal.PortalReadTimeoutException
@@ -182,6 +183,27 @@ class PortalWorkerDriverTest {
                 .copyToByteArray(),
             ),
         )
+    }
+
+    @Test
+    fun `malformed generated request ends worker without business error reply and retires capabilities once`(
+        @TempDir directory: Path,
+    ) {
+        Files.writeString(directory.resolve("grant"), "x")
+        val capability = openCapability(directory.resolve("grant"))
+        val malformed = PortalMalformedPayloadException("trailing payload bytes", "fixture.Service.op")
+        val transport = FakeTransport(listOf(PortalWorkerReceive.Frame(request(listOf(capability)), listOf(capability))))
+        val driver = PortalWorkerDriver(transport) { _, _, _ ->
+            throw InvocationTargetException(malformed)
+        }
+
+        val thrown = assertThrows(PortalMalformedPayloadException::class.java) { driver.run() }
+
+        assertSame(malformed, thrown)
+        assertEquals(0, transport.sendAttempts)
+        assertEquals(PortalWorkerState.Stopped, driver.state)
+        assertTrue(transport.closed)
+        assertThrows(IllegalStateException::class.java) { capability.borrow { it.value } }
     }
 
     private fun request(capabilities: List<Capability.ReadFd> = emptyList()) = PortalFrame(PortalKind.Request, 7, PortalMethod.Echo, PortalPayload(ByteArray(0)), capabilities.size)

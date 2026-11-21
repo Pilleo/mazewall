@@ -16,6 +16,7 @@ import io.mazewall.portal.codegen.testapi.SampleGeom
 import io.mazewall.portal.codegen.testapi.SampleGreeter
 import io.mazewall.portal.codegen.testapi.SecondOuter
 import io.mazewall.portal.codegen.testapi.SnapshotStream
+import io.mazewall.portal.codegen.testapi.StrictContractService
 import io.mazewall.portal.codegen.testapi.UnreadablePojoService
 import io.mazewall.portal.codegen.testapi.ValidPojoService
 import io.mazewall.portal.codegen.testapi.WrongReaderPojoService
@@ -180,9 +181,9 @@ class PortalStubGeneratorTest {
         val stub = files.single { it.name == "CommonScalarServicePortalStub" }.toString()
         val dispatcher = files.single { it.name == "CommonScalarServicePortalDispatcher" }.toString()
 
-        assertTrue(stub.contains("UUID.fromString"), stub)
-        assertTrue(stub.contains("Instant.parse"), stub)
-        assertTrue(stub.contains("BigDecimal"), stub)
+        assertTrue(stub.contains("reader.uuid()"), stub)
+        assertTrue(stub.contains("reader.instant()"), stub)
+        assertTrue(stub.contains("reader.bigDecimal()"), stub)
         assertTrue(dispatcher.contains("toString()"), dispatcher)
     }
 
@@ -192,7 +193,7 @@ class PortalStubGeneratorTest {
         val stub = files.single { it.name == "EnumServicePortalStub" }.toString()
         val dispatcher = files.single { it.name == "EnumServicePortalDispatcher" }.toString()
 
-        assertTrue(stub.contains("valueOf"), stub)
+        assertTrue(stub.contains("enumValue(TransportKind::class.java)"), stub)
         assertTrue(dispatcher.contains(".name"), dispatcher)
         assertFalse(stub.contains("ordinal"), stub)
         assertFalse(dispatcher.contains("ordinal"), dispatcher)
@@ -230,7 +231,7 @@ class PortalStubGeneratorTest {
 
         assertTrue(stub.contains("override fun inherited"), stub)
         assertTrue(stub.contains("override fun overridden"), stub)
-        assertTrue(dispatcher.split(".overridden").size == 2, dispatcher)
+        assertTrue(dispatcher.split(".overridden(").size == 2, dispatcher)
         assertTrue(dispatcher.contains("PING_METHOD_ID"), dispatcher)
         assertTrue(dispatcher.contains("PING_METHOD_ID_"), dispatcher)
     }
@@ -388,6 +389,23 @@ class PortalStubGeneratorTest {
         )
         assertFalse(stub.contains("Array<Byte>"), stub)
         assertFalse(dispatcher.contains("Array<Byte>"), dispatcher)
+    }
+
+    @Test
+    fun `generated stubs and dispatchers emit strict capability context and exhaustion checks`() {
+        val files = PortalStubGenerator.generate(StrictContractService::class.java)
+        val stub = files.single { it.name == "StrictContractServicePortalStub" }.toString()
+        val dispatcher = files.single { it.name == "StrictContractServicePortalDispatcher" }.toString()
+
+        assertTrue(dispatcher.contains("PortalCodec.requireCapabilityCount(granted.size, 1,"), dispatcher)
+        assertTrue(dispatcher.contains("PortalCodec.requireCapabilityCount(granted.size, 0,"), dispatcher)
+        assertTrue(dispatcher.contains("reader.inContext(\"label\")"), dispatcher)
+        assertTrue(dispatcher.contains("reader.requireExhausted()"), dispatcher)
+        assertTrue(dispatcher.contains("reader.map("), dispatcher)
+        assertTrue(stub.contains("PortalCodec.Reader(result,"), stub)
+        assertTrue(stub.contains(".requireExhausted()"), stub)
+        assertTrue(stub.contains("reader.map("), stub)
+        assertTrue(stub.contains("reader.inContext(\"label\")"), stub)
     }
 
     @Test

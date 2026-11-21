@@ -199,6 +199,12 @@ preserved. Broker process/native retirement continues to use its own lifecycle.
   unchanged.
 - Missing metadata, worker artifacts, generated stubs, or containment cause a
   clear fail-closed error. There is no in-process implementation fallback.
+- Generated request dispatchers and host stubs require canonical wire encodings
+  (`0`/`1` booleans, strict UTF-8, duplicate-key-free maps, valid
+  UUID/Instant/BigDecimal/enum values), exact expected capability counts, and
+  complete payload consumption (`requireExhausted()`) before service entry and
+  before result delivery, raising `PortalMalformedPayloadException` distinctly
+  from business exceptions and trusted DTO constructor validation.
 
 ## Initial service modes
 

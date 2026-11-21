@@ -329,7 +329,7 @@ is not authorized without the separate compatibility decision specified by CG03.
 ## CG04 — Strict decoding
 
 **Read first:** `PortalCodec.Reader`, generated host/dispatcher decoding and
-[CG04](../../internals/backlog/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md).
+[CG04](../../internals/backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md).
 
 Use one known-good payload for each shape, then change only the indicated property:
 

@@ -163,6 +163,10 @@ exception type and message. The protocol never serializes arbitrary exception
 objects or their cause graphs. Generated stubs recreate only explicitly
 declared exception types from a fixed host-side allow-list, using public
 message/no-argument constructors; undeclared types remain remote-call failures.
+Noncanonical wire encodings (boolean bytes other than `0`/`1`, malformed UTF-8,
+duplicate map keys), unexpected capability counts, or trailing/unconsumed bytes
+fail before service entry and before host result delivery with
+`PortalMalformedPayloadException` (`UNKNOWN_COMPLETION`).
 
 ## Inspection
 
