@@ -17,33 +17,77 @@ package io.mazewall.enforcer.api
  * [landlockApplied] is independent: Landlock cannot be undone, so a failed seccomp step after a successful Landlock
  * apply still leaves filesystem rules in force.
  */
-public class InstallationReceipt(
+public class InstallationReceipt private constructor(
     public val processWide: Boolean,
     public val requestedPolicy: PolicyDefinition<*>,
-    public val timestampMillis: Long = System.currentTimeMillis(),
-    public val installed: Boolean = true,
-    public val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
-    public val landlockApplied: Boolean = false,
-    /** Stages newly applied by this attempt, not a summary of inherited restrictions or cached CET proof. */
-    public val progress: InstallationProgress? = null,
-    /** Original installation failure, or the recorded reason for an explicit unsupported-feature bypass. */
-    public val failure: Throwable? = null,
-    public val cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
+    public val timestampMillis: Long,
+    public val fallback: Platform.FallbackBehavior,
+    public val landlockApplied: Boolean,
+    public val cetOutcome: CetOutcome,
+    internal val outcome: Outcome,
+    private var supervisorRegistration: AutoCloseable?,
 ) : AutoCloseable {
-    init {
-        require(!(installed && failure != null)) {
-            "Installed receipt cannot carry an installation failure"
-        }
+    public constructor(
+        processWide: Boolean,
+        requestedPolicy: PolicyDefinition<*>,
+        timestampMillis: Long = System.currentTimeMillis(),
+        installed: Boolean = true,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+        landlockApplied: Boolean = false,
+        progress: InstallationProgress? = null,
+        failure: Throwable? = null,
+        cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
+    ) : this(
+        processWide = processWide,
+        requestedPolicy = requestedPolicy,
+        timestampMillis = timestampMillis,
+        fallback = fallback,
+        landlockApplied = landlockApplied,
+        cetOutcome = cetOutcome,
+        outcome = outcomeFromFlags(installed, fallback, progress, failure),
+        supervisorRegistration = null,
+    )
+
+    internal sealed interface Outcome {
+        val progress: InstallationProgress?
+
+        data class Installed(
+            override val progress: InstallationProgress? = null,
+        ) : Outcome
+
+        data class Failed(
+            val cause: Throwable?,
+            override val progress: InstallationProgress? = null,
+        ) : Outcome
+
+        data class Bypassed(
+            val reason: Throwable?,
+            override val progress: InstallationProgress? = null,
+        ) : Outcome
     }
 
-    private var supervisorRegistration: AutoCloseable? = null
+    public val installed: Boolean
+        get() = outcome is Outcome.Installed
+
+    /** Stages newly applied by this attempt, not a summary of inherited restrictions or cached CET proof. */
+    public val progress: InstallationProgress?
+        get() = outcome.progress
+
+    /** Original installation failure, or the recorded reason for an explicit unsupported-feature bypass. */
+    public val failure: Throwable?
+        get() =
+            when (outcome) {
+                is Outcome.Installed -> null
+                is Outcome.Failed -> outcome.cause
+                is Outcome.Bypassed -> outcome.reason
+            }
 
     /** Retires only the supervisor registration; installed containment remains irreversible. */
     @Synchronized
     override fun close() {
         val registration = supervisorRegistration ?: return
-        registration.close()
         supervisorRegistration = null
+        registration.close()
     }
 
     /**
@@ -53,9 +97,16 @@ public class InstallationReceipt(
      * A recorded installation failure is rethrown with its original identity and cause chain.
      */
     public fun requireInstalled(): InstallationReceipt {
-        if (failure != null) throw failure
-        check(installed) {
-            "Required containment installation did not complete. Already applied restrictions remain in force."
+        when (val current = outcome) {
+            is Outcome.Failed -> {
+                current.cause?.let { throw it }
+                error(INCOMPLETE_INSTALLATION_MESSAGE)
+            }
+            is Outcome.Bypassed -> {
+                current.reason?.let { throw it }
+                error(INCOMPLETE_INSTALLATION_MESSAGE)
+            }
+            is Outcome.Installed -> Unit
         }
         check(!requestedPolicy.enforceLandlock || landlockApplied) {
             "Containment installation did not apply the requested filesystem restriction."
@@ -87,6 +138,100 @@ public class InstallationReceipt(
     }
 
     internal companion object {
+        private const val INCOMPLETE_INSTALLATION_MESSAGE =
+            "Required containment installation did not complete. Already applied restrictions remain in force."
+
+        init {
+            preloadForSeccompInstall()
+        }
+
+        internal fun preloadForSeccompInstall() {
+            Outcome::class.java.name
+            Outcome.Installed::class.java.name
+            Outcome.Failed::class.java.name
+            Outcome.Bypassed::class.java.name
+        }
+
+        private fun outcomeFromFlags(
+            installed: Boolean,
+            fallback: Platform.FallbackBehavior,
+            progress: InstallationProgress?,
+            failure: Throwable?,
+        ): Outcome =
+            if (installed) {
+                require(failure == null) { "Installed receipt cannot carry an installation failure" }
+                Outcome.Installed(progress)
+            } else if (fallback == Platform.FallbackBehavior.FAIL) {
+                Outcome.Failed(cause = failure, progress = progress)
+            } else {
+                Outcome.Bypassed(reason = failure, progress = progress)
+            }
+
+        fun installed(
+            processWide: Boolean,
+            requestedPolicy: PolicyDefinition<*>,
+            timestampMillis: Long = System.currentTimeMillis(),
+            fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+            landlockApplied: Boolean = false,
+            progress: InstallationProgress? = null,
+            cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
+            supervisorRegistration: AutoCloseable? = null,
+        ): InstallationReceipt =
+            InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = requestedPolicy,
+                timestampMillis = timestampMillis,
+                fallback = fallback,
+                landlockApplied = landlockApplied,
+                cetOutcome = cetOutcome,
+                outcome = Outcome.Installed(progress),
+                supervisorRegistration = supervisorRegistration,
+            )
+
+        fun failed(
+            processWide: Boolean,
+            requestedPolicy: PolicyDefinition<*>,
+            cause: Throwable,
+            timestampMillis: Long = System.currentTimeMillis(),
+            fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+            landlockApplied: Boolean = false,
+            progress: InstallationProgress? = null,
+            cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
+            supervisorRegistration: AutoCloseable? = null,
+        ): InstallationReceipt =
+            InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = requestedPolicy,
+                timestampMillis = timestampMillis,
+                fallback = fallback,
+                landlockApplied = landlockApplied,
+                cetOutcome = cetOutcome,
+                outcome = Outcome.Failed(cause = cause, progress = progress),
+                supervisorRegistration = supervisorRegistration,
+            )
+
+        fun bypassed(
+            processWide: Boolean,
+            requestedPolicy: PolicyDefinition<*>,
+            reason: Throwable,
+            timestampMillis: Long = System.currentTimeMillis(),
+            fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+            landlockApplied: Boolean = false,
+            progress: InstallationProgress? = null,
+            cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
+            supervisorRegistration: AutoCloseable? = null,
+        ): InstallationReceipt =
+            InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = requestedPolicy,
+                timestampMillis = timestampMillis,
+                fallback = fallback,
+                landlockApplied = landlockApplied,
+                cetOutcome = cetOutcome,
+                outcome = Outcome.Bypassed(reason = reason, progress = progress),
+                supervisorRegistration = supervisorRegistration,
+            )
+
         fun withSupervisorRegistration(
             processWide: Boolean,
             requestedPolicy: PolicyDefinition<*>,
@@ -99,8 +244,15 @@ public class InstallationReceipt(
             failure: Throwable? = null,
             cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
         ): InstallationReceipt =
-            InstallationReceipt(processWide, requestedPolicy, timestampMillis, installed, fallback, landlockApplied, progress, failure, cetOutcome).also {
-                it.supervisorRegistration = supervisorRegistration
-            }
+            InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = requestedPolicy,
+                timestampMillis = timestampMillis,
+                fallback = fallback,
+                landlockApplied = landlockApplied,
+                cetOutcome = cetOutcome,
+                outcome = outcomeFromFlags(installed, fallback, progress, failure),
+                supervisorRegistration = supervisorRegistration,
+            )
     }
 }

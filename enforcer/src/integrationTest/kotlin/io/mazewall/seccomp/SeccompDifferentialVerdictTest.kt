@@ -74,12 +74,16 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         probeNrs: List<Int>,
         kernelOutcome: (nr: Int) -> Boolean,
     ) {
-        val blockedNrs = probeNrs.filter { nr ->
-            BpfSimulator.simulate(program, nr, arch)?.let { it != NativeConstants.SECCOMP_RET_ALLOW } ?: false
-        }
-        val allowedNrs = probeNrs.filter { nr ->
-            BpfSimulator.simulate(program, nr, arch) == NativeConstants.SECCOMP_RET_ALLOW
-        }
+        val simulatedVerdicts =
+            probeNrs.associateWith { nr ->
+                BpfSimulator.simulate(program, nr, arch)
+                    ?: throw AssertionError(
+                        "BPF simulator produced no verdict for nr=$nr on arch=${arch.name}\n" +
+                            "BPF program:\n${BpfProgram.unverified(program).disassemble()}",
+                    )
+            }
+        val blockedNrs = probeNrs.filter { nr -> simulatedVerdicts.getValue(nr) != NativeConstants.SECCOMP_RET_ALLOW }
+        val allowedNrs = probeNrs.filter { nr -> simulatedVerdicts.getValue(nr) == NativeConstants.SECCOMP_RET_ALLOW }
         // Kernel-vs-simulator consensus: every simulator-denied probe is actually denied by the
         // kernel; every simulator-allowed probe actually succeeds.
         for (nr in blockedNrs) {
@@ -88,6 +92,35 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         for (nr in allowedNrs.filter { it != 0 }) { // nr 0 is `read`: cannot be invoked benignly here
             assertFalse(kernelOutcome(nr), "Kernel must allow nr=$nr (simulator predicted ALLOW)")
         }
+    }
+
+    @Test
+    fun `missing simulator verdict fails differential check with probe and disassembly`() {
+        val noRetProgram = listOf(BpfInstruction.Ld(0))
+        val probeNr = Syscall.UMASK.numberFor(arch)
+        var kernelInvoked = false
+        val failure =
+            assertFailsWith<AssertionError> {
+                assertKernelVerdictMatchesSimulator(
+                    program = noRetProgram,
+                    probeNrs = listOf(probeNr),
+                ) {
+                    kernelInvoked = true
+                    false
+                }
+            }
+        assertFalse(kernelInvoked, "Kernel oracle must not run when simulator produces no verdict")
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("nr=$probeNr"), "Expected probe nr in failure: $message")
+        assertTrue(message.contains("arch=${arch.name}"), "Expected arch in failure: $message")
+        assertTrue(message.contains("0000: ld [0]"), "Expected BPF disassembly in failure: $message")
+
+        // Benign allow/deny controls verify both partition branches on valid single-RET filters.
+        val allowProgram = listOf(BpfInstruction.Ret(SeccompAction.ACT_ALLOW))
+        assertKernelVerdictMatchesSimulator(allowProgram, listOf(probeNr)) { false }
+
+        val denyProgram = listOf(BpfInstruction.Ret(SeccompAction.ACT_ERRNO(NativeConstants.EPERM)))
+        assertKernelVerdictMatchesSimulator(denyProgram, listOf(probeNr)) { true }
     }
 
     /**
@@ -294,8 +327,26 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
         }
     }
 
+    private fun verifyKillThreadProbeOutcome(
+        readyPath: Path,
+        outcomePath: Path,
+        runProbe: () -> Unit,
+    ) {
+        runProbe()
+        assertTrue(Files.exists(readyPath), "Kill probe never wrote seccomp-installed readiness marker")
+        val readyMarker = Files.readString(readyPath).trim()
+        assertTrue(readyMarker.startsWith("installed:"), "Unexpected kill-probe readiness marker: $readyMarker")
+        val tid = readyMarker.removePrefix("installed:").toIntOrNull()
+        assertTrue(tid != null && tid > 0, "Invalid probe tid in readiness marker: $readyMarker")
+        assertTrue(Files.exists(outcomePath), "Kill probe never wrote kernel thread-death outcome marker")
+        val outcome = Files.readString(outcomePath).trim()
+        assertEquals("killed:$tid", outcome, "Kill-probe thread was not terminated by kernel seccomp")
+    }
+
     @Test
-    fun `kill_thread archetype terminates the probe child before PROBE_OK`() {
+    fun `kill_thread archetype terminates the probe child before PROBE_OK`(
+        @TempDir directory: Path,
+    ) {
         val victimNr = Syscall.UMASK.numberFor(arch)
         val childProgram = compiledProgramOf(victimNr)
 
@@ -305,19 +356,76 @@ class SeccompDifferentialVerdictTest : BaseIntegrationTest() {
             BpfSimulator.simulate(childProgram, victimNr, arch),
         )
 
-        var output = ""
-        try {
+        // Positive control: without seccomp, the dedicated probe thread executes victimNr and survives.
+        val baselineReady = directory.resolve("baseline.ready")
+        val baselineOutcome = directory.resolve("baseline.outcome")
+        IsolatedProcessTester.runIsolatedTest(
+            SeccompKillProbeChild::class.java.name,
+            victimNr.toString(),
+            "baseline",
+            baselineReady.toString(),
+            baselineOutcome.toString(),
+        )
+        val baselineTid = Files.readString(baselineReady).trim().removePrefix("baseline:")
+        assertTrue(baselineTid.toIntOrNull()?.let { it > 0 } == true, "Missing baseline tid in $baselineReady")
+        assertEquals("survived:$baselineTid", Files.readString(baselineOutcome).trim())
+
+        // Negative control 1: seccomp installed with ACT_ALLOW lets probe thread survive -> oracle rejects.
+        val allowReady = directory.resolve("allow.ready")
+        val allowOutcome = directory.resolve("allow.outcome")
+        val allowFailure =
+            assertFailsWith<AssertionError> {
+                verifyKillThreadProbeOutcome(allowReady, allowOutcome) {
+                    IsolatedProcessTester.runIsolatedTest(
+                        SeccompKillProbeChild::class.java.name,
+                        victimNr.toString(),
+                        "allow-control",
+                        allowReady.toString(),
+                        allowOutcome.toString(),
+                    )
+                }
+            }
+        val allowTid = Files.readString(allowReady).trim().removePrefix("installed:")
+        assertEquals("survived:$allowTid", Files.readString(allowOutcome).trim())
+        assertTrue(allowFailure.message.orEmpty().contains("killed:$allowTid"))
+
+        // Negative control 2: child fails before installing seccomp (exit code 2) -> oracle rejects.
+        val preInstallReady = directory.resolve("pre-install.ready")
+        val preInstallOutcome = directory.resolve("pre-install.outcome")
+        assertFailsWith<IllegalStateException> {
+            verifyKillThreadProbeOutcome(preInstallReady, preInstallOutcome) {
+                IsolatedProcessTester.runIsolatedTest(
+                    SeccompKillProbeChild::class.java.name,
+                    victimNr.toString(),
+                    "fail-before-install",
+                    preInstallReady.toString(),
+                    preInstallOutcome.toString(),
+                )
+            }
+        }
+        assertFalse(Files.exists(preInstallReady), "Pre-install failure must not produce readiness marker")
+
+        // Negative control 3: simulated child timeout -> oracle rejects rather than treating exception as death.
+        val timeoutReady = directory.resolve("timeout.ready")
+        val timeoutOutcome = directory.resolve("timeout.outcome")
+        assertFailsWith<IllegalStateException> {
+            verifyKillThreadProbeOutcome(timeoutReady, timeoutOutcome) {
+                error("Timed out waiting for kill-probe child")
+            }
+        }
+
+        // Guarded run: real ACT_KILL_THREAD terminates probeThread in kernel before syscall returns.
+        val guardedReady = directory.resolve("guarded.ready")
+        val guardedOutcome = directory.resolve("guarded.outcome")
+        verifyKillThreadProbeOutcome(guardedReady, guardedOutcome) {
             IsolatedProcessTester.runIsolatedTest(
                 SeccompKillProbeChild::class.java.name,
                 victimNr.toString(),
+                "guarded",
+                guardedReady.toString(),
+                guardedOutcome.toString(),
             )
-            error("Kill-probe child survived; seccomp did not enforce KILL_THREAD")
-        } catch (e: IllegalStateException) {
-            // IsolatedProcessTester only surfaces exit codes; capture marker semantics below.
-            output = e.message ?: ""
         }
-        // The child must have died from enforcement, not completed its run.
-        assertFalse(output.contains("PROBE_OK"), "Child printed PROBE_OK: kill enforcement failed")
     }
 
     /** Compiles the same program the kill-probe child installs, for oracle prediction. */

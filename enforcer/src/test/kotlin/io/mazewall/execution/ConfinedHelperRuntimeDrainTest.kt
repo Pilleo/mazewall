@@ -5580,7 +5580,12 @@ class ConfinedHelperRuntimeDrainTest {
                     return originalPaths.iterator()
                 }
             }
-            val policy = Policy<PolicyScope.ThreadLocalOnly, Uncompiled>(worker.policy.definition.copy(allowedFsReadPaths = blocked))
+            val definition = worker.policy.definition.copy()
+            PolicyDefinition::class.java
+                .getDeclaredField("allowedFsReadPaths")
+                .apply { isAccessible = true }
+                .set(definition, blocked)
+            val policy = Policy<PolicyScope.ThreadLocalOnly, Uncompiled>(definition)
             val generation = runtimeState(fixture.runtime).javaClass.getDeclaredField("nextGeneration").apply { isAccessible = true }
             val before = generation.getLong(runtimeState(fixture.runtime))
             val result = CompletableFuture<Throwable>()

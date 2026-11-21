@@ -248,43 +248,49 @@ internal object BpfFilter {
                 val argOffsetHi = argOffsetLo + 4
 
                 when (val check = inspection.check) {
-                    is ArgCheck.EqualsAny -> {
-                        val allowLabel = nextLabel("${labelPrefix}_allow")
-                        check.allowedValues.forEachIndexed { valIdx, value ->
-                            val hi = (value ushr 32).toInt()
-                            val lo = value.toInt()
+                    is ArgCheck.EqualsAny ->
+                        if (check.allowedValues.isEmpty()) {
+                            ret(ifNotMatchedNative)
+                        } else {
+                            val allowLabel = nextLabel("${labelPrefix}_allow")
+                            check.allowedValues.forEachIndexed { valIdx, value ->
+                                val hi = (value ushr 32).toInt()
+                                val lo = value.toInt()
 
-                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
-                            val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
+                                val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                                val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
-                            // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
-                            loadAbsolute(argOffsetHi)
-                            // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
-                            jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
-                            mark(checkLoLabel)
-                            // A = args[i][31:0]. A match selects the inspection's matched action.
-                            loadAbsolute(argOffsetLo)
-                            jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
-                            mark(nextValLabel)
+                                // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
+                                loadAbsolute(argOffsetHi)
+                                // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
+                                jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
+                                mark(checkLoLabel)
+                                // A = args[i][31:0]. A match selects the inspection's matched action.
+                                loadAbsolute(argOffsetLo)
+                                jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
+                                mark(nextValLabel)
+                            }
+                            ret(ifNotMatchedNative)
+                            mark(allowLabel)
+                            ret(ifMatchedNative)
                         }
-                        ret(ifNotMatchedNative)
-                        mark(allowLabel)
-                        ret(ifMatchedNative)
-                    }
 
-                    is ArgCheck.EqualsAny32 -> {
-                        // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
-                        val allowLabel = nextLabel("${labelPrefix}_allow")
-                        check.allowedValues.forEachIndexed { valIdx, value ->
-                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
-                            loadAbsolute(argOffsetLo)
-                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
-                            mark(nextValLabel)
+                    is ArgCheck.EqualsAny32 ->
+                        if (check.allowedValues.isEmpty()) {
+                            ret(ifNotMatchedNative)
+                        } else {
+                            // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
+                            val allowLabel = nextLabel("${labelPrefix}_allow")
+                            check.allowedValues.forEachIndexed { valIdx, value ->
+                                val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                                loadAbsolute(argOffsetLo)
+                                jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
+                                mark(nextValLabel)
+                            }
+                            ret(ifNotMatchedNative)
+                            mark(allowLabel)
+                            ret(ifMatchedNative)
                         }
-                        ret(ifNotMatchedNative)
-                        mark(allowLabel)
-                        ret(ifMatchedNative)
-                    }
 
                     is ArgCheck.MaskEquals -> {
                         val maskHi = (check.mask ushr 32).toInt()

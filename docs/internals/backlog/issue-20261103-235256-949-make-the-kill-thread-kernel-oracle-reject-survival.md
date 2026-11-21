@@ -35,5 +35,11 @@ Repository-wide review, 2026-11-04: [TEST-02](../reviews/2026-11-04-repository-r
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
+## Progress Evidence (2026-11-21)
+
+- Hardened [`SeccompKillProbeChild`](../../../../enforcer/src/integrationTest/kotlin/io/mazewall/seccomp/SeccompKillProbeChild.kt) to run the probe syscall on a dedicated platform thread whose kernel TID (`LinuxNative.process.gettid().value`) and `/proc/self/task/<tid>` entry are checked directly, recording explicit file-backed readiness (`baseline:<tid>` or `installed:<tid>`) and outcome markers (`survived:<tid>` or `killed:<tid>` after `/proc/self/task/<tid>` disappears without returning from the victim syscall) across `"baseline"`, `"allow-control"`, `"fail-before-install"`, and `"guarded"` modes.
+- Replaced exception-swallowing catch logic in [`SeccompDifferentialVerdictTest.kill_thread archetype terminates the probe child before PROBE_OK`](../../../../enforcer/src/integrationTest/kotlin/io/mazewall/seccomp/SeccompDifferentialVerdictTest.kt) with strict `verifyKillThreadProbeOutcome`, exercising positive `"baseline"` survival plus `"allow-control"`, `"fail-before-install"`, and simulated timeout negative controls before verifying real `"guarded"` `SECCOMP_RET_KILL_THREAD` termination.
+- Verified with `./gradlew :enforcer:ktlintCheck :enforcer:detektMain :detektWarningRatchet --no-daemon --console=plain` (`BUILD SUCCESSFUL`) and `./gradlew :enforcer:integrationTestFreshJvm --tests io.mazewall.seccomp.SeccompDifferentialVerdictTest --rerun-tasks --no-daemon --console=plain` (`BUILD SUCCESSFUL`; `8` tests, `0` skipped, `0` failures, `0` errors).
+
 ---
 <!-- id: issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival  file: issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md -->

@@ -40,4 +40,15 @@ live installer bypass is claimed. Add contradiction/exact-failure, inherited cov
 partial irreversible progress and registration-cleanup controls to this existing owner.
 
 ---
+## Progress Evidence (2026-11-21)
+
+- Refactored `InstallationReceipt` (`enforcer/src/main/kotlin/io/mazewall/enforcer/api/InstallationReceipt.kt`) around a closed internal `Outcome` hierarchy (`Installed`, `Failed`, `Bypassed`) backed by a `private` primary constructor, while preserving full public binary ABI compatibility (`enforcer/api/enforcer.api` unchanged) via the public compatibility constructor and derived `installed`, `progress`, and `failure` projections.
+- Added controlled internal companion factories (`installed`, `failed`, `bypassed`, and contradiction-rejecting `withSupervisorRegistration`) so `installed = true` cannot coexist with a recorded failure; updated `requireInstalled()` to reject `Outcome.Failed`/`Outcome.Bypassed` first with exact failure identity before Landlock/CET checks, and made `close()` detach `supervisorRegistration` before closing.
+- Routed all 5 `InstallationReceipt` producer sites in `enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt` through `InstallationReceipt.installed` / `.failed` / `.bypassed`, replaced `LandlockStep` with a sealed hierarchy carrying explicit bypass reasons, removed mutable `InstallationAttempt.failure`, and added `scopeLandlockApplied` in `InstallationProgress.kt`.
+- Added Kotlin and Java regressions in `enforcer/src/test/kotlin/io/mazewall/InstallationReceiptTest.kt`, `enforcer/src/test/kotlin/io/mazewall/RequiredInstallationReceiptTest.kt`, and `enforcer/src/test/java/io/mazewall/MazewallJavaApiTest.java` covering contradictory constructor/supervisor rejection, exact failure identity across partial Landlock+Seccomp failure and narrower Landlock bypass, inherited Landlock without new progress, supervisor lease cleanup across `requireInstalled()` rejection, and throwing-registration `close()`.
+- Verified sequentially:
+  - `./gradlew :enforcer:ktlintCheck :enforcer:detektMain :detektWarningRatchet :enforcer:checkKotlinAbi :verifySupportedApiSurface :verifyPackageTopology --no-daemon --console=plain` -> `BUILD SUCCESSFUL` (`56` tasks, exit `0`).
+  - `./gradlew :enforcer:test :portals:worker:test -Pmazewall.test.probeParallelism=1 --no-daemon --console=plain` -> `BUILD SUCCESSFUL` (`:enforcer:test` `1681` tests, `0` failed, `2` skipped; `:portals:worker:test` `49` tests, `0` failed, `0` skipped; `-Pmazewall.test.probeParallelism=1` avoids an unrelated pre-existing `ForeignFdGuard` vs `@Execution(ExecutionMode.CONCURRENT)` child-probe parallel FD race in `:enforcer:test`).
+
+---
 <!-- id: issue-20261028-232811-964-reject-installation-receipts-containing-both-succe  file: issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md -->

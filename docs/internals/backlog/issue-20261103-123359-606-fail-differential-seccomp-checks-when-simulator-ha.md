@@ -37,5 +37,11 @@ integration helper/kernel were not executed by that witness. Require immediate a
 failure before partitioning, plus valid benign allow/deny controls. Separate TEST-02 owns the
 surviving-child KILL_THREAD oracle; neither correction substitutes for the other.
 
+## Progress Evidence (2026-11-21)
+
+- Updated [`SeccompDifferentialVerdictTest.assertKernelVerdictMatchesSimulator`](../../../../enforcer/src/integrationTest/kotlin/io/mazewall/seccomp/SeccompDifferentialVerdictTest.kt) so any `null` verdict from `BpfSimulator.simulate(program, nr, arch)` throws an immediate `AssertionError` reporting `nr`, `arch`, and `BpfProgram.unverified(program).disassemble()` before invoking the kernel oracle.
+- Added regression `missing simulator verdict fails differential check with probe and disassembly` covering a no-RET BPF program (`ld [0]`), verifying the kernel oracle lambda is not invoked, along with benign single-RET `ACT_ALLOW` and `ACT_ERRNO(EPERM)` controls.
+- Verified with `./gradlew :enforcer:ktlintCheck :enforcer:detektMain :detektWarningRatchet --no-daemon --console=plain` (`BUILD SUCCESSFUL`) and `./gradlew :enforcer:integrationTestFreshJvm --tests io.mazewall.seccomp.SeccompDifferentialVerdictTest --rerun-tasks --no-daemon --console=plain` (`BUILD SUCCESSFUL`; `8` tests, `0` skipped, `0` failures, `0` errors).
+
 ---
 <!-- id: issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha  file: issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md -->

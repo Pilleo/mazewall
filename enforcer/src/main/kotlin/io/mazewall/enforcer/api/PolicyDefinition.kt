@@ -20,9 +20,9 @@ import java.util.TreeMap
  * by focusing exclusively on rule representation and algebraic composition, delegating
  * construction to [PolicyBuilder] and compilation artifacts to [CompiledSandbox].
  */
-public data class PolicyDefinition<out S : PolicyScope>(
+public class PolicyDefinition<out S : PolicyScope>(
     public val defaultAction: SeccompAction = SeccompAction.ACT_ALLOW,
-    public val syscallActions: Map<Syscall, SeccompAction> = emptyMap(),
+    syscallActions: Map<Syscall, SeccompAction> = emptyMap(),
     public val allowMmapExec: Boolean = false,
     public val allowNonThreadClone: Boolean = false,
     /**
@@ -33,12 +33,107 @@ public data class PolicyDefinition<out S : PolicyScope>(
      */
     public val allowUnsafePrctl: Boolean = false,
     public val lockIntelCet: Boolean = false,
-    public val allowedFsReadPaths: Set<SandboxedPath> = emptySet(),
-    public val allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
+    allowedFsReadPaths: Set<SandboxedPath> = emptySet(),
+    allowedFsWritePaths: Set<SandboxedPath> = emptySet(),
     internal val enforceLandlock: Boolean = false,
-    public val customViolationPhrases: List<String> = emptyList(),
-    public val customViolationRegexes: List<Regex> = emptyList(),
+    customViolationPhrases: List<String> = emptyList(),
+    customViolationRegexes: List<Regex> = emptyList(),
 ) {
+    public val syscallActions: Map<Syscall, SeccompAction> = java.util.Map.copyOf(syscallActions)
+    public val allowedFsReadPaths: Set<SandboxedPath> = java.util.Set.copyOf(allowedFsReadPaths)
+    public val allowedFsWritePaths: Set<SandboxedPath> = java.util.Set.copyOf(allowedFsWritePaths)
+    public val customViolationPhrases: List<String> = java.util.List.copyOf(customViolationPhrases)
+    public val customViolationRegexes: List<Regex> = java.util.List.copyOf(customViolationRegexes)
+
+    public operator fun component1(): SeccompAction = defaultAction
+
+    public operator fun component2(): Map<Syscall, SeccompAction> = syscallActions
+
+    public operator fun component3(): Boolean = allowMmapExec
+
+    public operator fun component4(): Boolean = allowNonThreadClone
+
+    public operator fun component5(): Boolean = allowUnsafePrctl
+
+    public operator fun component6(): Boolean = lockIntelCet
+
+    public operator fun component7(): Set<SandboxedPath> = allowedFsReadPaths
+
+    public operator fun component8(): Set<SandboxedPath> = allowedFsWritePaths
+
+    internal operator fun component9(): Boolean = enforceLandlock
+
+    public operator fun component10(): List<String> = customViolationPhrases
+
+    public operator fun component11(): List<Regex> = customViolationRegexes
+
+    public fun copy(
+        defaultAction: SeccompAction = this.defaultAction,
+        syscallActions: Map<Syscall, SeccompAction> = this.syscallActions,
+        allowMmapExec: Boolean = this.allowMmapExec,
+        allowNonThreadClone: Boolean = this.allowNonThreadClone,
+        allowUnsafePrctl: Boolean = this.allowUnsafePrctl,
+        lockIntelCet: Boolean = this.lockIntelCet,
+        allowedFsReadPaths: Set<SandboxedPath> = this.allowedFsReadPaths,
+        allowedFsWritePaths: Set<SandboxedPath> = this.allowedFsWritePaths,
+        enforceLandlock: Boolean = this.enforceLandlock,
+        customViolationPhrases: List<String> = this.customViolationPhrases,
+        customViolationRegexes: List<Regex> = this.customViolationRegexes,
+    ): PolicyDefinition<S> =
+        PolicyDefinition(
+            defaultAction = defaultAction,
+            syscallActions = syscallActions,
+            allowMmapExec = allowMmapExec,
+            allowNonThreadClone = allowNonThreadClone,
+            allowUnsafePrctl = allowUnsafePrctl,
+            lockIntelCet = lockIntelCet,
+            allowedFsReadPaths = allowedFsReadPaths,
+            allowedFsWritePaths = allowedFsWritePaths,
+            enforceLandlock = enforceLandlock,
+            customViolationPhrases = customViolationPhrases,
+            customViolationRegexes = customViolationRegexes,
+        )
+
+    override fun equals(other: Any?): Boolean = this === other || (other is PolicyDefinition<*> && hasSameScalarRules(other) && hasSameCollections(other))
+
+    private fun hasSameScalarRules(other: PolicyDefinition<*>): Boolean =
+        defaultAction == other.defaultAction &&
+            allowMmapExec == other.allowMmapExec &&
+            allowNonThreadClone == other.allowNonThreadClone &&
+            allowUnsafePrctl == other.allowUnsafePrctl &&
+            lockIntelCet == other.lockIntelCet &&
+            enforceLandlock == other.enforceLandlock
+
+    private fun hasSameCollections(other: PolicyDefinition<*>): Boolean =
+        syscallActions == other.syscallActions &&
+            allowedFsReadPaths == other.allowedFsReadPaths &&
+            allowedFsWritePaths == other.allowedFsWritePaths &&
+            customViolationPhrases == other.customViolationPhrases &&
+            customViolationRegexes == other.customViolationRegexes
+
+    override fun hashCode(): Int =
+        java.util.Objects.hash(
+            defaultAction,
+            syscallActions,
+            allowMmapExec,
+            allowNonThreadClone,
+            allowUnsafePrctl,
+            lockIntelCet,
+            allowedFsReadPaths,
+            allowedFsWritePaths,
+            enforceLandlock,
+            customViolationPhrases,
+            customViolationRegexes,
+        )
+
+    override fun toString(): String =
+        "PolicyDefinition(defaultAction=$defaultAction, syscallActions=$syscallActions, " +
+            "allowMmapExec=$allowMmapExec, allowNonThreadClone=$allowNonThreadClone, " +
+            "allowUnsafePrctl=$allowUnsafePrctl, lockIntelCet=$lockIntelCet, " +
+            "allowedFsReadPaths=$allowedFsReadPaths, allowedFsWritePaths=$allowedFsWritePaths, " +
+            "enforceLandlock=$enforceLandlock, customViolationPhrases=$customViolationPhrases, " +
+            "customViolationRegexes=$customViolationRegexes)"
+
     public val hasSupervisedSyscalls: Boolean get() =
         syscallActions.values.any { it == SeccompAction.ACT_NOTIFY } ||
             defaultAction == SeccompAction.ACT_NOTIFY
@@ -181,7 +276,10 @@ public data class PolicyDefinition<out S : PolicyScope>(
     }
 }
 
-/** Captures collections without exposing mutable permission or diagnostic views to callers. */
+/**
+ * Returns a defensively snapshotted copy of all collection properties (O(1) no-op for already-frozen
+ * Java unmodifiable collections, while re-snapshotting if an internal collection field was replaced).
+ */
 internal fun <S : PolicyScope> PolicyDefinition<S>.frozenCopy(): PolicyDefinition<S> =
     copy(
         syscallActions = java.util.Map.copyOf(syscallActions),

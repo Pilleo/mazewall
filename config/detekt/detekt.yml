@@ -109,6 +109,8 @@ complexity:
         ignoreDefaultParameters: false
         ignoreDataClasses: true
         ignoreAnnotatedParameter: []
+        excludes:
+            - "**/PolicyDefinition.kt"
     MethodOverloading:
         active: false
         allowedOverloads: 6
