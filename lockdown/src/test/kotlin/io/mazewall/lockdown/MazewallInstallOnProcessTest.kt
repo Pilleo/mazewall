@@ -30,6 +30,7 @@ import io.mazewall.lockdown.internal.platform.syscall.Arch
 import io.mazewall.lockdown.internal.platform.syscall.NativeArg
 import io.mazewall.lockdown.internal.platform.syscall.PrctlCommand
 import io.mazewall.lockdown.internal.seccomp.BpfInstruction
+import io.mazewall.lockdown.internal.seccomp.ProcessFilterInstaller
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -308,6 +309,156 @@ class MazewallInstallOnProcessTest {
         }
     }
 
+    @Test
+    fun `PR_SET_NO_NEW_PRIVS denial succeeds when PR_GET_NO_NEW_PRIVS confirms already enabled`() {
+        fun handler(onGetNoNewPrivs: () -> SyscallResult<Long, SyscallHandledState.Unhandled>): (PrctlCommand) -> SyscallResult<Long, SyscallHandledState.Unhandled> =
+            { command ->
+                when (command) {
+                    is PrctlCommand.SetNoNewPrivs -> SyscallResult.Error(NativeConstants.EPERM, -1L)
+                    is PrctlCommand.GetNoNewPrivs -> onGetNoNewPrivs()
+                    is PrctlCommand.GetSeccomp -> SyscallResult.Success(2L)
+                    is PrctlCommand.SetSeccomp ->
+                        if (command.mode == -1L) {
+                            SyscallResult.Error(NativeConstants.EINVAL, -1L)
+                        } else {
+                            SyscallResult.Success(0L)
+                        }
+                    else -> SyscallResult.Success(0L)
+                }
+            }
+
+        var getAttempts = 0
+        fakeEngine.onPrctl =
+            handler {
+                getAttempts++
+                if (getAttempts == 1) {
+                    SyscallResult.Error(NativeConstants.EINTR, -1L)
+                } else {
+                    SyscallResult.Success(1L)
+                }
+            }
+
+        val installation = Mazewall.installOnProcess(ProcessPolicy.elasticsearch(RuntimeProfile.HOTSPOT_JIT))
+        assertEquals(1, installation.filterDepth)
+        assertEquals(2, getAttempts)
+
+        ContainmentStateRegistry.processState = ContainerState()
+        fakeEngine.onPrctl = handler { SyscallResult.Success(0L) }
+        val zeroFailure =
+            assertFailsWith<MazewallInstallationException> {
+                Mazewall.installOnProcess(ProcessPolicy.elasticsearch(RuntimeProfile.HOTSPOT_JIT))
+            }
+        assertTrue(zeroFailure.message.orEmpty().contains("PR_GET_NO_NEW_PRIVS=0"))
+
+        ContainmentStateRegistry.processState = ContainerState()
+        fakeEngine.onPrctl = handler { SyscallResult.Error(NativeConstants.EACCES, -1L) }
+        val errorFailure =
+            assertFailsWith<MazewallInstallationException> {
+                Mazewall.installOnProcess(ProcessPolicy.elasticsearch(RuntimeProfile.HOTSPOT_JIT))
+            }
+        assertTrue(errorFailure.message.orEmpty().contains("PR_GET_NO_NEW_PRIVS failed with errno=13"))
+    }
+
+    @Test
+    fun `extractJvmOptionsFromCmdline and findIncompatibleJvmFatalFlags respect launcher boundaries and overrides`() {
+        assertEquals(listOf("java", "-Xmx1g"), ProcessFilterInstaller.parseNulSeparatedTokens("java\u0000-Xmx1g\u0000".toByteArray()))
+        assertEquals(listOf("java", "Main", ""), ProcessFilterInstaller.parseNulSeparatedTokens("java\u0000Main\u0000\u0000".toByteArray()))
+        assertEquals(emptyList(), ProcessFilterInstaller.parseNulSeparatedTokens(ByteArray(0)))
+
+        val appArgsOnly =
+            listOf(
+                "/usr/bin/java",
+                "-Xmx512m",
+                "-cp",
+                "app.jar",
+                "com.example.Main",
+                "-XX:OnError=echo app-arg",
+                "-XX:OnOutOfMemoryError=/bin/true",
+            )
+        assertEquals(listOf("-Xmx512m", "-cp"), ProcessFilterInstaller.extractJvmOptionsFromCmdline(appArgsOnly))
+        assertEquals(emptyList(), ProcessFilterInstaller.findIncompatibleJvmFatalFlags(appArgsOnly))
+
+        val jarArgsOnly =
+            listOf(
+                "java",
+                "--add-opens",
+                "java.base/java.lang=ALL-UNNAMED",
+                "-jar",
+                "service.jar",
+                "-XX:OnError=echo",
+            )
+        assertEquals(emptyList(), ProcessFilterInstaller.findIncompatibleJvmFatalFlags(jarArgsOnly))
+
+        val moduleArgsOnly =
+            listOf(
+                "java",
+                "-p",
+                "mods",
+                "--module=app.mod/app.Main",
+                "-XX:OnOutOfMemoryError=kill -9 %p",
+            )
+        assertEquals(emptyList(), ProcessFilterInstaller.findIncompatibleJvmFatalFlags(moduleArgsOnly))
+
+        val clearedFlags =
+            listOf(
+                "java",
+                "-XX:OnOutOfMemoryError=/bin/false",
+                "-XX:OnOutOfMemoryError=",
+                "-XX:OnError=/bin/false",
+                "-XX:OnError=   ",
+                "com.example.Main",
+            )
+        assertEquals(emptyList(), ProcessFilterInstaller.findIncompatibleJvmFatalFlags(clearedFlags))
+
+        val activeFlags =
+            listOf(
+                "java",
+                "-XX:+UseG1GC",
+                "-XX:OnError=gdb -p %p",
+                "-XX:OnOutOfMemoryError=kill -9 %p",
+                "-m",
+                "app/Main",
+            )
+        assertEquals(
+            listOf("-XX:OnError=gdb -p %p", "-XX:OnOutOfMemoryError=kill -9 %p"),
+            ProcessFilterInstaller.findIncompatibleJvmFatalFlags(activeFlags),
+        )
+    }
+
+    @Test
+    fun `ProcessFilterInstaller rejects incompatible JVM fatal-error flags before quarantine only when spawning is blocked`() {
+        val noExec = ProcessPolicy.elasticsearch(RuntimeProfile.HOTSPOT_JIT).definition
+        val cmdlineWithOomHook =
+            listOf(
+                "java",
+                "-XX:OnOutOfMemoryError=/usr/bin/notify.sh",
+                "-cp",
+                "app.jar",
+                "probe.Probe",
+            )
+        val failure =
+            assertFailsWith<IllegalStateException> {
+                ProcessFilterInstaller.install(noExec, fakeEngine, cmdlineWithOomHook)
+            }
+        assertTrue(failure.message.orEmpty().contains("-XX:OnOutOfMemoryError=/usr/bin/notify.sh"))
+        assertTrue(failure.message.orEmpty().contains("-XX:+ExitOnOutOfMemoryError"))
+        assertTrue(failure.message.orEmpty().contains("-XX:+CrashOnOutOfMemoryError"))
+        assertNull(ContainmentStateRegistry.processState.installationFailure)
+        assertEquals(0, fakeEngine.syscallCount.get())
+
+        val withoutExecBlocks =
+            ProcessPolicy
+                .elasticsearch(RuntimeProfile.HOTSPOT_JIT)
+                .unblock(
+                    LockdownSyscall.EXECVE,
+                    LockdownSyscall.EXECVEAT,
+                    LockdownSyscall.FORK,
+                    LockdownSyscall.VFORK,
+                ).definition
+        val installed = ProcessFilterInstaller.install(withoutExecBlocks, fakeEngine, cmdlineWithOomHook)
+        assertEquals(1, installed.filterDepth)
+    }
+
     private class FakeNativeEngine :
         NativeEngine,
         RawSyscallOperations,
@@ -316,6 +467,7 @@ class MazewallInstallOnProcessTest {
         NativeFileSystem,
         NativeNetworking {
         val syscallCount = AtomicInteger(0)
+        var onPrctl: ((PrctlCommand) -> SyscallResult<Long, SyscallHandledState.Unhandled>)? = null
 
         var onSyscall: (Long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg) -> SyscallResult<Long, SyscallHandledState.Unhandled> =
             { _, _, _, arg3, _, _, _ ->
@@ -380,12 +532,13 @@ class MazewallInstallOnProcessTest {
         override fun gettid(): Tid = Tid(1)
 
         override fun prctl(command: PrctlCommand): SyscallResult<Long, SyscallHandledState.Unhandled> =
-            when {
-                command is PrctlCommand.GetSeccomp -> SyscallResult.Success(2L)
-                command is PrctlCommand.SetSeccomp && command.mode == -1L ->
-                    SyscallResult.Error(NativeConstants.EINVAL, -1L)
-                else -> SyscallResult.Success(0L)
-            }
+            onPrctl?.invoke(command)
+                ?: when {
+                    command is PrctlCommand.GetSeccomp -> SyscallResult.Success(2L)
+                    command is PrctlCommand.SetSeccomp && command.mode == -1L ->
+                        SyscallResult.Error(NativeConstants.EINVAL, -1L)
+                    else -> SyscallResult.Success(0L)
+                }
 
         override fun pidfdOpen(
             pid: Int,

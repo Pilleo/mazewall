@@ -1,7 +1,7 @@
 ---
 title: "Make BPF verification proof immutable and enforce kernel instruction semantics"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -36,9 +36,12 @@ could otherwise shadow `Clone3Inspector`'s unconditional ENOSYS fallback.
 Implemented with concrete builder stages, immutable privately constructed programs,
 closed instructions and checked native handoff. Compiler-negative consumers and
 113 focused enforcer seccomp tests pass, including clone3 shadowing rejection.
-See the [scoped review](../reviews/2026-11-03-bpf-generation-hardening.md).
+See the [scoped review](../../reviews/2026-11-03-bpf-generation-hardening.md).
 The full `./gradlew build` passed on 2026-11-03 in 22m 40s (243 actionable tasks:
 107 executed, 136 up-to-date); evidence: `/tmp/opencode/bpf-full-build-final.log`.
+
+## Resolution Evidence (2026-11-21)
+- Concrete builder stages (`BpfBuilder`), immutable privately constructed `BpfProgram`, closed `BpfInstruction`, and verified native handoff verified in `:enforcer:test` and full `./gradlew build -PmazewallKernelLane=BASELINE` (`7e62bacf7`, `ca28cfb18`).
 
 ---
 <!-- id: issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-  file: issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md -->

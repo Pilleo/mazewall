@@ -96,6 +96,8 @@ public final class ServiceBootstrap {
 **Operational constraints & compatibility:**
 - **Irreversible:** Seccomp-BPF filters cannot be removed for the lifetime of the OS process.
 - **Platform thread required:** Calling `installOnProcess` from a virtual thread fails with `MazewallInstallationException`.
+- **Container `no_new_privs` compatibility:** When `prctl(PR_SET_NO_NEW_PRIVS, 1)` is blocked by an outer container seccomp policy, lockdown queries `prctl(PR_GET_NO_NEW_PRIVS)` and proceeds when `no_new_privs == 1` is already locked by the container runtime (failing closed with phase/errno details if it is still `0`).
+- **Incompatible JVM fatal-error flags:** If a policy blocks process creation (`execve`/`execveat`/`fork`/`vfork`), starting the JVM with `-XX:OnError=...` or `-XX:OnOutOfMemoryError=...` is rejected before installation with `MazewallInstallationException`, because the JVM spawns a shell via fork/exec during crash/OOM handling. Use `-XX:+ExitOnOutOfMemoryError` or `-XX:+CrashOnOutOfMemoryError` instead.
 - **Always fail-closed:** Always throws `MazewallInstallationException` on non-Linux OSes (macOS, Windows), unsupported architectures (non-`amd64`/`aarch64`), missing `--enable-native-access`, missing `TSYNC` kernel support, or incompatible outer seccomp profiles. There is no silent unprotected fallback.
 - **Library compatibility:** Blocking `io_uring_setup`/`io_uring_enter`, `memfd_create`, and non-allowlisted `prctl` options is incompatible with Netty `IoUringIoHandler` (use standard Epoll or NIO transport) and native libraries calling `memfd_create` or restricted `prctl` subcommands (such as `PR_SET_VMA` / `PR_SET_PDEATHSIG`) after lockdown installation.
 

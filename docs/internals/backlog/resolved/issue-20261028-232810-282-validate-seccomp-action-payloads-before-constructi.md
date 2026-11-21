@@ -1,7 +1,7 @@
 ---
 title: "Validate seccomp action payloads before construction and compilation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -36,9 +36,13 @@ Host-only reproduction: ACT_ERRNO(65536) is accepted and toKernelReturnCode mask
 Constructor and copy validation now enforce errno `1..65535` and TRACE `0..65535`;
 the shared encoder retains both payloads and the BPF compiler uses typed actions.
 Focused action-boundary, compiler, canonical-policy round-trip and profiling verdict
-tests pass. See the [scoped review](../reviews/2026-11-03-bpf-generation-hardening.md).
+tests pass. See the [scoped review](../../reviews/2026-11-03-bpf-generation-hardening.md).
 The full `./gradlew build` passed on 2026-11-03 in 22m 40s (243 actionable tasks:
 107 executed, 136 up-to-date); evidence: `/tmp/opencode/bpf-full-build-final.log`.
+
+## Resolution Evidence (2026-11-21)
+- Verified in `:platform:test` (`SeccompActionTest`) and `:enforcer:test` (`CanonicalPolicyArtifactTest`, `BpfFilterTest`) as well as full `./gradlew build -PmazewallKernelLane=BASELINE` (`7e62bacf7`, `ca28cfb18`).
+- `SeccompAction` constructor/copy validation enforces errno `1..65535` and `ACT_TRACE` `0..65535` consistently across helpers, BPF compilation, and canonical serialization.
 
 ---
 <!-- id: issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi  file: issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md -->

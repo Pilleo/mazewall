@@ -319,6 +319,34 @@ class MazewallLockdownIntegrationTest {
                 )
             assertEquals(0, elasticCustom.first, "Customized Elasticsearch preset probe failed: ${elasticCustom.second}")
             assertTrue(elasticCustom.second.contains("INSTALLED:depth=1"))
+
+            val incompatibleJvmFlag =
+                runCommand(
+                    javaBin,
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-XX:OnOutOfMemoryError=/bin/true",
+                    "-cp",
+                    "$lockdownJar:$stdlibJar:$cpOut",
+                    "probe.Probe",
+                    "expect-error",
+                )
+            assertEquals(0, incompatibleJvmFlag.first, "Incompatible JVM flag probe failed: ${incompatibleJvmFlag.second}")
+            assertTrue(incompatibleJvmFlag.second.contains("CAUGHT_INSTALLATION_EX:"))
+            assertTrue(incompatibleJvmFlag.second.contains("-XX:OnOutOfMemoryError=/bin/true"))
+            assertTrue(incompatibleJvmFlag.second.contains("-XX:+ExitOnOutOfMemoryError"))
+
+            val appArgNotFlag =
+                runCommand(
+                    javaBin,
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-cp",
+                    "$lockdownJar:$stdlibJar:$cpOut",
+                    "probe.Probe",
+                    "expect-install",
+                    "-XX:OnOutOfMemoryError=/bin/true",
+                )
+            assertEquals(0, appArgNotFlag.first, "App argument after main class must not trigger JVM flag rejection: ${appArgNotFlag.second}")
+            assertTrue(appArgNotFlag.second.contains("INSTALLED:depth=1"))
         } finally {
             tempDir.toFile().deleteRecursively()
         }

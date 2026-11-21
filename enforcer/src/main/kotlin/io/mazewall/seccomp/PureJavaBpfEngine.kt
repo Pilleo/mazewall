@@ -172,21 +172,59 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      * current thread/process and all its future children spawned via fork/exec.
      * This is a prerequisite for installing seccomp filters for unprivileged users.
      *
+     * If `PR_SET_NO_NEW_PRIVS` fails (for example, an outer container seccomp profile blocks
+     * setting it even though `allowPrivilegeEscalation: false` / `no-new-privileges:true`
+     * already locked `no_new_privs=1`), we query `PR_GET_NO_NEW_PRIVS` and proceed only when
+     * the kernel confirms `no_new_privs == 1`.
+     *
      * Note: This system call is executed within a retry loop to handle signal
      * interruptions (EINTR) robustly, ensuring that temporary interruptions do not
      * abort or bypass privilege locking.
      */
     internal fun lockNoNewPrivileges(native: NativeEngine = LinuxNative.snapshot()) {
-        // Step 1: Set no_new_privs (mandatory for non-root seccomp)
+        // Step 1: Set no_new_privs (mandatory for non-root seccomp unless already locked by container runtime)
         while (true) {
-            val result = native.process.prctl(PrctlCommand.SetNoNewPrivs(true))
-            if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
-                continue
+            when (val result = native.process.prctl(PrctlCommand.SetNoNewPrivs(true))) {
+                is LinuxNative.SyscallResult.Success -> return
+                is LinuxNative.SyscallResult.Error -> {
+                    if (result.errno == NativeConstants.EINTR) {
+                        continue
+                    }
+                    verifyAlreadyLockedNoNewPrivsOrThrow(native, result.errno)
+                    return
+                }
             }
-            result.getOrThrow("prctl(PR_SET_NO_NEW_PRIVS)")
-            break
         }
     }
+
+    private fun verifyAlreadyLockedNoNewPrivsOrThrow(
+        native: NativeEngine,
+        setErrno: Int,
+    ) {
+        while (true) {
+            when (val getResult = native.process.prctl(PrctlCommand.GetNoNewPrivs)) {
+                is LinuxNative.SyscallResult.Success -> {
+                    check(getResult.value == 1L) {
+                        "prctl(PR_SET_NO_NEW_PRIVS) failed with errno=${formatErrno(setErrno)} " +
+                            "(PR_GET_NO_NEW_PRIVS=${getResult.value})"
+                    }
+                    return
+                }
+                is LinuxNative.SyscallResult.Error -> {
+                    if (getResult.errno == NativeConstants.EINTR) {
+                        continue
+                    }
+                    error(
+                        "prctl(PR_SET_NO_NEW_PRIVS) failed with errno=${formatErrno(setErrno)} " +
+                            "(PR_GET_NO_NEW_PRIVS failed with errno=${formatErrno(getResult.errno)})",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun formatErrno(errno: Int): String =
+        io.mazewall.platform.syscall.ErrnoMapping.getSymbolicName(errno)?.let { "$errno ($it)" } ?: "$errno"
 
     /**
      * Installs the compiled BPF filter program into the kernel.

@@ -214,4 +214,49 @@ class PureJavaBpfEngineReproductionTest {
 
         kotlin.test.assertEquals(2, prctlCalls, "Should retry GetSeccomp on EINTR")
     }
+
+    @Test
+    fun `test lockNoNewPrivileges falls back to GetNoNewPrivs when SetNoNewPrivs is denied`() {
+        val mockProcess = MockNativeProcess()
+        val mockEngine = MockNativeEngine(process = mockProcess)
+        LinuxNative.setEngine(mockEngine)
+
+        var getCalls = 0
+        mockProcess.onPrctl = { command ->
+            when (command) {
+                is PrctlCommand.SetNoNewPrivs -> LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+                is PrctlCommand.GetNoNewPrivs -> {
+                    getCalls++
+                    if (getCalls == 1) {
+                        LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EINTR, -1L)
+                    } else {
+                        LinuxNative.SyscallResult.Success(1L)
+                    }
+                }
+                else -> LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        PureJavaBpfEngine.lockNoNewPrivileges()
+        kotlin.test.assertEquals(2, getCalls)
+
+        mockProcess.onPrctl = { command ->
+            when (command) {
+                is PrctlCommand.SetNoNewPrivs -> LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+                is PrctlCommand.GetNoNewPrivs -> LinuxNative.SyscallResult.Success(0L)
+                else -> LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        val zeroEx = assertFailsWith<IllegalStateException> { PureJavaBpfEngine.lockNoNewPrivileges() }
+        assertTrue(zeroEx.message.orEmpty().contains("PR_GET_NO_NEW_PRIVS=0"))
+
+        mockProcess.onPrctl = { command ->
+            when (command) {
+                is PrctlCommand.SetNoNewPrivs -> LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EPERM, -1L)
+                is PrctlCommand.GetNoNewPrivs -> LinuxNative.SyscallResult.Error(13, -1L)
+                else -> LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        val errEx = assertFailsWith<IllegalStateException> { PureJavaBpfEngine.lockNoNewPrivileges() }
+        assertTrue(errEx.message.orEmpty().contains("PR_GET_NO_NEW_PRIVS failed with errno=13"))
+    }
 }

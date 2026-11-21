@@ -1,7 +1,7 @@
 ---
 title: "Preserve safe prctl argument allowances under explicit syscall denial"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -26,9 +26,12 @@ The prctl inspector uses the policy action for its safe-option branch, so explic
 The inspected safe-option branch now returns ALLOW. Both architecture regressions
 verify the six safe options under explicit PRCTL denial and retain unsafe-option
 denial. The int-ABI high-word-garbage regression also passes.
-See the [scoped review](../reviews/2026-11-03-bpf-generation-hardening.md).
+See the [scoped review](../../reviews/2026-11-03-bpf-generation-hardening.md).
 The full `./gradlew build` passed on 2026-11-03 in 22m 40s (243 actionable tasks:
 107 executed, 136 up-to-date); evidence: `/tmp/opencode/bpf-full-build-final.log`.
+
+## Resolution Evidence (2026-11-21)
+- `UnsafePrctlInspector` preserves `ACT_ALLOW` for the six safe `prctl` options under explicit `PRCTL` denial and rejects unsafe options (`PR_SET_MM`, `PR_SET_PTRACER`, etc.), verified in `:enforcer:test`, `:enforcer:integrationTest`, and `:lockdown:integrationTestFreshJvm`.
 
 ---
 <!-- id: issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl  file: issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md -->

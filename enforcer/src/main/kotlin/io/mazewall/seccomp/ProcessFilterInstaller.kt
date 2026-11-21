@@ -17,12 +17,35 @@ import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Self-contained process-wide seccomp installer without Landlock, supervisor, or Platform dependencies.
  */
 internal object ProcessFilterInstaller {
     private const val SELF_VERIFY_PROPERTY = "io.mazewall.selfVerify"
+    private val PROC_CMDLINE_PATH = Path.of("/proc/self/cmdline")
+    private val APPLICATION_TARGET_FLAGS = setOf("--", "-jar", "-m", "--module")
+    private val TWO_TOKEN_JVM_OPTIONS =
+        setOf(
+            "-cp",
+            "-classpath",
+            "--class-path",
+            "-p",
+            "--module-path",
+            "--upgrade-module-path",
+            "--add-modules",
+            "--limit-modules",
+            "--add-reads",
+            "--add-exports",
+            "--add-opens",
+            "--patch-module",
+            "--describe-module",
+            "-d",
+            "--source",
+        )
     private val processLock = Any()
 
     private class IncompatiblePolicyException(
@@ -80,8 +103,9 @@ internal object ProcessFilterInstaller {
     internal fun install(
         policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
         native: NativeEngine? = null,
+        cmdlineTokens: List<String>? = null,
     ): InstalledProcessFilter {
-        validateInstallPreconditions(policy)
+        validateInstallPreconditions(policy, cmdlineTokens)
         return try {
             executeProcessInstall(policy, native)
         } catch (expectedIncompatible: IncompatiblePolicyException) {
@@ -100,7 +124,10 @@ internal object ProcessFilterInstaller {
         throw failure
     }
 
-    private fun validateInstallPreconditions(policy: PolicyDefinition<PolicyScope.ProcessWideSafe>) {
+    private fun validateInstallPreconditions(
+        policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
+        cmdlineTokens: List<String>? = null,
+    ) {
         check(!Thread.currentThread().isVirtual) {
             "Cannot install process-wide seccomp lockdown from a virtual thread: " +
                 "call Mazewall.installOnProcess from a platform thread (for example, main())."
@@ -119,7 +146,89 @@ internal object ProcessFilterInstaller {
         check(!policy.lockIntelCet) {
             "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread"
         }
+        validateCompatibleJvmOptions(policy, cmdlineTokens)
     }
+
+    private fun validateCompatibleJvmOptions(
+        policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
+        cmdlineTokens: List<String>?,
+    ) {
+        val blocksProcessCreation =
+            !policy.isSyscallAllowed(Syscall.EXECVE) ||
+                !policy.isSyscallAllowed(Syscall.EXECVEAT) ||
+                !policy.isSyscallAllowed(Syscall.FORK) ||
+                !policy.isSyscallAllowed(Syscall.VFORK)
+        if (!blocksProcessCreation) return
+
+        val incompatibleFlags = findIncompatibleJvmFatalFlags(cmdlineTokens ?: readCurrentProcessCmdlineTokens())
+        check(incompatibleFlags.isEmpty()) {
+            "Incompatible JVM fatal-error handler flag(s) detected for no-exec seccomp lockdown: " +
+                "${incompatibleFlags.joinToString(", ")}. " +
+                "The JVM spawns an external shell via fork/exec on crash or OOM, which lockdown blocks with EPERM. " +
+                "Remove -XX:OnError / -XX:OnOutOfMemoryError or replace them with -XX:+ExitOnOutOfMemoryError or -XX:+CrashOnOutOfMemoryError."
+        }
+    }
+
+    internal fun findIncompatibleJvmFatalFlags(cmdlineTokens: List<String>): List<String> {
+        val activeFlags = LinkedHashMap<String, String>()
+        for (option in extractJvmOptionsFromCmdline(cmdlineTokens)) {
+            when {
+                option.startsWith("-XX:OnError=") -> {
+                    val value = option.removePrefix("-XX:OnError=")
+                    if (value.isBlank()) activeFlags.remove("OnError") else activeFlags["OnError"] = option
+                }
+                option.startsWith("-XX:OnOutOfMemoryError=") -> {
+                    val value = option.removePrefix("-XX:OnOutOfMemoryError=")
+                    if (value.isBlank()) activeFlags.remove("OnOutOfMemoryError") else activeFlags["OnOutOfMemoryError"] = option
+                }
+            }
+        }
+        return activeFlags.values.toList()
+    }
+
+    internal fun extractJvmOptionsFromCmdline(cmdlineTokens: List<String>): List<String> {
+        if (cmdlineTokens.size <= 1) return emptyList()
+        val options = mutableListOf<String>()
+        var expectOptionValue = false
+        for (index in 1 until cmdlineTokens.size) {
+            val token = cmdlineTokens[index]
+            if (expectOptionValue) {
+                expectOptionValue = false
+                continue
+            }
+            if (token in APPLICATION_TARGET_FLAGS || token.startsWith("--module=") || !token.startsWith("-")) {
+                break
+            }
+            options.add(token)
+            if (token in TWO_TOKEN_JVM_OPTIONS) {
+                expectOptionValue = true
+            }
+        }
+        return options
+    }
+
+    internal fun parseNulSeparatedTokens(bytes: ByteArray): List<String> {
+        if (bytes.isEmpty()) return emptyList()
+        val tokens = mutableListOf<String>()
+        var start = 0
+        for (i in bytes.indices) {
+            if (bytes[i] == 0.toByte()) {
+                tokens.add(String(bytes, start, i - start, StandardCharsets.UTF_8))
+                start = i + 1
+            }
+        }
+        if (start < bytes.size) {
+            tokens.add(String(bytes, start, bytes.size - start, StandardCharsets.UTF_8))
+        }
+        return tokens
+    }
+
+    private fun readCurrentProcessCmdlineTokens(): List<String> =
+        if (Files.isReadable(PROC_CMDLINE_PATH)) {
+            parseNulSeparatedTokens(Files.readAllBytes(PROC_CMDLINE_PATH))
+        } else {
+            emptyList()
+        }
 
     private fun executeProcessInstall(
         policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,

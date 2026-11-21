@@ -60,7 +60,7 @@ target_files:
   - "docs/internals/backlog/issue-20261105-213712-210-retain-unobserved-confined-drain-sweep-fatal-failu.md"
   - "docs/internals/backlog/issue-20261105-223351-669-preserve-prepared-resource-ownership-on-predispatc.md"
   - "docs/internals/backlog/issue-20261106-013649-338-retain-failed-prepared-acquisition-rollback-owners.md"
-  - "docs/internals/backlog/issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md"
+  - "docs/internals/backlog/resolved/issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md"
   - "docs/internals/backlog/issue-20261106-035256-415-investigate-timed-out-consumer-stderr-loss-before-.md"
   - "docs/internals/backlog/issue-20261106-081044-009-qualify-reviewed-helper-runtime-closure-for-read-o.md"
   - "docs/internals/backlog/issue-20261106-081057-933-investigate-owned-worker-scoped-socket-denial-in-n.md"

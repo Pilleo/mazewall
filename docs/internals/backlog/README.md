@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 420 | *Total Resolved Issues:* 763
+*Total Active Issues:* 417 | *Total Resolved Issues:* 768
 
-Active status detail: 418 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 415 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -71,7 +71,7 @@ into two independently implementable changes; the reducer issue follows the
 authoritative-state issue.
 
 1. [Validate profile completeness against its evidence](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md).
-2. [Validate seccomp action payloads and unify their encoding](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
+2. [Validate seccomp action payloads and unify their encoding](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
 3. [Own immutable policy collections at every construction boundary](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md).
 4. [Bind policy scope to validated filesystem intent](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md).
 5. [Separate installation outcome from irreversible progress](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md).
@@ -136,6 +136,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261121-175747-959](issue-20261121-175747-959-add-oci-container-seccomp-profile-and-no-new-privs.md) | Add OCI container seccomp profile and no_new_privs matrix integration tests for mazewall-lockdown | high | core |
+| [issue-20261121-175746-741](issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown | high | core |
 | [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
 | [issue-20261120-170411-782-graalvm-native-image-backend](issue-20261120-170411-782-graalvm-native-image-backend.md) | GraalVM Native Image backend | medium | portal-runtime |
 | [issue-20261120-170411-175-older-kernel-support](issue-20261120-170411-175-older-kernel-support.md) | Older-kernel support | medium | portal-runtime |
@@ -240,9 +242,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261103-124359-339](resolved/issue-20261103-124359-339-expose-validated-readiness-from-the-standalone-hot.md) | Readiness notification complete;16 host tests, scoped review and full build passed | high | core |
 | Archived [issue-20261103-123347-795](resolved/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) | Validate BPF inspection fragment exits before accepting termination (resolved 2026-11-21) | medium | core |
 | Archived [issue-20261103-123359-606](resolved/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) | Fail differential seccomp checks when simulator has no verdict (resolved 2026-11-21) | medium | core |
-| [issue-20261103-113514-264](issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md) | Make BPF verification proof immutable and enforce kernel instruction semantics | high | core |
-| [issue-20261103-113654-623](issue-20261103-113654-623-reject-x32-syscall-numbers-before-native-seccomp-p.md) | Reject x32 syscall numbers before native seccomp policy dispatch | high | core |
-| [issue-20261103-115030-497](issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md) | Preserve safe prctl argument allowances under explicit syscall denial | high | core |
+| Archived [issue-20261103-113514-264](resolved/issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md) | Make BPF verification proof immutable and enforce kernel instruction semantics (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-113654-623](resolved/issue-20261103-113654-623-reject-x32-syscall-numbers-before-native-seccomp-p.md) | Reject x32 syscall numbers before native seccomp policy dispatch (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-115030-497](resolved/issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md) | Preserve safe prctl argument allowances under explicit syscall denial (resolved 2026-11-21) | high | core |
 | [issue-20261103-101536-305](issue-20261103-101536-305-expose-and-validate-aggregate-portal-capacity-befo.md) | Expose and validate aggregate Portal capacity before worker startup | high | portal-runtime |
 | [issue-20261103-101536-562](issue-20261103-101536-562-qualify-portal-process-boundary-usage-safeguards-w.md) | Qualify Portal process-boundary usage safeguards with real consumers | high | portal-runtime |
 | Archived [issue-20261103-101247-569](resolved/issue-20261103-101247-569-add-a-standalone-ordinary-jvm-hotspot-observation-.md) | Add a standalone ordinary-JVM HotSpot observation example | high | core |
@@ -332,7 +334,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261106-081057-933](issue-20261106-081057-933-investigate-owned-worker-scoped-socket-denial-in-n.md) | Investigate owned-worker scoped socket denial in non-root checkpoint profile | high | core |
 | [issue-20261106-081044-009](issue-20261106-081044-009-qualify-reviewed-helper-runtime-closure-for-read-o.md) | Qualify reviewed helper runtime closure for read-only shared gconv mappings | high | core |
 | [issue-20261106-035256-415](issue-20261106-035256-415-investigate-timed-out-consumer-stderr-loss-before-.md) | Investigate timed-out consumer stderr loss before evidence drain | high | core |
-| [issue-20261106-021835-047](issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md) | Assert installed no-new-privileges state in confined ancestry characterization | high | core |
+| Archived [issue-20261106-021835-047](resolved/issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md) | Assert installed no-new-privileges state in confined ancestry characterization (resolved 2026-11-21) | high | core |
 | [issue-20261106-013649-338](issue-20261106-013649-338-retain-failed-prepared-acquisition-rollback-owners.md) | Retain failed prepared acquisition rollback owners for explicit retry | high | core |
 | [issue-20261105-223351-669](issue-20261105-223351-669-preserve-prepared-resource-ownership-on-predispatc.md) | Preserve prepared resource ownership on predispatch close exceptions | high | core |
 | [issue-20261105-213712-210](issue-20261105-213712-210-retain-unobserved-confined-drain-sweep-fatal-failu.md) | Retain unobserved confined drain sweep fatal failures before replacement | high | core |
@@ -426,7 +428,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
 | [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
 | [issue-20261028-232809-819](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) | Reject contradictory completeness in imported profile documents | high | core |
-| [issue-20261028-232810-282](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation | high | core |
+| Archived [issue-20261028-232810-282](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation (resolved 2026-11-21) | high | core |
 | [issue-20261028-232810-687](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) | Prevent raw policy definitions from asserting invalid process scope | high | core |
 | Archived [issue-20261028-232811-132](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) | Freeze policy definition collections at every construction boundary (resolved 2026-11-21) | high | core |
 | [issue-20261028-232811-578](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) | Bind measured profile coverage to its observed behavior | medium | core |
