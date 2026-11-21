@@ -5,7 +5,8 @@
 ## 0.1.0 Release Tiers
 
 - **Published Stable (`0.1.0`) — `:lockdown` (`io.mazewall:mazewall-lockdown`):**
-  - Public package: `io.mazewall.lockdown` (`Mazewall`, `ProcessPolicy`, `RuntimeProfile`, `ProcessInstallation`, `MazewallInstallationException`).
+  - Public package: `io.mazewall.lockdown` (`Mazewall`, `ProcessPolicy`, `LockdownPreset`, `LockdownSyscall`, `RuntimeProfile`, `ProcessInstallation`, `MazewallInstallationException`).
+  - Supports selectable presets (`ProcessPolicy.elasticsearch`, `ProcessPolicy.openSearch`, `ProcessPolicy.denyProcessCreation`, `ProcessPolicy.fromPreset(LockdownPreset.*)`) and immutable syscall additions/removals (`block`, `unblock`, `blockedSyscalls`) over `LockdownSyscall`.
   - Has zero project dependencies beyond `kotlin-stdlib`, targets JDK 22 bytecode, and is guarded by `lockdown/api/lockdown.api`, `verifySupportedApiSurface`, and `verifyLockdownPublication`.
 - **Unpublished Experimental (`0.1.0`) — `:enforcer`, `:profiler`, `:portals:*`, `:integrations:*`:**
   - Retained in-repository for active development and evaluation (Landlock, thread-scoped workers, `USER_NOTIF` stacktrace supervision, profiling, and out-of-process portals). Not published as stable `0.1.0` Maven coordinates.

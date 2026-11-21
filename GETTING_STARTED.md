@@ -6,7 +6,7 @@ Read [STABILITY.md](STABILITY.md) and the [threat model](docs/internals/designs/
 
 ## 0.1.0 Stable Release: Process-Wide Execution Lockdown (`io.mazewall:mazewall-lockdown`)
 
-For the `0.1.0` release, `:lockdown` (`io.mazewall:mazewall-lockdown`, JPMS module `io.mazewall.lockdown`) is the standalone, supported stable library. Across every thread in the JVM process, it blocks `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`, and `prctl` subcommands outside the 6 safe options (`PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM`, returns `ENOSYS` for `clone3` (falling back to `clone`), and leaves `fork`/`vfork`/`clone` permitted (with inherited filter).
+For the `0.1.0` release, `:lockdown` (`io.mazewall:mazewall-lockdown`, JPMS module `io.mazewall.lockdown`) is the standalone, supported stable library. Callers can choose between curated presets (`ProcessPolicy.elasticsearch(...)`, `ProcessPolicy.openSearch(...)`, `ProcessPolicy.denyProcessCreation(...)`, or `ProcessPolicy.fromPreset(LockdownPreset.MAZEWALL_STRICT, ...)`) and immutably add or remove individual syscalls via `.block(...)` / `.unblock(...)` over `LockdownSyscall`. Across every thread in the JVM process, the installed filter blocks the configured syscalls plus `prctl` subcommands outside the 6 safe options (`PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM`, and returns `ENOSYS` for `clone3` (falling back to `clone`).
 
 ### Supported Matrix (`:lockdown` `0.1.0`)
 
@@ -51,6 +51,7 @@ dependencies {
 Call `Mazewall.installOnProcess` once on a **platform thread** (`!Thread.currentThread().isVirtual()`) at application startup, after any required helper child processes exit and before opening network listeners:
 
 ```java
+import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
 import io.mazewall.lockdown.MazewallInstallationException;
 import io.mazewall.lockdown.ProcessInstallation;
@@ -60,9 +61,9 @@ import io.mazewall.lockdown.RuntimeProfile;
 public final class ApplicationMain {
     public static void main(String[] args) {
         try {
-            ProcessInstallation installation = Mazewall.installOnProcess(
-                ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
-            );
+            ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
+                .block(LockdownSyscall.MEMFD_CREATE);
+            ProcessInstallation installation = Mazewall.installOnProcess(policy);
             System.out.println("Lockdown active (" + installation.architecture() + ")");
         } catch (MazewallInstallationException failure) {
             // Fail closed: do not swallow on unsupported OS/kernel, missing native access, or virtual thread.

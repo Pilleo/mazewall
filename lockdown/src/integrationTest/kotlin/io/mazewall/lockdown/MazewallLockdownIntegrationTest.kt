@@ -168,6 +168,8 @@ class MazewallLockdownIntegrationTest {
                 """
                 package probe;
 
+                import io.mazewall.lockdown.LockdownPreset;
+                import io.mazewall.lockdown.LockdownSyscall;
                 import io.mazewall.lockdown.Mazewall;
                 import io.mazewall.lockdown.MazewallInstallationException;
                 import io.mazewall.lockdown.ProcessInstallation;
@@ -179,10 +181,19 @@ class MazewallLockdownIntegrationTest {
                     public static void main(String[] args) {
                         String mode = args[0];
                         try {
-                            ProcessInstallation inst = Mazewall.installOnProcess(
-                                ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
-                            );
-                            if ("expect-install".equals(mode)) {
+                            ProcessPolicy policy = "expect-elasticsearch-custom".equals(mode)
+                                ? ProcessPolicy.fromPreset(LockdownPreset.ELASTICSEARCH, RuntimeProfile.HOTSPOT_JIT)
+                                    .block(LockdownSyscall.PIDFD_GETFD)
+                                    .unblock(LockdownSyscall.VFORK)
+                                : ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT);
+                            if ("expect-elasticsearch-custom".equals(mode)) {
+                                if (!policy.blockedSyscalls().contains(LockdownSyscall.PIDFD_GETFD)
+                                    || policy.blockedSyscalls().contains(LockdownSyscall.VFORK)) {
+                                    throw new AssertionError("Unexpected blockedSyscalls: " + policy.blockedSyscalls());
+                                }
+                            }
+                            ProcessInstallation inst = Mazewall.installOnProcess(policy);
+                            if ("expect-install".equals(mode) || "expect-elasticsearch-custom".equals(mode)) {
                                 try {
                                     new ProcessBuilder("/bin/echo", "blocked-probe").start();
                                     throw new AssertionError("ProcessBuilder unexpectedly succeeded after lockdown");
@@ -296,6 +307,18 @@ class MazewallLockdownIntegrationTest {
                 )
             assertEquals(0, optInSelfVerify.first, "Opt-in selfVerify probe failed: ${optInSelfVerify.second}")
             assertTrue(optInSelfVerify.second.contains("INSTALLED:depth=1"))
+
+            val elasticCustom =
+                runCommand(
+                    javaBin,
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-cp",
+                    "$lockdownJar:$stdlibJar:$cpOut",
+                    "probe.Probe",
+                    "expect-elasticsearch-custom",
+                )
+            assertEquals(0, elasticCustom.first, "Customized Elasticsearch preset probe failed: ${elasticCustom.second}")
+            assertTrue(elasticCustom.second.contains("INSTALLED:depth=1"))
         } finally {
             tempDir.toFile().deleteRecursively()
         }

@@ -9,7 +9,13 @@ Mazewall divides its modules and packages into three stability tiers. For the `0
 - **Public package:** `io.mazewall.lockdown`
 - **Public API surface:**
   - `Mazewall.installOnProcess(first: ProcessPolicy, vararg more: ProcessPolicy): ProcessInstallation`
-  - `ProcessPolicy.denyProcessCreation(runtime: RuntimeProfile): ProcessPolicy`
+  - `ProcessPolicy` presets & immutable customization:
+    - `ProcessPolicy.elasticsearch([runtime])` (`execve`, `execveat`, `fork`, `vfork`)
+    - `ProcessPolicy.openSearch([runtime])` (`elasticsearch` + `ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`)
+    - `ProcessPolicy.denyProcessCreation([runtime])` (default `MAZEWALL` preset: `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`)
+    - `ProcessPolicy.fromPreset(preset: LockdownPreset, [runtime])` (`ELASTICSEARCH`, `OPENSEARCH`, `MAZEWALL`, `MAZEWALL_STRICT`)
+    - `ProcessPolicy.block(...)`, `ProcessPolicy.unblock(...)`, `ProcessPolicy.blockedSyscalls()`, `ProcessPolicy.runtimeProfile()`
+  - `LockdownPreset`, `LockdownSyscall`
   - `RuntimeProfile` (`HOTSPOT_JIT`, `NATIVE_IMAGE`)
   - `ProcessInstallation` (`filterDepth`, `architecture` — `"amd64"` / `"aarch64"`)
   - `MazewallInstallationException`
@@ -21,7 +27,7 @@ Mazewall divides its modules and packages into three stability tiers. For the `0
   - **OS & kernel:** Linux `x86_64` (`amd64`) and `aarch64` (`arm64`), kernel 3.17+ with Seccomp-BPF and `SECCOMP_FILTER_FLAG_TSYNC` enabled.
   - **JVM:** JDK 22 through JDK 25 (`--release 22` bytecode floor) running with `--enable-native-access=io.mazewall.lockdown` (module path) or `--enable-native-access=ALL-UNNAMED` (classpath).
   - **Language compatibility:** Java 22+ (all standard types); Kotlin consumers require a Kotlin compiler compatible with `2.4.21` metadata (Kotlin `2.3+`).
-  - **Filter & verification contract (`0.1.0`):** Denies `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`, and non-allowlisted `prctl` options with `EPERM`; returns `ENOSYS` for `clone3`; leaves `fork`/`vfork`/`clone` permitted (children inherit the filter). Startup verification checks `PR_GET_SECCOMP == 2` plus `getpid()` liveness by default; active denied-syscall probing is opt-in via `-Dio.mazewall.selfVerify=true`.
+  - **Filter & verification contract (`0.1.0`):** Each preset denies its documented syscalls (and non-allowlisted `prctl` options outside `PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM`, returns `ENOSYS` for `clone3` (falling back to `clone`), and can be immutably tailored with `ProcessPolicy.block(...)` / `ProcessPolicy.unblock(...)` over `LockdownSyscall` without touching critical JVM coordination syscalls. `fork`/`vfork` are blocked in `ELASTICSEARCH`, `OPENSEARCH`, and `MAZEWALL_STRICT`, and left permitted (with inherited filter) in the `MAZEWALL` (`denyProcessCreation`) preset. Startup verification checks `PR_GET_SECCOMP == 2` plus `getpid()` liveness by default; active denied-syscall probing is opt-in via `-Dio.mazewall.selfVerify=true`.
 
 ## Tier 2 — Experimental (Unpublished in `0.1.0`)
 

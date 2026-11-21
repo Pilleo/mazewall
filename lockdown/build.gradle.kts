@@ -536,6 +536,8 @@ abstract class VerifyLockdownPublication : DefaultTask() {
     private companion object {
         val REQUIRED_PUBLIC_CLASSES =
             listOf(
+                "io/mazewall/lockdown/LockdownPreset.class",
+                "io/mazewall/lockdown/LockdownSyscall.class",
                 "io/mazewall/lockdown/Mazewall.class",
                 "io/mazewall/lockdown/MazewallInstallationException.class",
                 "io/mazewall/lockdown/ProcessInstallation.class",
@@ -545,6 +547,8 @@ abstract class VerifyLockdownPublication : DefaultTask() {
 
         val ALLOWED_PUBLIC_TOP_LEVEL_TYPES =
             setOf(
+                "LockdownPreset",
+                "LockdownSyscall",
                 "Mazewall",
                 "MazewallInstallationException",
                 "ProcessInstallation",

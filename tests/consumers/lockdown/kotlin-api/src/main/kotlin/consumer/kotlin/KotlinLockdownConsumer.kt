@@ -1,5 +1,7 @@
 package consumer.kotlin
 
+import io.mazewall.lockdown.LockdownPreset
+import io.mazewall.lockdown.LockdownSyscall
 import io.mazewall.lockdown.Mazewall
 import io.mazewall.lockdown.ProcessPolicy
 import io.mazewall.lockdown.RuntimeProfile
@@ -15,6 +17,16 @@ fun main() {
 
     val repeated = Mazewall.installOnProcess(ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
     check(repeated.filterDepth == 1) { "Expected idempotent filterDepth == 1" }
+
+    val elastic = ProcessPolicy.elasticsearch()
+    check(elastic.blockedSyscalls().size == 4) { "Unexpected Elasticsearch preset size: ${elastic.blockedSyscalls()}" }
+    val customized =
+        ProcessPolicy
+            .fromPreset(LockdownPreset.OPENSEARCH)
+            .block(LockdownSyscall.BPF)
+            .unblock(LockdownSyscall.PTRACE)
+    val narrowed = Mazewall.installOnProcess(customized)
+    check(narrowed.filterDepth == 2) { "Expected narrowed filterDepth == 2, got ${narrowed.filterDepth}" }
 
     val blocked =
         try {

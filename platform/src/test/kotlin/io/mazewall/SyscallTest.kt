@@ -153,6 +153,8 @@ class SyscallTest {
         Syscall.BPF to arch.bpf,
         Syscall.PROCESS_VM_WRITEV to arch.processVmWritev,
         Syscall.PROCESS_VM_READV to arch.processVmReadv,
+        Syscall.PIDFD_OPEN to arch.pidfdOpen,
+        Syscall.PIDFD_GETFD to arch.pidfdGetFd,
         Syscall.USERFAULTFD to arch.userfaultfd,
         Syscall.UNSHARE to arch.unshare,
         Syscall.SETNS to arch.setns,

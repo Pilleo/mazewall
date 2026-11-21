@@ -1,3 +1,54 @@
+public final class io/mazewall/lockdown/LockdownPreset : java/lang/Enum {
+	public static final field ELASTICSEARCH Lio/mazewall/lockdown/LockdownPreset;
+	public static final field MAZEWALL Lio/mazewall/lockdown/LockdownPreset;
+	public static final field MAZEWALL_STRICT Lio/mazewall/lockdown/LockdownPreset;
+	public static final field OPENSEARCH Lio/mazewall/lockdown/LockdownPreset;
+	public final fun defaultBlockedSyscalls ()Ljava/util/Set;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/lockdown/LockdownPreset;
+	public static fun values ()[Lio/mazewall/lockdown/LockdownPreset;
+}
+
+public final class io/mazewall/lockdown/LockdownSyscall : java/lang/Enum {
+	public static final field BPF Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field CHMOD Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field CHOWN Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field CHROOT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field EXECVE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field EXECVEAT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FCHMOD Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FCHMODAT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FCHOWN Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FCHOWNAT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FINIT_MODULE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field FORK Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field INIT_MODULE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field IO_URING_ENTER Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field IO_URING_SETUP Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field LCHOWN Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field LINK Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field LINKAT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field MEMFD_CREATE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field MOUNT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PIDFD_GETFD Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PIDFD_OPEN Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PIVOT_ROOT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PROCESS_VM_READV Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PROCESS_VM_WRITEV Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field PTRACE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field SETNS Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field SYMLINK Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field SYMLINKAT Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field UMOUNT2 Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field UNSHARE Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field USERFAULTFD Lio/mazewall/lockdown/LockdownSyscall;
+	public static final field VFORK Lio/mazewall/lockdown/LockdownSyscall;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun syscallName ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/lockdown/LockdownSyscall;
+	public static fun values ()[Lio/mazewall/lockdown/LockdownSyscall;
+}
+
 public final class io/mazewall/lockdown/Mazewall {
 	public static final field INSTANCE Lio/mazewall/lockdown/Mazewall;
 	public static final fun installOnProcess (Lio/mazewall/lockdown/ProcessPolicy;[Lio/mazewall/lockdown/ProcessPolicy;)Lio/mazewall/lockdown/ProcessInstallation;
@@ -18,14 +69,38 @@ public final class io/mazewall/lockdown/ProcessInstallation {
 
 public final class io/mazewall/lockdown/ProcessPolicy {
 	public static final field Companion Lio/mazewall/lockdown/ProcessPolicy$Companion;
+	public final fun block (Lio/mazewall/lockdown/LockdownSyscall;[Lio/mazewall/lockdown/LockdownSyscall;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun block (Ljava/util/Collection;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun blockedSyscalls ()Ljava/util/Set;
+	public static final fun denyProcessCreation ()Lio/mazewall/lockdown/ProcessPolicy;
 	public static final fun denyProcessCreation (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static final fun elasticsearch ()Lio/mazewall/lockdown/ProcessPolicy;
+	public static final fun elasticsearch (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
 	public fun equals (Ljava/lang/Object;)Z
+	public static final fun fromPreset (Lio/mazewall/lockdown/LockdownPreset;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static final fun fromPreset (Lio/mazewall/lockdown/LockdownPreset;Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
 	public fun hashCode ()I
+	public static final fun openSearch ()Lio/mazewall/lockdown/ProcessPolicy;
+	public static final fun openSearch (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun runtimeProfile ()Lio/mazewall/lockdown/RuntimeProfile;
 	public fun toString ()Ljava/lang/String;
+	public final fun unblock (Lio/mazewall/lockdown/LockdownSyscall;[Lio/mazewall/lockdown/LockdownSyscall;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun unblock (Ljava/util/Collection;)Lio/mazewall/lockdown/ProcessPolicy;
 }
 
 public final class io/mazewall/lockdown/ProcessPolicy$Companion {
+	public final fun denyProcessCreation ()Lio/mazewall/lockdown/ProcessPolicy;
 	public final fun denyProcessCreation (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static synthetic fun denyProcessCreation$default (Lio/mazewall/lockdown/ProcessPolicy$Companion;Lio/mazewall/lockdown/RuntimeProfile;ILjava/lang/Object;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun elasticsearch ()Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun elasticsearch (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static synthetic fun elasticsearch$default (Lio/mazewall/lockdown/ProcessPolicy$Companion;Lio/mazewall/lockdown/RuntimeProfile;ILjava/lang/Object;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun fromPreset (Lio/mazewall/lockdown/LockdownPreset;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun fromPreset (Lio/mazewall/lockdown/LockdownPreset;Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static synthetic fun fromPreset$default (Lio/mazewall/lockdown/ProcessPolicy$Companion;Lio/mazewall/lockdown/LockdownPreset;Lio/mazewall/lockdown/RuntimeProfile;ILjava/lang/Object;)Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun openSearch ()Lio/mazewall/lockdown/ProcessPolicy;
+	public final fun openSearch (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static synthetic fun openSearch$default (Lio/mazewall/lockdown/ProcessPolicy$Companion;Lio/mazewall/lockdown/RuntimeProfile;ILjava/lang/Object;)Lio/mazewall/lockdown/ProcessPolicy;
 }
 
 public final class io/mazewall/lockdown/RuntimeProfile : java/lang/Enum {

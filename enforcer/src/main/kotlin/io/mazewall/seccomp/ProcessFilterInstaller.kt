@@ -29,6 +29,23 @@ internal object ProcessFilterInstaller {
         message: String,
     ) : IllegalStateException(message)
 
+    internal val ELASTICSEARCH_BLOCKED_SYSCALLS: Set<Syscall> =
+        setOf(
+            Syscall.EXECVE,
+            Syscall.EXECVEAT,
+            Syscall.FORK,
+            Syscall.VFORK,
+        )
+
+    internal val OPENSEARCH_BLOCKED_SYSCALLS: Set<Syscall> =
+        ELASTICSEARCH_BLOCKED_SYSCALLS +
+            setOf(
+                Syscall.PTRACE,
+                Syscall.PROCESS_VM_READV,
+                Syscall.PROCESS_VM_WRITEV,
+                Syscall.PIDFD_GETFD,
+            )
+
     internal val DENY_PROCESS_CREATION_BLOCKED_SYSCALLS: Set<Syscall> =
         setOf(
             Syscall.EXECVE,
@@ -38,17 +55,26 @@ internal object ProcessFilterInstaller {
             Syscall.IO_URING_ENTER,
         )
 
+    internal val MAZEWALL_STRICT_BLOCKED_SYSCALLS: Set<Syscall> =
+        OPENSEARCH_BLOCKED_SYSCALLS + DENY_PROCESS_CREATION_BLOCKED_SYSCALLS
+
     internal data class InstalledProcessFilter(
         val filterDepth: Int,
         val arch: Arch,
     )
 
-    internal fun denyProcessCreationDefinition(allowExecutableMappings: Boolean): PolicyDefinition<PolicyScope.ProcessWideSafe> =
+    internal fun policyDefinition(
+        blockedSyscalls: Set<Syscall>,
+        allowExecutableMappings: Boolean,
+    ): PolicyDefinition<PolicyScope.ProcessWideSafe> =
         PolicyDefinition<PolicyScope.ProcessWideSafe>(
             defaultAction = SeccompAction.ACT_ALLOW,
-            syscallActions = DENY_PROCESS_CREATION_BLOCKED_SYSCALLS.associateWith { SeccompAction.ACT_ERRNO() },
+            syscallActions = blockedSyscalls.associateWith { SeccompAction.ACT_ERRNO() },
             allowMmapExec = allowExecutableMappings,
         ).frozenCopy()
+
+    internal fun denyProcessCreationDefinition(allowExecutableMappings: Boolean): PolicyDefinition<PolicyScope.ProcessWideSafe> =
+        policyDefinition(DENY_PROCESS_CREATION_BLOCKED_SYSCALLS, allowExecutableMappings)
 
     @Suppress("TooGenericExceptionCaught") // Preserves fatal identity and quarantines failed process installations.
     internal fun install(

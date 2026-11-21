@@ -45,6 +45,8 @@ public enum class Syscall {
     BPF,
     PROCESS_VM_WRITEV,
     PROCESS_VM_READV,
+    PIDFD_OPEN,
+    PIDFD_GETFD,
     USERFAULTFD,
     UNSHARE,
     SETNS,

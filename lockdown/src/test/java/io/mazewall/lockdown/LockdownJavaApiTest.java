@@ -13,6 +13,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 
@@ -39,6 +40,8 @@ class LockdownJavaApiTest {
             ProcessPolicy.class,
             ProcessInstallation.class,
             RuntimeProfile.class,
+            LockdownPreset.class,
+            LockdownSyscall.class,
             MazewallInstallationException.class
         );
         for (Class<?> apiType : apiTypes) {
@@ -55,6 +58,42 @@ class LockdownJavaApiTest {
                 }
             }
         }
+    }
+
+    @Test
+    void javaCallersCanSelectOpenSearchAndElasticsearchPresetsAndCustomizeSyscalls() {
+        ProcessPolicy elastic = ProcessPolicy.elasticsearch();
+        ProcessPolicy openSearch = ProcessPolicy.openSearch(RuntimeProfile.NATIVE_IMAGE);
+        ProcessPolicy strict = ProcessPolicy.fromPreset(LockdownPreset.MAZEWALL_STRICT);
+
+        assertEquals(RuntimeProfile.HOTSPOT_JIT, elastic.runtimeProfile());
+        assertEquals(RuntimeProfile.NATIVE_IMAGE, openSearch.runtimeProfile());
+        assertEquals(4, elastic.blockedSyscalls().size());
+        assertEquals(8, openSearch.blockedSyscalls().size());
+        assertEquals(11, strict.blockedSyscalls().size());
+        assertEquals("pidfd_getfd", LockdownSyscall.PIDFD_GETFD.syscallName());
+
+        ProcessPolicy customized = elastic
+            .block(LockdownSyscall.PIDFD_GETFD, LockdownSyscall.BPF)
+            .unblock(LockdownSyscall.VFORK)
+            .block(List.of(LockdownSyscall.UNSHARE))
+            .unblock(List.of(LockdownSyscall.BPF));
+
+        assertEquals(Set.of(
+            LockdownSyscall.EXECVE,
+            LockdownSyscall.EXECVEAT,
+            LockdownSyscall.FORK,
+            LockdownSyscall.PIDFD_GETFD,
+            LockdownSyscall.UNSHARE
+        ), customized.blockedSyscalls());
+
+        assertThrows(UnsupportedOperationException.class, () -> customized.blockedSyscalls().add(LockdownSyscall.BPF));
+        assertThrows(NullPointerException.class, () -> ProcessPolicy.fromPreset(null));
+        assertThrows(NullPointerException.class, () -> ProcessPolicy.elasticsearch(null));
+        assertThrows(NullPointerException.class, () -> elastic.block((LockdownSyscall) null));
+        assertThrows(NullPointerException.class, () -> elastic.block(Arrays.asList(LockdownSyscall.BPF, null)));
+        assertThrows(NullPointerException.class, () -> elastic.unblock((LockdownSyscall) null));
+        assertThrows(NullPointerException.class, () -> elastic.unblock(Arrays.asList(LockdownSyscall.FORK, null)));
     }
 
     @Test
@@ -108,6 +147,8 @@ class LockdownJavaApiTest {
         String name = base.getName();
         boolean allowed = (name.startsWith("io.mazewall.lockdown.") && !name.startsWith("io.mazewall.lockdown.internal.")) ||
             name.startsWith("java.lang.") ||
+            name.equals("java.util.Set") ||
+            name.equals("java.util.Collection") ||
             name.equals("kotlin.enums.EnumEntries");
         assertTrue(allowed, "Internal or leaked type in public JVM signature: " + name);
     }

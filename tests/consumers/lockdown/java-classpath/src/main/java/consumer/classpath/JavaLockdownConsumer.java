@@ -1,5 +1,7 @@
 package consumer.classpath;
 
+import io.mazewall.lockdown.LockdownPreset;
+import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
 import io.mazewall.lockdown.MazewallInstallationException;
 import io.mazewall.lockdown.ProcessInstallation;
@@ -52,6 +54,19 @@ public final class JavaLockdownConsumer {
         );
         if (second.filterDepth() != 1) {
             throw new AssertionError("Expected idempotent filterDepth == 1, got " + second.filterDepth());
+        }
+
+        ProcessPolicy elastic = ProcessPolicy.elasticsearch();
+        ProcessPolicy openSearchCustom = ProcessPolicy.fromPreset(LockdownPreset.OPENSEARCH)
+            .block(LockdownSyscall.BPF)
+            .unblock(LockdownSyscall.PTRACE);
+        if (elastic.blockedSyscalls().size() != 4 || !openSearchCustom.blockedSyscalls().contains(LockdownSyscall.BPF)
+            || openSearchCustom.blockedSyscalls().contains(LockdownSyscall.PTRACE)) {
+            throw new AssertionError("Unexpected preset customization: " + openSearchCustom.blockedSyscalls());
+        }
+        ProcessInstallation narrowed = Mazewall.installOnProcess(openSearchCustom);
+        if (narrowed.filterDepth() != 2) {
+            throw new AssertionError("Expected narrowed filterDepth == 2, got " + narrowed.filterDepth());
         }
 
         assertProcessBlocked("main");

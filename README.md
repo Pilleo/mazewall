@@ -51,6 +51,8 @@ java --enable-native-access=ALL-UNNAMED -jar app.jar
 Call `Mazewall.installOnProcess` once on your startup platform thread after any required startup child commands finish and before opening network traffic:
 
 ```java
+import io.mazewall.lockdown.LockdownPreset;
+import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
 import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
@@ -58,9 +60,15 @@ import io.mazewall.lockdown.RuntimeProfile;
 
 public final class ServiceBootstrap {
     public static void main(String[] args) {
-        ProcessInstallation installation = Mazewall.installOnProcess(
-            ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
-        );
+        // Choose Elasticsearch (execve, execveat, fork, vfork),
+        // OpenSearch (+ ptrace, process_vm_readv/writev, pidfd_getfd),
+        // Mazewall default (denyProcessCreation), or MAZEWALL_STRICT,
+        // and add/remove syscalls with .block(...) / .unblock(...):
+        ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
+            .unblock(LockdownSyscall.PTRACE)
+            .block(LockdownSyscall.MEMFD_CREATE);
+
+        ProcessInstallation installation = Mazewall.installOnProcess(policy);
         // Process-wide lockdown is active (installation.filterDepth() >= 1)
     }
 }
@@ -69,14 +77,13 @@ public final class ServiceBootstrap {
 ## Promise and Limits (`io.mazewall:mazewall-lockdown` `0.1.0`)
 
 **What it promises:**
-- After `Mazewall.installOnProcess(ProcessPolicy.denyProcessCreation(...))` returns on Linux (`amd64` or `aarch64`, kernel 3.17+ with `SECCOMP_FILTER_FLAG_TSYNC`), the kernel denies these syscalls with `EPERM` across **every thread** in the process (pre-existing platform threads via `TSYNC`, future threads, Loom virtual threads, and JNI/FFM native libraries):
-  - `execve`
-  - `execveat`
-  - `memfd_create`
-  - `io_uring_setup`
-  - `io_uring_enter`
-  - `prctl` options outside the 6 safe options (`PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`)
-- `clone3` returns `ENOSYS` so glibc falls back cleanly to `clone`. `fork`, `vfork`, and `clone` remain permitted in `0.1.0` (any child process inherits the irreversible seccomp filter and cannot `execve`).
+- Choose from curated `LockdownPreset` baselines or tailor individual syscalls via `ProcessPolicy.block(...)` / `ProcessPolicy.unblock(...)` over `LockdownSyscall` (`execve`, `execveat`, `fork`, `vfork`, `ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`, `memfd_create`, `io_uring_setup`, `io_uring_enter`, `bpf`, `userfaultfd`, namespaces/mounts, `chown`/`chmod`/`link`/`symlink` — excluding critical JVM coordination syscalls):
+  - `ProcessPolicy.elasticsearch(...)` (`LockdownPreset.ELASTICSEARCH`): `execve`, `execveat`, `fork`, `vfork`
+  - `ProcessPolicy.openSearch(...)` (`LockdownPreset.OPENSEARCH`): `ELASTICSEARCH` + `ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`
+  - `ProcessPolicy.denyProcessCreation(...)` (`LockdownPreset.MAZEWALL`): `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`
+  - `ProcessPolicy.fromPreset(LockdownPreset.MAZEWALL_STRICT, ...)`: full union of `OPENSEARCH` + `MAZEWALL` (`11` syscalls)
+- After `Mazewall.installOnProcess(...)` returns on Linux (`amd64` or `aarch64`, kernel 3.17+ with `SECCOMP_FILTER_FLAG_TSYNC`), the kernel denies every configured syscall in the policy (plus `prctl` options outside the 6 safe options `PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM` across **every thread** in the process (pre-existing platform threads via `TSYNC`, future threads, Loom virtual threads, and JNI/FFM native libraries).
+- `clone3` returns `ENOSYS` so glibc falls back cleanly to `clone`. `clone(CLONE_THREAD)` stays allowed for JVM thread creation; `fork`/`vfork` are blocked in `ELASTICSEARCH`/`OPENSEARCH`/`MAZEWALL_STRICT` and permitted (inheriting the irreversible filter) in `MAZEWALL` (`denyProcessCreation`).
 - Explicit runtime profile selection without guesswork: `RuntimeProfile.HOTSPOT_JIT` preserves JIT code-cache executable mappings, while `RuntimeProfile.NATIVE_IMAGE` also blocks new executable `mmap`/`mprotect`/`pkey_mprotect` mappings (`PROT_EXEC`).
 - Repeated identical `installOnProcess` calls succeed idempotently without stacking redundant filters; incompatible profile relaxation (`HOTSPOT_JIT` after `NATIVE_IMAGE` or conflicting profiles in one call) fails closed with `MazewallInstallationException`.
 - Safe startup verification: by default, installation verifies `prctl(PR_GET_SECCOMP) == 2` and `getpid()` liveness without issuing synthetic denied syscalls (avoiding `SIGSYS` under strict outer seccomp `KILL`/`TRAP` profiles and avoiding false-positive alerts in Falco/auditd). Pass `-Dio.mazewall.selfVerify=true` in CI or staging to also run active denied-syscall probes.

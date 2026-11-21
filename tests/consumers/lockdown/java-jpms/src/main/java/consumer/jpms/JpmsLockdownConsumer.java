@@ -1,5 +1,7 @@
 package consumer.jpms;
 
+import io.mazewall.lockdown.LockdownPreset;
+import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
 import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
@@ -15,8 +17,16 @@ public final class JpmsLockdownConsumer {
             throw new AssertionError("Pre-install /bin/echo exited with " + pre.exitValue());
         }
 
+        ProcessPolicy elastic = ProcessPolicy.fromPreset(LockdownPreset.ELASTICSEARCH, RuntimeProfile.HOTSPOT_JIT)
+            .block(LockdownSyscall.PIDFD_GETFD)
+            .unblock(LockdownSyscall.VFORK);
+        if (!elastic.blockedSyscalls().contains(LockdownSyscall.PIDFD_GETFD)
+            || elastic.blockedSyscalls().contains(LockdownSyscall.VFORK)) {
+            throw new AssertionError("Unexpected JPMS preset syscalls: " + elastic.blockedSyscalls());
+        }
+
         ProcessInstallation installed = Mazewall.installOnProcess(
-            ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+            ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
         );
         if (installed.filterDepth() != 1) {
             throw new AssertionError("Expected filterDepth == 1, got " + installed.filterDepth());
