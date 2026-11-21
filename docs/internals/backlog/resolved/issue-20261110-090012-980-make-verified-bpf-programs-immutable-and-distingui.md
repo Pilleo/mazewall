@@ -1,7 +1,7 @@
 ---
 title: "Make verified BPF programs immutable and distinguish static verification from installation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,9 @@ P1 security invariants (:enforcer, :platform where needed, effort medium, risk m
 
 **Needed:**
 1. Add failing test A (mutate source list after verify) in the BpfStaticVerifier tests, then snapshot instructions defensively at verification and restrict Verified construction
+
+## Resolution Evidence (2026-11-21)
+- Already resolved in `BpfProgram.kt` via immutable snapshot copy and private `Verified` proof construction through `BpfStaticVerifier`; verified in `BpfVerificationBoundaryTest` and `:enforcer:test`.
 
 ---
 <!-- id: issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui  file: issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md -->

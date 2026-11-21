@@ -1,7 +1,7 @@
 ---
 title: "Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,9 @@ Post-0.1.0 enhancement from the v1 hardening spec: allow operators to attach io.
 
 **Needed:**
 1. Design the -javaagent Premain-Class entrypoint and argument grammar in lockdown/ and verify modular/classpath agent startup without auto-activating on normal library classpath usage.
+
+## Resolution Evidence (2026-11-21)
+- Added `MazewallAgent` (`premain(String?)`, `parsePolicy(String?)`), manifest `Premain-Class`, `VerifyLockdownPublication` enforcement, `lockdown/api/lockdown.api`, unit tests (`MazewallAgentTest`, `LockdownJavaApiTest`), and packaged `-javaagent` subprocess verification in `MazewallLockdownIntegrationTest`.
 
 ---
 <!-- id: issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f  file: issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md -->

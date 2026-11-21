@@ -75,6 +75,7 @@ public final class ApplicationMain {
 
 - Use `RuntimeProfile.HOTSPOT_JIT` on standard HotSpot JVMs so JIT compilation can continue allocating executable code-cache pages.
 - Use `RuntimeProfile.NATIVE_IMAGE` on GraalVM Native Image / AOT runtimes where executable `mmap`/`mprotect`/`pkey_mprotect` (`PROT_EXEC`) mappings should also be denied. Once `NATIVE_IMAGE` is installed, attempting to relax back to `HOTSPOT_JIT` fails closed with `MazewallInstallationException`.
+- **Zero-code `-javaagent` attachment:** You can also attach `mazewall-lockdown.jar` before `main()` via `-javaagent:mazewall-lockdown.jar[=preset=opensearch,runtime=hotspot_jit,block=memfd_create,unblock=ptrace]` (normal library usage remains passive unless `-javaagent` is passed).
 - **Startup verification:** Default installation checks `prctl(PR_GET_SECCOMP) == 2` and `getpid()` liveness without firing synthetic denied syscalls; pass `-Dio.mazewall.selfVerify=true` in CI/staging to enable active denied-syscall probing.
 - **Container `no_new_privs` compatibility:** If an outer container profile blocks `prctl(PR_SET_NO_NEW_PRIVS, 1)`, lockdown checks `prctl(PR_GET_NO_NEW_PRIVS)` and continues if `no_new_privs == 1` was already set by the container runtime (failing closed with phase-specific diagnostics otherwise).
 - **Incompatible JVM flags:** No-exec policies reject `-XX:OnError=...` and `-XX:OnOutOfMemoryError=...` at pre-install validation time; use `-XX:+ExitOnOutOfMemoryError` or `-XX:+CrashOnOutOfMemoryError` so OOM handling does not attempt a blocked fork/exec shell spawn.

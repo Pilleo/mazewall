@@ -74,6 +74,14 @@ public final class ServiceBootstrap {
 }
 ```
 
+Or attach with zero application code changes via `-javaagent`:
+
+```bash
+java --enable-native-access=ALL-UNNAMED \
+  -javaagent:mazewall-lockdown.jar=preset=opensearch,block=memfd_create,unblock=ptrace \
+  -jar app.jar
+```
+
 ## Promise and Limits (`io.mazewall:mazewall-lockdown` `0.1.0`)
 
 **What it promises:**

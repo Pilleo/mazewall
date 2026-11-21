@@ -1,7 +1,7 @@
 ---
 title: "Refactor classic-BPF instructions into a type-safe sealed hierarchy"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,9 @@ P1 architecture/correctness (:platform, :enforcer, effort medium-large, risk med
 
 **Needed:**
 1. After the verifier fix lands, design the typed Jump.Always/Jump.Conditional hierarchy with a single raw sock_filter encoding boundary and capture byte-identical baseline output of representative compiled policies before refactoring
+
+## Resolution Evidence (2026-11-21)
+- Already resolved in `BpfInstruction.kt` via closed sealed variants (`Ld`, `Alu`, `Ja`, `Jmp`, `Ret`) with single encoding boundary and exhaustive handling across `BpfProgram`, `BpfStaticVerifier`, `BpfSimulator`, and `:platform:test` / `:enforcer:test`.
 
 ---
 <!-- id: issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe  file: issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md -->

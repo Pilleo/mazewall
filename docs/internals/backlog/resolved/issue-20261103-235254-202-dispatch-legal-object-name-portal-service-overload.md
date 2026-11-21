@@ -1,7 +1,7 @@
 ---
 title: "Dispatch legal Object-name Portal service overloads to the guest"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "portal-runtime"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Dispatch legal Object-name Portal service overloads to the guest
 
 **Context:**
-Repository-wide review, 2026-11-04: [PRT-05](../reviews/2026-11-04-repository-review-findings.md#prt-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PRT-05](../../reviews/2026-11-04-repository-review-findings.md#prt-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · generated-contract blocker · NEW · source-confirmed and reproduced against existing bytecode · release boundary: PortalRuntime bindings.** PRT-05 and PCG-11 share this owner: accepted service operations never reach the worker. The consolidated priority is P1/high for the advertised generated contract, rather than the runtime lane's narrower P2 API assessment.
 
@@ -46,6 +46,9 @@ The helper's bytecode was checked with `javap -p -c` and agrees with the cited c
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution Evidence (2026-11-21)
+- Updated `PortalRuntime.createServiceProxy` in `PortalRuntime.kt` to match only `equals(Object)`, `hashCode()`, and `toString()` locally on the proxy and route overloaded `equals(Int)`, `hashCode(Int)`, and `toString(Int)` through `statefulGate` / `ensureOpen()`, verified in `PortalRuntimeTest`.
 
 ---
 <!-- id: issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload  file: issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md -->

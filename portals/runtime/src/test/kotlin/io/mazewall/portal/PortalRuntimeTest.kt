@@ -23,6 +23,14 @@ import java.util.zip.ZipOutputStream
 class PortalRuntimeTest {
     interface MissingService
 
+    interface OverloadedObjectService {
+        fun toString(id: Int): String
+
+        fun hashCode(seed: Int): Int
+
+        fun equals(id: Int): Boolean
+    }
+
     @Test
     fun `fatal stateful call preserves identity and terminal state loss`() {
         val manifest = sampleManifest("worker")
@@ -190,6 +198,64 @@ class PortalRuntimeTest {
             .of(config.workerClasspath(second))
 
         assertNotEquals(firstJar.parent.parent, secondJar.parent.parent)
+    }
+
+    @Test
+    fun `proxy dispatches Object-name overloads while retaining local Object identity`() {
+        val manifest =
+            sampleManifest("worker").copy(
+                serviceId = PortalServiceId("overload"),
+                contractName = OverloadedObjectService::class.java.name,
+            )
+        val runtime =
+            PortalRuntime.open(
+                PortalRuntimeConfig(
+                    manifests = listOf(manifest),
+                    workerProfiles = mapOf("restricted" to PortalWorkerProfile()),
+                ),
+            )
+        try {
+            val calls = AtomicInteger(0)
+            val delegate =
+                object : OverloadedObjectService {
+                    override fun toString(id: Int): String {
+                        calls.incrementAndGet()
+                        return "remote-$id"
+                    }
+
+                    override fun hashCode(seed: Int): Int {
+                        calls.incrementAndGet()
+                        return seed + 1
+                    }
+
+                    override fun equals(id: Int): Boolean {
+                        calls.incrementAndGet()
+                        return id == 7
+                    }
+                }
+
+            val proxy = runtime.createServiceProxy(OverloadedObjectService::class.java, manifest, delegate)
+
+            assertEquals("PortalProxy(overload)", proxy.toString())
+            assertEquals(System.identityHashCode(proxy), proxy.hashCode())
+            assertEquals(true, proxy.equals(proxy))
+            assertEquals(false, proxy.equals("other"))
+            assertEquals(0, calls.get())
+
+            assertEquals("remote-7", proxy.toString(7))
+            assertEquals(8, proxy.hashCode(7))
+            assertEquals(true, proxy.equals(7))
+            assertEquals(false, proxy.equals(8))
+            assertEquals(4, calls.get())
+
+            runtime.close()
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.toString(7) }
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.hashCode(7) }
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.equals(7) }
+            assertEquals(4, calls.get())
+        } finally {
+            runtime.close()
+        }
     }
 
     private fun sampleManifest(artifact: String): PortalServiceManifest =

@@ -1,7 +1,7 @@
 ---
 title: "Preserve fatal failures during Portal declared-exception reconstruction"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "portal-runtime"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Preserve fatal failures during Portal declared-exception reconstruction
 
 **Context:**
-Repository-wide review, 2026-11-04: [PCG-10](../reviews/2026-11-04-repository-review-findings.md#pcg-10). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PCG-10](../../reviews/2026-11-04-repository-review-findings.md#pcg-10). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · NEW freshly reproduced defect · high confidence · Portal generated-error
 path/runtime helper.**
@@ -58,6 +58,9 @@ path/runtime helper.**
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution Evidence (2026-11-21)
+- Updated `PortalDeclaredExceptionMapper` so `(String)` and `()` constructor lookup falls back only on `NoSuchMethodException` / non-invocation reflective failures, while `InvocationTargetException` unwraps and rethrows the constructor's actual `Throwable` with `remote` attached in `suppressed`; verified with `PortalStatefulInvocationGate` in `PortalDeclaredExceptionMapperTest`.
 
 ---
 <!-- id: issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc  file: issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md -->

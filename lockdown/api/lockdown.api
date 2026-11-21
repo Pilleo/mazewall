@@ -54,6 +54,12 @@ public final class io/mazewall/lockdown/Mazewall {
 	public static final fun installOnProcess (Lio/mazewall/lockdown/ProcessPolicy;[Lio/mazewall/lockdown/ProcessPolicy;)Lio/mazewall/lockdown/ProcessInstallation;
 }
 
+public final class io/mazewall/lockdown/MazewallAgent {
+	public static final field INSTANCE Lio/mazewall/lockdown/MazewallAgent;
+	public static final fun parsePolicy (Ljava/lang/String;)Lio/mazewall/lockdown/ProcessPolicy;
+	public static final fun premain (Ljava/lang/String;)V
+}
+
 public final class io/mazewall/lockdown/MazewallInstallationException : java/lang/RuntimeException {
 	public fun <init> (Ljava/lang/String;)V
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V

@@ -1,7 +1,7 @@
 ---
 title: "Reject FIFO Portal grants without blocking before file-type validation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "portal-runtime"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Reject FIFO Portal grants without blocking before file-type validation
 
 **Context:**
-Repository-wide review, 2026-11-04: [PRT-03](../reviews/2026-11-04-repository-review-findings.md#prt-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PRT-03](../../reviews/2026-11-04-repository-review-findings.md#prt-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · liveness/input validation · NEW · high source/kernel-contract confidence; not natively reproduced · release boundary: Portal file grants**
 
@@ -34,6 +34,9 @@ Repository-wide review, 2026-11-04: [PRT-03](../reviews/2026-11-04-repository-re
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution Evidence (2026-11-21)
+- Updated `openGrantedRead` in `PortalChannel.kt` to open with `O_NONBLOCK` and clear `O_NONBLOCK` via `LinuxNative.raw.fcntl` only after verifying `Files.isRegularFile` on `/proc/self/fd/<fd>`, with writerless FIFO and regular-file controls in `OpenGrantedReadTest`.
 
 ---
 <!-- id: issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-  file: issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md -->

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 417 | *Total Resolved Issues:* 768
+*Total Active Issues:* 410 | *Total Resolved Issues:* 775
 
-Active status detail: 415 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 408 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -137,7 +137,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Issue | Title | Priority | Component |
 |---|---|---|---|
 | [issue-20261121-175747-959](issue-20261121-175747-959-add-oci-container-seccomp-profile-and-no-new-privs.md) | Add OCI container seccomp profile and no_new_privs matrix integration tests for mazewall-lockdown | high | core |
-| [issue-20261121-175746-741](issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown | high | core |
+| Archived [issue-20261121-175746-741](resolved/issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown (resolved 2026-11-21) | high | core |
 | [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
 | [issue-20261120-170411-782-graalvm-native-image-backend](issue-20261120-170411-782-graalvm-native-image-backend.md) | GraalVM Native Image backend | medium | portal-runtime |
 | [issue-20261120-170411-175-older-kernel-support](issue-20261120-170411-175-older-kernel-support.md) | Older-kernel support | medium | portal-runtime |
@@ -169,9 +169,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261120-122441-870](issue-20261120-122441-870-phase-4-verify-kernel-matrix-packaged-consumers-an.md) | Phase 4: Verify kernel matrix, packaged consumers, and independent security review | high | core |
 | Archived [issue-20261120-122442-047](resolved/issue-20261120-122442-047-phase-5-write-0-1-0-release-documentation-and-clea.md) | Phase 5: Write 0.1.0 release documentation and clean repository hygiene (resolved 2026-11-21) | high | core |
 | [issue-20261120-122442-356](issue-20261120-122442-356-phase-6-tag-v0-1-0-publish-lockdown-and-verify-rem.md) | Phase 6: Tag v0.1.0, publish :lockdown, and verify remote artifact download | high | core |
-| [issue-20261110-085945-106](issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier | high | core |
-| [issue-20261110-090012-628](issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy | high | core |
-| [issue-20261110-090012-980](issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation | high | core |
+| Archived [issue-20261110-085945-106](resolved/issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier (resolved 2026-11-21) | high | core |
+| Archived [issue-20261110-090012-628](resolved/issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy (resolved 2026-11-21) | high | core |
+| Archived [issue-20261110-090012-980](resolved/issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation (resolved 2026-11-21) | high | core |
 | [issue-20261107-045431-849](issue-20261107-045431-849-preserve-executable-info-ownership-across-partial-.md) | Preserve executable-info ownership across partial map-installation failures | high | core |
 | [issue-20261105-182827-544](issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends | high | profiler |
 | [issue-20261105-182737-637](issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts | medium | platform |
@@ -202,9 +202,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235252-265](issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
 | [issue-20261103-235252-762](issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) | Isolate cross-process signals in the required Portal worker baseline | high | portal-runtime |
 | [issue-20261103-235253-262](issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) | Retain replacement worker ownership across broker close races | high | portal-runtime |
-| [issue-20261103-235253-722](issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation | medium | portal-runtime |
-| [issue-20261103-235254-202](issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) | Dispatch legal Object-name Portal service overloads to the guest | high | portal-runtime |
-| [issue-20261103-235254-619](issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) | Preserve fatal failures during Portal declared-exception reconstruction | medium | portal-runtime |
+| Archived [issue-20261103-235253-722](resolved/issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation (resolved 2026-11-21) | medium | portal-runtime |
+| Archived [issue-20261103-235254-202](resolved/issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) | Dispatch legal Object-name Portal service overloads to the guest (resolved 2026-11-21) | high | portal-runtime |
+| Archived [issue-20261103-235254-619](resolved/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) | Preserve fatal failures during Portal declared-exception reconstruction (resolved 2026-11-21) | medium | portal-runtime |
 | [issue-20261103-235255-089](issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) | Tie Spring lifecycle completion to physical retirement and retained dependencies | medium | spring |
 | [issue-20261103-235255-561](issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) | Complete Kotlin upgrade locks and independent optional consumer approvals | high | build |
 | Archived [issue-20261103-235256-009](resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) | Select existing API ABI and package topology checks in required CI (resolved 2026-11-21) | medium | build |

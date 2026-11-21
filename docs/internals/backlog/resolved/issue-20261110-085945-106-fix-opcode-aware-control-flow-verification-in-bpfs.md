@@ -1,7 +1,7 @@
 ---
 title: "Fix opcode-aware control-flow verification in BpfStaticVerifier"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,9 @@ P0 correctness/security bug (:enforcer, effort small-medium, review required, no
 
 **Needed:**
 1. Add failing regression test A (JA k=5 out-of-bounds) to BpfStaticVerifierTest.kt, confirm it fails on current code, then make enqueueJumpTargets opcode-aware and add tests B-F
+
+## Resolution Evidence (2026-11-21)
+- Already resolved in `BpfStaticVerifier.kt` using closed `BpfInstruction.Ja` (`target(program, index, instruction.k)`) and `BpfInstruction.Jmp` (`jt`, `jf`) with `Long` bounds arithmetic; verified in `BpfVerificationBoundaryTest` / `BpfBuilderTest` / `:enforcer:test`.
 
 ---
 <!-- id: issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs  file: issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md -->

@@ -76,9 +76,9 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | HS09-05 | P2 | W10 | [issue-20261103-235252-265](../backlog/issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) |
 | PRT-01 | P1 | W06 | [issue-20261103-235252-762](../backlog/issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) |
 | PRT-02 | P1 | W06 | [issue-20261103-235253-262](../backlog/issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) |
-| PRT-03 | P2 | W06 | [issue-20261103-235253-722](../backlog/issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) |
-| PRT-05 | P1 | W07 | [issue-20261103-235254-202](../backlog/issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) |
-| PCG-10 | P2 | W07 | [issue-20261103-235254-619](../backlog/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) |
+| PRT-03 | P2 | W06 | [issue-20261103-235253-722](../backlog/resolved/issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) |
+| PRT-05 | P1 | W07 | [issue-20261103-235254-202](../backlog/resolved/issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) |
+| PCG-10 | P2 | W07 | [issue-20261103-235254-619](../backlog/resolved/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) |
 | SPR-02 | P2 | W13 | [issue-20261103-235255-089](../backlog/issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) |
 | BUILD-01 | P1 | W12 | [issue-20261103-235255-561](../backlog/issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) |
 | BUILD-02 | P2 | W11 | [issue-20261103-235256-009](../backlog/resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) |
