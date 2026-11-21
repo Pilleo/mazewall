@@ -73,4 +73,31 @@ class PolicyIntentContractTest {
         assertFalse(composed.isSyscallAllowed(Syscall.EXECVE))
         assertFalse(composed.isSyscallAllowed(Syscall.CONNECT))
     }
+
+    @Test
+    fun `denyProcessCreation and combineAll return frozen collection snapshots`() {
+        val definition = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT).definition
+        val other =
+            PolicyDefinition<PolicyScope.ProcessWideSafe>(
+                syscallActions = mapOf(Syscall.GETPID to SeccompAction.ACT_ERRNO()),
+                customViolationPhrases = listOf("phrase-1"),
+            )
+        val combined = PolicyDefinition.combineAll(listOf(definition, other))
+
+        assertThrows(UnsupportedOperationException::class.java) {
+            (definition.syscallActions as MutableMap<Syscall, SeccompAction>).clear()
+        }
+        assertThrows(UnsupportedOperationException::class.java) {
+            (combined.syscallActions as MutableMap<Syscall, SeccompAction>).clear()
+        }
+        assertThrows(UnsupportedOperationException::class.java) {
+            (combined.allowedFsReadPaths as MutableSet<SandboxedPath>).clear()
+        }
+        assertThrows(UnsupportedOperationException::class.java) {
+            (combined.customViolationPhrases as MutableList<String>).clear()
+        }
+        assertFalse(combined.isSyscallAllowed(Syscall.EXECVE))
+        assertFalse(combined.isSyscallAllowed(Syscall.GETPID))
+        assertEquals(listOf("phrase-1"), combined.customViolationPhrases)
+    }
 }

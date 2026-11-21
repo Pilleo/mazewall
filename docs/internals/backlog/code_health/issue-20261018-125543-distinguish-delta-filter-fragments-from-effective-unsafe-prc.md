@@ -38,6 +38,10 @@ This is a diagnostic/evidence issue, not evidence of a policy bypass. The implem
 ## Side effects
 - Diagnostic-only follow-up: preserve real unsafe-policy warnings and cumulative kernel restrictions; no implementation is part of the Koog thread feature.
 
+## Progress Evidence
+- Added `warnOnUnsafePrctl: Boolean = true` (excluded from `CacheKey`) across `BpfFilter.kt`, `PolicyDefinition.kt`, `PolicyCompilationCache.kt`, and `ContainedExecutors.kt` so delta fragment compilation suppresses false `ALLOW_UNSAFE_PRCTL` `SEVERE` warnings when the cumulative caller policy has `allowUnsafePrctl == false`, while preserving warnings for genuine unsafe policies.
+- Covered `HOTSPOT_JIT` -> `NATIVE_IMAGE` upgrade warning suppression in `MazewallInstallOnProcessTest` (`:lockdown:test`); dedicated thread-backed Koog native regression and full `./gradlew build` remain before archival.
+
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).

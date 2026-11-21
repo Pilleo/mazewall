@@ -31,5 +31,9 @@ Repository-wide review, 2026-11-04: [PLAT-05](../reviews/2026-11-04-repository-r
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
+## Progress Evidence
+- Added exhaustive `NativeTransfer` validation in `RealNativeProcess.prctl` (`platform/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt`): writable `TASK_COMM_LEN = 16L` native segment check for `GetName`, bounded readable NUL-terminated path contract via `NativeTransfer.path` for `SetName`, readable `Layouts.SOCK_FPROG.byteSize()` check for `SetSeccomp(SECCOMP_MODE_FILTER)`, and `NativeTransfer.bytes` check for `SetMm`.
+- Added unit tests in `RealNativeHelperDowncallTest.kt`; full `:platform:test`, `:lockdown:integrationTestFreshJvm`, and `./gradlew build` archival gate remain to confirm completion before resolving.
+
 ---
 <!-- id: issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na  file: issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md -->

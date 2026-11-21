@@ -147,7 +147,9 @@ class ConfinedHelperChannelTest {
         }
 
         override fun close() {
-            if (socket.isLiveForIo()) socket.close(native.fileSystem)
+            if (socket.isLiveForIo()) {
+                socket.close(native.fileSystem)
+            }
         }
     }
 

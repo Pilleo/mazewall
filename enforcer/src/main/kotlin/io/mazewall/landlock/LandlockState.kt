@@ -287,8 +287,23 @@ internal class LandlockSession(
         return transition.effects
     }
 
-    private fun interpretTerminalEffects(effects: List<LandlockInstallEffect>) {
-        effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { it.rulesetFd.close(native.fileSystem) }
+    // SUPPRESSION-RATIONALE: On a failed Landlock path, cleanup close errors must attach as suppressed evidence rather than replacing the primary Landlock failure.
+    @Suppress("TooGenericExceptionCaught")
+    private fun interpretTerminalEffects(
+        effects: List<LandlockInstallEffect>,
+        primary: Throwable? = null,
+    ): Boolean {
+        var attached = false
+        effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { effect ->
+            try {
+                effect.rulesetFd.close(native.fileSystem)
+            } catch (closeFailure: Throwable) {
+                val kept = primary ?: throw closeFailure
+                kept.addSuppressed(closeFailure)
+                attached = true
+            }
+        }
+        return attached
     }
 
     fun tryApplyRuleset(): LandlockApplyResult {
@@ -318,7 +333,7 @@ internal class LandlockSession(
     }
 
     private fun rejectInstallFailure(failure: Throwable): LandlockApplyResult {
-        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(failure)))
+        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(failure)), failure)
         return LandlockApplyResult.Rejected(failure.message ?: failure.javaClass.name, cause = failure)
     }
 
@@ -374,8 +389,20 @@ internal class LandlockSession(
         errno: Int,
     ): LandlockApplyResult {
         val outcome = Landlock.classifyLandlockErrno(operation, errno, fallback)
-        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(outcome.toFailure())))
-        return outcome
+        val primary = outcome.toFailure()
+        val effects = transition(LandlockInstallEvent.Failed(primary))
+        return when (outcome) {
+            is LandlockApplyResult.Rejected -> {
+                val attached = interpretTerminalEffects(effects, primary)
+                if (attached) outcome.copy(cause = primary) else outcome
+            }
+            is LandlockApplyResult.Applied,
+            is LandlockApplyResult.Bypassed,
+            -> {
+                interpretTerminalEffects(effects)
+                outcome
+            }
+        }
     }
 
     private fun handleProcessWideUnsupported() {

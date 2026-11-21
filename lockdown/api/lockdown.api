@@ -1,0 +1,38 @@
+public final class io/mazewall/lockdown/Mazewall {
+	public static final field INSTANCE Lio/mazewall/lockdown/Mazewall;
+	public static final fun installOnProcess (Lio/mazewall/lockdown/ProcessPolicy;[Lio/mazewall/lockdown/ProcessPolicy;)Lio/mazewall/lockdown/ProcessInstallation;
+}
+
+public final class io/mazewall/lockdown/MazewallInstallationException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+}
+
+public final class io/mazewall/lockdown/ProcessInstallation {
+	public final fun architecture ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun filterDepth ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/lockdown/ProcessPolicy {
+	public static final field Companion Lio/mazewall/lockdown/ProcessPolicy$Companion;
+	public static final fun denyProcessCreation (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/lockdown/ProcessPolicy$Companion {
+	public final fun denyProcessCreation (Lio/mazewall/lockdown/RuntimeProfile;)Lio/mazewall/lockdown/ProcessPolicy;
+}
+
+public final class io/mazewall/lockdown/RuntimeProfile : java/lang/Enum {
+	public static final field HOTSPOT_JIT Lio/mazewall/lockdown/RuntimeProfile;
+	public static final field NATIVE_IMAGE Lio/mazewall/lockdown/RuntimeProfile;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/lockdown/RuntimeProfile;
+	public static fun values ()[Lio/mazewall/lockdown/RuntimeProfile;
+}
+

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 411 | *Total Resolved Issues:* 741
+*Total Active Issues:* 441 | *Total Resolved Issues:* 742
 
-Active status detail: 409 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 439 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -136,6 +136,37 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
+| [issue-20261120-170411-782-graalvm-native-image-backend](issue-20261120-170411-782-graalvm-native-image-backend.md) | GraalVM Native Image backend | medium | portal-runtime |
+| [issue-20261120-170411-175-older-kernel-support](issue-20261120-170411-175-older-kernel-support.md) | Older-kernel support | medium | portal-runtime |
+| [issue-20261120-170410-619-stronger-identity-isolation](issue-20261120-170410-619-stronger-identity-isolation.md) | Stronger identity isolation | medium | portal-runtime |
+| [issue-20261120-170410-059-smaller-worker-authority](issue-20261120-170410-059-smaller-worker-authority.md) | Smaller worker authority | medium | portal-runtime |
+| [issue-20261120-170352-084-strict-failure-handling](issue-20261120-170352-084-strict-failure-handling.md) | Strict failure handling | high | portal-runtime |
+| [issue-20261120-170351-749-harden-worker-artifacts](issue-20261120-170351-749-harden-worker-artifacts.md) | Harden worker artifacts | high | portal-runtime |
+| [issue-20261120-170351-396-controlled-worker-spawning](issue-20261120-170351-396-controlled-worker-spawning.md) | Controlled worker spawning | high | portal-runtime |
+| [issue-20261120-170351-066-secure-crash-recovery](issue-20261120-170351-066-secure-crash-recovery.md) | Secure crash recovery | high | portal-runtime |
+| [issue-20261120-170350-698-resource-containment](issue-20261120-170350-698-resource-containment.md) | Resource containment | high | portal-runtime |
+| [issue-20261120-170350-203-restrict-inherited-file-descriptors](issue-20261120-170350-203-restrict-inherited-file-descriptors.md) | Restrict inherited file descriptors | high | portal-runtime |
+| [issue-20261120-170313-809-secure-portal-ipc](issue-20261120-170313-809-secure-portal-ipc.md) | Secure Portal IPC | high | portal-runtime |
+| [issue-20261120-170313-531-prevent-secret-inheritance](issue-20261120-170313-531-prevent-secret-inheritance.md) | Prevent secret inheritance | high | portal-runtime |
+| [issue-20261120-170313-197-portal-process-isolation](issue-20261120-170313-197-portal-process-isolation.md) | Portal process isolation | high | portal-runtime |
+| [issue-20261120-170312-895-reliable-no-exec-protection](issue-20261120-170312-895-reliable-no-exec-protection.md) | Reliable no-exec protection | high | enforcer |
+| [issue-20261120-165855-557-verified-process-wide-seccomp](issue-20261120-165855-557-verified-process-wide-seccomp.md) | Verified process-wide Seccomp | high | enforcer |
+| [issue-20261120-151800-504](issue-20261120-151800-504-investigate-threadcloneinspector-ignoring-inspecti.md) | Investigate ThreadCloneInspector ignoring InspectionContext.allowNonThreadClone on default-ALLOW policies | low | core |
+| [issue-20261120-151800-231](issue-20261120-151800-231-add-jpms-module-info-sources-javadoc-jars-lockdown.md) | Add JPMS module-info, sources/javadoc JARs, lockdown virtual-thread error message, and complete 5-syscall plus NATIVE_IMAGE kernel tests | medium | core |
+| [issue-20261120-151759-970](issue-20261120-151759-970-make-processfilterinstaller-active-denied-syscall-.md) | Make ProcessFilterInstaller active denied-syscall self-verification opt-in so production startup is safe under strict outer seccomp and IDS | high | core |
+| [issue-20261120-151750-281](issue-20261120-151750-281-declare-linker-option-firstvariadicarg-1-on-variad.md) | Declare Linker.Option.firstVariadicArg(1) on variadic syscall and prctl FFM downcalls | high | core |
+| [issue-20261120-151750-060](issue-20261120-151750-060-reject-irreversible-runtimeprofile-relaxation-cont.md) | Reject irreversible RuntimeProfile relaxation, contradictory vararg profiles, and re-check sticky installationFailure inside processLock | high | core |
+| [issue-20261120-151749-841](issue-20261120-151749-841-mark-processinstallation-and-processpolicy-interna.md) | Mark ProcessInstallation and ProcessPolicy internal constructors and accessors JvmSynthetic and validate null varargs | high | core |
+| [issue-20261120-151749-547](issue-20261120-151749-547-document-exact-prctl-allowlist-clone3-enosys-fallb.md) | Document exact prctl allowlist, clone3 ENOSYS fallback, and fork/vfork scope in Mazewall lockdown 0.1.0 | high | core |
+| [issue-20261120-151731-760](issue-20261120-151731-760-defer-ffm-native-initialization-in-processfilterin.md) | Defer FFM native initialization in ProcessFilterInstaller and wrap Error failures into MazewallInstallationException | high | core |
+| [issue-20261120-122411-300](issue-20261120-122411-300-mazewall-0-1-0-process-wide-lockdown-release.md) | Mazewall 0.1.0 process-wide lockdown release | high | core |
+| [issue-20261120-122430-554](issue-20261120-122430-554-phase-0-1-finish-maven-central-namespace-verificat.md) | Phase 0-1: Finish Maven Central namespace verification and close Phase 1 review items | high | core |
+| [issue-20261120-122431-839](issue-20261120-122431-839-phase-2-extract-lockdown-module-and-cut-four-coupl.md) | Phase 2: Extract :lockdown module and cut four coupling seams | high | core |
+| [issue-20261120-122433-169](issue-20261120-122433-169-phase-3-implement-stable-io-mazewall-lockdown-api-.md) | Phase 3: Implement stable io.mazewall.lockdown API and ABI surface gates | high | core |
+| [issue-20261120-122441-870](issue-20261120-122441-870-phase-4-verify-kernel-matrix-packaged-consumers-an.md) | Phase 4: Verify kernel matrix, packaged consumers, and independent security review | high | core |
+| [issue-20261120-122442-047](issue-20261120-122442-047-phase-5-write-0-1-0-release-documentation-and-clea.md) | Phase 5: Write 0.1.0 release documentation and clean repository hygiene | high | core |
+| [issue-20261120-122442-356](issue-20261120-122442-356-phase-6-tag-v0-1-0-publish-lockdown-and-verify-rem.md) | Phase 6: Tag v0.1.0, publish :lockdown, and verify remote artifact download | high | core |
 | [issue-20261110-085945-106](issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier | high | core |
 | [issue-20261110-090012-628](issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy | high | core |
 | [issue-20261110-090012-980](issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation | high | core |
@@ -148,7 +179,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-234851-768](issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) | Correct AArch64 renameat metadata before policy compilation | high | core |
 | [issue-20261103-235243-934](issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic | medium | core |
 | [issue-20261103-235244-414](issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission | high | core |
-| [issue-20261103-235244-769](issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) | Preserve descriptor close errors and pre-dispatch cleanup ownership | medium | core |
 | [issue-20261103-235245-104](issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch | medium | core |
 | [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |
 | [issue-20261103-235246-003](issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) | Serialize eventfd completion signaling with native retirement | medium | core |
@@ -205,6 +235,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235912-820](issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) | Qualify bootstrap-directory loading before synchronous profiler stack capture | medium | profiler |
 | [issue-20261103-235434-538](issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) | Diagnose supervisor helper prewarm failure in the full native gate | high | core |
 | [issue-20261103-222740-448](issue-20261103-222740-448-reject-oversized-native-trace-custom-label-counts-.md) | Reject oversized native trace custom-label counts before allocation and indexing | high | profiler |
+| Archived [issue-20261103-235244-769](resolved/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) | Irreversible close claim; full baseline build and confined lane passed | medium | core |
 | Archived [issue-20261103-180145-173](resolved/issue-20261103-180145-173-select-provenance-compatible-native-bundle-before-.md) | Current-patch compatible bundle validated before fresh grant; current-host 5000ms observation passed with safe cleanup and partial coverage, not kernel/policy qualification | high | profiler |
 | Archived [issue-20261103-124359-339](resolved/issue-20261103-124359-339-expose-validated-readiness-from-the-standalone-hot.md) | Readiness notification complete;16 host tests, scoped review and full build passed | high | core |
 | [issue-20261103-123347-795](issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) | Validate BPF inspection fragment exits before accepting termination | medium | core |

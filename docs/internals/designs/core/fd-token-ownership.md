@@ -120,7 +120,14 @@ connection for retry. A native close error is observable but terminal: Linux may
 already have released the integer, so its ownership is retired even on error.
 `FileDescriptor.closeResource` follows the same rule: do not retry `close(2)` on
 `EINTR`/`EIO` for a retired generation, because the kernel can already have reused
-the integer.
+the integer. Since the close-result contract, a native `Error` result from
+`NativeFileSystem.close` stays observable as `NativeCloseFailure` after retirement,
+and any exception while the original generation remains owned retains the token
+for later cleanup. The native adapter prepares the handle and errno capture before
+its irreversible claim; exceptions after that claim are terminal even without a
+syscall result. Adapters must claim before attempting close and must never restore
+a retired generation. Independent resources close on terminal paths with a
+failure-preserving fold that never replaces the close failure.
 `RealSocketManager` reports these errors distinctly, preserving `FdEpoch` retirement
 before native close; no generation is revived. Retrying the connection
 does not close descriptors already released by an earlier attempt or by the reactor.

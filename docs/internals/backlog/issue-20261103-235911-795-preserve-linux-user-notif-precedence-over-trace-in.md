@@ -31,5 +31,11 @@ Repository-wide review, 2026-11-04: [PLAT-08](../reviews/2026-11-04-repository-r
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
+## Progress Evidence
+- Updated `SeccompAction.restrictivenessRank()` in `platform/src/main/kotlin/io/mazewall/platform/syscall/SeccompAction.kt` (`ACT_NOTIFY` rank `40`, `ACT_TRACE` rank `30`) to match Linux UAPI signed-minimum action precedence (`KILL_PROCESS > KILL_THREAD > TRAP > ERRNO > USER_NOTIF > TRACE > LOG > ALLOW`), updated KDoc accurately, and replaced the remaining `.priority` check in `enforcer/src/main/kotlin/io/mazewall/enforcer/api/PolicyDefinition.kt` (`L121`) with `.restrictivenessRank()`.
+- Updated and expanded `platform/src/test/kotlin/io/mazewall/core/SeccompActionTest.kt` (full 8-action 64-pair Linux UAPI precedence matrix, `KILL_PROCESS` sign-bit vs unsigned comparison check, and `ACT_ERRNO`/`ACT_TRACE` first-policy tie-breaking) and `enforcer/src/test/kotlin/io/mazewall/PolicyTest.kt` (`combine`, `intersection`, `restrictFurtherWith`, `syscallActionNumbers` across `AMD64`/`AARCH64`, explicit vs default intersections).
+- Verified `./gradlew :platform:test` (`536` tests, `0` skipped, `0` failed), `./gradlew :enforcer:test` (`1664` tests, `2` pre-existing `LandlockFailureModeTest` assumption-skipped, `0` failed), `./gradlew :lockdown:test :lockdown:integrationTestFreshJvm :lockdownConsumerCheck`, and `ktlintCheck` / `checkKotlinAbi`.
+- Remaining before archival: run full `./gradlew build` completion gate.
+
 ---
 <!-- id: issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in  file: issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md -->

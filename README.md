@@ -1,16 +1,104 @@
 # mazewall
 
 [![CI](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml/badge.svg)](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml)
-[![JitPack](https://jitpack.io/v/Pilleo/mazewall.svg)](https://jitpack.io/#Pilleo/mazewall)
 
-**Linux kernel-enforced syscall and filesystem restrictions for process and thread self restriction from inside an app.**
+**Linux kernel-enforced Seccomp-BPF process lockdown (stable in `0.1.0`) and experimental per-worker syscall/filesystem containment for JVM services.**
 
 > [!NOTE]
-> **Pre-Alpha.** Core enforcement and profiling work end-to-end. API is unstable and known issues are actively tracked. If you're evaluating this for your stack or want to contribute, [open a discussion](https://github.com/Pilleo/mazewall/discussions).
+> **`0.1.0` Release Scope:** The sole published stable module in `0.1.0` is `:lockdown` (`io.mazewall:mazewall-lockdown`, JPMS module `io.mazewall.lockdown`, package `io.mazewall.lockdown`). The richer per-thread Landlock, `USER_NOTIF` supervision, `:profiler`, and `:portals` modules remain unpublished experimental in-repository modules. See [STABILITY.md](STABILITY.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Who Should Care
+## `0.1.0` Stable Quickstart: Process-Wide Execution Lockdown
+
+Released artifacts use `io.mazewall:mazewall-lockdown:0.1.0` (only transitive dependency: `kotlin-stdlib`, JDK 22+ bytecode, pure FFM with zero native C dependencies):
+
+```kotlin
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation("io.mazewall:mazewall-lockdown:0.1.0")
+}
+```
+
+This checkout still publishes `0.1.0-SNAPSHOT`. Before `0.1.0` is live on Maven Central, evaluate from source with `./gradlew :lockdown:publishToMavenLocal` and request the snapshot:
+
+```kotlin
+repositories {
+    mavenLocal {
+        content { includeGroup("io.mazewall") }
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation("io.mazewall:mazewall-lockdown:0.1.0-SNAPSHOT")
+}
+```
+
+Run your JVM with native access granted to Mazewall (modular apps can scope access strictly to `io.mazewall.lockdown`; classpath apps use `ALL-UNNAMED`):
+
+```bash
+# Modular application (recommended: scopes native FFM access strictly to Mazewall)
+java --module-path libs --enable-native-access=io.mazewall.lockdown -m com.example.app
+
+# Classpath application
+java --enable-native-access=ALL-UNNAMED -jar app.jar
+```
+
+Call `Mazewall.installOnProcess` once on your startup platform thread after any required startup child commands finish and before opening network traffic:
+
+```java
+import io.mazewall.lockdown.Mazewall;
+import io.mazewall.lockdown.ProcessInstallation;
+import io.mazewall.lockdown.ProcessPolicy;
+import io.mazewall.lockdown.RuntimeProfile;
+
+public final class ServiceBootstrap {
+    public static void main(String[] args) {
+        ProcessInstallation installation = Mazewall.installOnProcess(
+            ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+        );
+        // Process-wide lockdown is active (installation.filterDepth() >= 1)
+    }
+}
+```
+
+## Promise and Limits (`io.mazewall:mazewall-lockdown` `0.1.0`)
+
+**What it promises:**
+- After `Mazewall.installOnProcess(ProcessPolicy.denyProcessCreation(...))` returns on Linux (`amd64` or `aarch64`, kernel 3.17+ with `SECCOMP_FILTER_FLAG_TSYNC`), the kernel denies these syscalls with `EPERM` across **every thread** in the process (pre-existing platform threads via `TSYNC`, future threads, Loom virtual threads, and JNI/FFM native libraries):
+  - `execve`
+  - `execveat`
+  - `memfd_create`
+  - `io_uring_setup`
+  - `io_uring_enter`
+  - `prctl` options outside the 6 safe options (`PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`)
+- `clone3` returns `ENOSYS` so glibc falls back cleanly to `clone`. `fork`, `vfork`, and `clone` remain permitted in `0.1.0` (any child process inherits the irreversible seccomp filter and cannot `execve`).
+- Explicit runtime profile selection without guesswork: `RuntimeProfile.HOTSPOT_JIT` preserves JIT code-cache executable mappings, while `RuntimeProfile.NATIVE_IMAGE` also blocks new executable `mmap`/`mprotect`/`pkey_mprotect` mappings (`PROT_EXEC`).
+- Repeated identical `installOnProcess` calls succeed idempotently without stacking redundant filters; incompatible profile relaxation (`HOTSPOT_JIT` after `NATIVE_IMAGE` or conflicting profiles in one call) fails closed with `MazewallInstallationException`.
+- Safe startup verification: by default, installation verifies `prctl(PR_GET_SECCOMP) == 2` and `getpid()` liveness without issuing synthetic denied syscalls (avoiding `SIGSYS` under strict outer seccomp `KILL`/`TRAP` profiles and avoiding false-positive alerts in Falco/auditd). Pass `-Dio.mazewall.selfVerify=true` in CI or staging to also run active denied-syscall probes.
+
+**What it does NOT guarantee:**
+- It is **not** general RCE prevention: arbitrary in-JVM code execution can still read/write files and open network connections permitted to the process.
+- It does **not** block IPC to external process-spawning daemons if your process holds access to their sockets (for example `/var/run/docker.sock`, systemd D-Bus, Kubernetes API, or SSH agent).
+- Already-running child processes spawned before `installOnProcess` and already-open file descriptors remain unaffected.
+
+**Operational constraints & compatibility:**
+- **Irreversible:** Seccomp-BPF filters cannot be removed for the lifetime of the OS process.
+- **Platform thread required:** Calling `installOnProcess` from a virtual thread fails with `MazewallInstallationException`.
+- **Always fail-closed:** Always throws `MazewallInstallationException` on non-Linux OSes (macOS, Windows), unsupported architectures (non-`amd64`/`aarch64`), missing `--enable-native-access`, missing `TSYNC` kernel support, or incompatible outer seccomp profiles. There is no silent unprotected fallback.
+- **Library compatibility:** Blocking `io_uring_setup`/`io_uring_enter`, `memfd_create`, and non-allowlisted `prctl` options is incompatible with Netty `IoUringIoHandler` (use standard Epoll or NIO transport) and native libraries calling `memfd_create` or restricted `prctl` subcommands (such as `PR_SET_VMA` / `PR_SET_PDEATHSIG`) after lockdown installation.
+
+---
+
+## Experimental In-Repository Modules (`:enforcer`, `:profiler`, `:portals`)
+
+The sections below describe the experimental in-repository modules (`0.1.0-SNAPSHOT`, unpublished in `0.1.0`):
+
+### Who Should Care
 
 If your JVM service handles **untrusted input** — XML, YAML, PDF, SQL, user-uploaded files, third-party SDKs — then every one of those code paths runs with the same OS permissions as your authentication layer, your secret store, and your outbound HTTP client.
 
@@ -304,8 +392,10 @@ without excluding `check`; any failed verification blocks the commit. See
 
 | Module | Purpose | Status |
 |---|---|---|
-| `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | Experimental; evaluate only with an explicit threat-model and supported-platform review |
-| `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery; generated policies require validation |
+| `:lockdown` | Standalone process-wide Seccomp-BPF lockdown (`io.mazewall:mazewall-lockdown`) — zero project dependencies beyond `kotlin-stdlib` | **Stable (`0.1.0`)** — see [STABILITY.md](STABILITY.md) |
+| `:platform` | Internal FFM layouts, native syscall wrappers, and Linux architecture metadata | Internal implementation detail |
+| `:enforcer` | Per-worker containment, Landlock, and `USER_NOTIF` supervision | Experimental (unpublished in `0.1.0`); evaluate only with an explicit threat-model and supported-platform review |
+| `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery (unpublished in `0.1.0`); generated policies require validation |
 | `:integrations:koog` | [Explicit owned thread and process-Portal Koog tools](integrations/koog/README.md) | Optional adapter; trusted synchronous thread bodies or bounded process services |
 | `:demos:cli-demo` | Interactive CLI exploits showcase | 🚫 Demo only |
 | `:demos:agent-sandbox-demo` | Custom supervised tool compartments and offline JUnit controls | Experimental demo |

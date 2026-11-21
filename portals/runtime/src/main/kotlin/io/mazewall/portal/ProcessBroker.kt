@@ -773,7 +773,7 @@ public class ProcessBroker internal constructor(
                     try {
                         slot.channel.close()
                         slot.channelRetired = true
-                    } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
+                    } catch (terminal: io.mazewall.platform.fd.NativeCloseFailure) {
                         slot.channelRetired = true
                         raiseBrokerFailure(terminal)
                     }
@@ -784,7 +784,7 @@ public class ProcessBroker internal constructor(
                     try {
                         sockets.close(slot.server)
                         slot.serverRetired = true
-                    } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
+                    } catch (terminal: io.mazewall.platform.fd.NativeCloseFailure) {
                         slot.serverRetired = true
                         raiseBrokerFailure(terminal)
                     }
@@ -998,7 +998,7 @@ public class ProcessBroker internal constructor(
             try {
                 action()
                 retired()
-            } catch (terminal: io.mazewall.platform.socket.NativeCloseFailure) {
+            } catch (terminal: io.mazewall.platform.fd.NativeCloseFailure) {
                 retired()
                 raiseBrokerFailure(terminal)
             }

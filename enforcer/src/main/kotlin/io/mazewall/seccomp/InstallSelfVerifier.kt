@@ -8,6 +8,7 @@ import io.mazewall.platform.native.RuntimeSnapshot
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 
 /**
  * Post-install self-verification (issue-20260823-172003).
@@ -61,6 +62,14 @@ internal object InstallSelfVerifier {
     fun warmup() {
         val arch = Arch.current()
         SelfVerificationPlan.create(emptyList(), arch)
+        SelfVerificationPlan.create(
+            emptyList(),
+            arch,
+            mergedState = ContainerState(
+                defaultAction = SeccompAction.ACT_ERRNO(),
+                syscallActions = mapOf(Syscall.GETPID to SeccompAction.ACT_ALLOW),
+            ),
+        )
     }
 
     /**

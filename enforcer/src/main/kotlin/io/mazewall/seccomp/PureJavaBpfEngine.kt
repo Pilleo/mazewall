@@ -9,7 +9,6 @@ import io.mazewall.enforcer.*
 
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
-import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.CompiledSandbox
 import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
@@ -46,7 +45,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         }
 
     override val isSupported: Boolean
-        get() = Platform.isSupported()
+        get() = SeccompPlatformProbe.isSupported()
 
     private class LoadedEngine(
         private val delegate: PureJavaBpfEngine,
@@ -64,11 +63,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
 
     override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         val native = LinuxNative.snapshot()
-        val platform = Platform.capture(native)
-        if (!platform.capabilities.matrix.seccompTsyncSupported) {
+        if (!SeccompPlatformProbe.isSeccompTsyncSupported(native)) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
-        installInternal(policy, useTsync = true, native = native, platform = platform)
+        installInternal(policy, useTsync = true, native = native, isLinux = SeccompPlatformProbe.isLinux())
         return LoadedEngine(this)
     }
 
@@ -76,7 +74,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
         native: NativeEngine = LinuxNative.snapshot(),
-        platform: CapturedPlatform = Platform.capture(native),
+        isLinux: Boolean = SeccompPlatformProbe.isLinux(),
         onApplied: () -> Unit = {},
     ) {
         io.mazewall.enforcer.diagnostics.requirePlatformThread()
@@ -98,7 +96,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             ScopedBpfProgram.withProgram(policy.program, native) { program ->
                 val built = SeccompInstallationState.FilterBuilt(program)
                 updateState(built, useTsync)
-                val locked = built.lockPrivileges(native, platform)
+                val locked = built.lockPrivileges(native, isLinux)
                 updateState(locked, useTsync)
                 val applied = locked.applyFilter(arch, useTsync, native)
                 onApplied()
@@ -129,13 +127,14 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         policy: CompiledSandbox<*>,
         processWide: Boolean,
         native: NativeEngine = LinuxNative.snapshot(),
-        platform: CapturedPlatform = Platform.capture(native),
+        isLinux: Boolean = SeccompPlatformProbe.isLinux(),
+        tsyncSupported: Boolean = if (processWide) SeccompPlatformProbe.isSeccompTsyncSupported(native) else false,
         onApplied: () -> Unit,
     ) {
-        if (processWide && !platform.capabilities.matrix.seccompTsyncSupported) {
+        if (processWide && !tsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
-        installInternal(policy, processWide, native, platform, onApplied)
+        installInternal(policy, processWide, native, isLinux, onApplied)
     }
 
     private fun getStepName(): String {

@@ -1,8 +1,21 @@
 # Supported Public API
 
-`0.1.0-SNAPSHOT` is the first intentionally versioned Mazewall API baseline.
+`0.1.0` establishes a three-tier API classification (see [STABILITY.md](../STABILITY.md)).
 
-Supported application contracts are limited to:
+## 0.1.0 Release Tiers
+
+- **Published Stable (`0.1.0`) — `:lockdown` (`io.mazewall:mazewall-lockdown`):**
+  - Public package: `io.mazewall.lockdown` (`Mazewall`, `ProcessPolicy`, `RuntimeProfile`, `ProcessInstallation`, `MazewallInstallationException`).
+  - Has zero project dependencies beyond `kotlin-stdlib`, targets JDK 22 bytecode, and is guarded by `lockdown/api/lockdown.api`, `verifySupportedApiSurface`, and `verifyLockdownPublication`.
+- **Unpublished Experimental (`0.1.0`) — `:enforcer`, `:profiler`, `:portals:*`, `:integrations:*`:**
+  - Retained in-repository for active development and evaluation (Landlock, thread-scoped workers, `USER_NOTIF` stacktrace supervision, profiling, and out-of-process portals). Not published as stable `0.1.0` Maven coordinates.
+  - Their in-repo API boundaries remain guarded by `enforcer/api/enforcer.api`, `profiler/api/profiler.api`, and `verifySupportedApiSurface`.
+- **Internal — `:platform`, `io.mazewall.ffi.*`, `io.mazewall.seccomp.*`, `io.mazewall.platform.*`, `*.internal.*`:**
+  - Private implementation details with no compatibility guarantee. Inside `:lockdown`, internalized core classes carry Kotlin `internal` visibility and never appear in `lockdown/api/lockdown.api`.
+
+## In-Repository Experimental Surface (`0.1.0-SNAPSHOT` modules)
+
+Supported in-repo experimental contracts across the unpublished evaluation modules are limited to:
 
 - `io.mazewall`: configuration, policies, installation assessment and receipts;
 - `io.mazewall.enforcer.api` and `io.mazewall.enforcer.diagnostics`: contained execution, violations and diagnostics;
@@ -10,7 +23,7 @@ Supported application contracts are limited to:
 
 Native engines, syscalls, FFM layouts, descriptor ownership, BPF programs, daemon protocols, attribution, replay and collector types are implementation details. They are not extension points and may change without compatibility notice. The Tier E daemon launcher is an executable JVM entrypoint, not a library API.
 
-The checked-in Kotlin ABI dumps in `enforcer/api`, `profiler/api`, and `platform/api` are enforced compatibility baselines. A deliberate public API change must update the relevant dump and this document in the same review.
+The checked-in Kotlin ABI dumps in `lockdown/api`, `enforcer/api`, `profiler/api`, and `platform/api` are enforced compatibility baselines. A deliberate public API change must update the relevant dump and this document in the same review.
 
 ## Migration from native and platform APIs
 

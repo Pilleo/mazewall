@@ -17,3 +17,15 @@ public sealed interface FileSystemPolicy {
         public val writePaths: Set<SandboxedPath> = java.util.Set.copyOf(writePaths)
     }
 }
+
+internal fun <S : PolicyScope> PolicyBuilder<S>.setFilesystem(policy: FileSystemPolicy): PolicyBuilder<S> =
+    when (policy) {
+        FileSystemPolicy.Unrestricted -> replaceFilesystemGrants(restricted = false)
+        FileSystemPolicy.DenyAll -> replaceFilesystemGrants(restricted = true)
+        is FileSystemPolicy.AllowResources ->
+            replaceFilesystemGrants(
+                restricted = true,
+                readPaths = policy.readPaths,
+                writePaths = policy.writePaths,
+            )
+    }

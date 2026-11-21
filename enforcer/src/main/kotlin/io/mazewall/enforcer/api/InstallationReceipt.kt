@@ -30,6 +30,12 @@ public class InstallationReceipt(
     public val failure: Throwable? = null,
     public val cetOutcome: CetOutcome = if (requestedPolicy.lockIntelCet) CetOutcome.UNCONFIRMED else CetOutcome.NOT_REQUESTED,
 ) : AutoCloseable {
+    init {
+        require(!(installed && failure != null)) {
+            "Installed receipt cannot carry an installation failure"
+        }
+    }
+
     private var supervisorRegistration: AutoCloseable? = null
 
     /** Retires only the supervisor registration; installed containment remains irreversible. */
@@ -47,7 +53,7 @@ public class InstallationReceipt(
      * A recorded installation failure is rethrown with its original identity and cause chain.
      */
     public fun requireInstalled(): InstallationReceipt {
-        if (!installed && failure != null) throw failure
+        if (failure != null) throw failure
         check(installed) {
             "Required containment installation did not complete. Already applied restrictions remain in force."
         }

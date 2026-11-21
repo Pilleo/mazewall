@@ -62,4 +62,17 @@ class InstallationReceiptTest {
         kotlin.test.assertFailsWith<IllegalStateException> { receipt.releaseIfUnsupervised() }
         receipt.close()
     }
+
+    @Test
+    fun `installed receipt cannot carry a failure`() {
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            InstallationReceipt(
+                processWide = false,
+                requestedPolicy = policy,
+                installed = true,
+                failure = RuntimeException("boom"),
+            )
+        }
+    }
 }

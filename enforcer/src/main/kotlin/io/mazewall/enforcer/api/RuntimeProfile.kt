@@ -29,3 +29,5 @@ public enum class RuntimeProfile {
                 NATIVE_IMAGE -> false
             }
 }
+
+internal fun <S : PolicyScope> PolicyBuilder<S>.forRuntime(runtime: RuntimeProfile): PolicyBuilder<S> = setExecutableMappings(runtime.allowsExecutableMappings)

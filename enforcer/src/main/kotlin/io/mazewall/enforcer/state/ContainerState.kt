@@ -17,7 +17,6 @@ import io.mazewall.seccomp.SeccompInstallationState
  */
 internal data class ContainerState(
     val filterDepth: Int = 0,
-    val allowedSyscalls: Set<Syscall>? = null,
     val defaultAction: SeccompAction = SeccompAction.ACT_ALLOW,
     val syscallActions: Map<Syscall, SeccompAction> = emptyMap(),
     val landlockPolicy: PolicyDefinition<*>? = null,
@@ -30,11 +29,19 @@ internal data class ContainerState(
 ) {
     val installationFailure: Throwable? get() = installationEvidence.failure
 
+    val allowedSyscalls: Set<Syscall>?
+        get() =
+            if (defaultAction == SeccompAction.ACT_ALLOW) {
+                null
+            } else {
+                syscallActions.filterValues { it == SeccompAction.ACT_ALLOW }.keys
+            }
+
+    /** Returns the effective [SeccompAction] for [syscall], falling back to [defaultAction]. */
+    fun effectiveAction(syscall: Syscall): SeccompAction = syscallActions[syscall] ?: defaultAction
+
     /** Returns true if the given [syscall] is unconditionally allowed by this state. */
-    fun isSyscallAllowed(syscall: Syscall): Boolean {
-        val action = syscallActions[syscall] ?: defaultAction
-        return action == SeccompAction.ACT_ALLOW
-    }
+    fun isSyscallAllowed(syscall: Syscall): Boolean = effectiveAction(syscall) == SeccompAction.ACT_ALLOW
 
     /**
      * Returns the effective [SeccompAction] for a given syscall number on the specified [arch].
@@ -65,37 +72,41 @@ internal data class ContainerState(
         }
     }
 
+    fun withAppliedFilter(installedFilter: PolicyDefinition<*>): ContainerState {
+        val nextDefaultAction = defaultAction.stricter(installedFilter.defaultAction)
+        val mergedActions = LinkedHashMap<Syscall, SeccompAction>()
+        for (sys in syscallActions.keys + installedFilter.syscallActions.keys) {
+            val current = effectiveAction(sys)
+            val incoming = installedFilter.syscallActions[sys] ?: installedFilter.defaultAction
+            mergedActions[sys] = current.stricter(incoming)
+        }
+
+        return copy(
+            filterDepth = filterDepth + 1,
+            syscallActions = mergedActions.toMap(),
+            defaultAction = nextDefaultAction,
+            allowsMmapExec = allowsMmapExec && installedFilter.allowMmapExec,
+            allowsNonThreadClone = allowsNonThreadClone && installedFilter.allowNonThreadClone,
+            allowsUnsafePrctl = allowsUnsafePrctl && installedFilter.allowUnsafePrctl,
+        )
+    }
+
     fun withNewSeccompPolicy(
         toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
     ): ContainerState {
-        val mergedActions = syscallActions.toMutableMap()
+        val incomingDefault = toInstall.defaultAction.stricter(newDefaultAction)
+        val incomingActions = LinkedHashMap(toInstall.syscallActions)
         for ((sys, action) in newBlocks) {
-            mergedActions[sys] = action
+            val existing = incomingActions[sys]
+            incomingActions[sys] = existing?.stricter(action) ?: action
         }
-
-        val nextDefaultAction = if (newDefaultAction.priority > defaultAction.priority) {
-            newDefaultAction
-        } else {
-            defaultAction
-        }
-
-        val nextAllowedSyscalls = if (toInstall.defaultAction != SeccompAction.ACT_ALLOW) {
-            val toInstallAllowed = Syscall.entries.filter { toInstall.isSyscallAllowed(it) }.toSet()
-            allowedSyscalls?.intersect(toInstallAllowed) ?: toInstallAllowed
-        } else {
-            allowedSyscalls
-        }
-
-        return copy(
-            filterDepth = filterDepth + 1,
-            syscallActions = mergedActions,
-            defaultAction = nextDefaultAction,
-            allowedSyscalls = nextAllowedSyscalls,
-            allowsMmapExec = allowsMmapExec && toInstall.allowMmapExec,
-            allowsNonThreadClone = allowsNonThreadClone && toInstall.allowNonThreadClone,
-            allowsUnsafePrctl = allowsUnsafePrctl && toInstall.allowUnsafePrctl,
+        return withAppliedFilter(
+            toInstall.copy(
+                defaultAction = incomingDefault,
+                syscallActions = incomingActions.toMap(),
+            ),
         )
     }
 

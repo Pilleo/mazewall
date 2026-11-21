@@ -21,7 +21,20 @@ public final class CoreLaneFunctionalTest {
         write(root, "settings.gradle.kts", "rootProject.name=\"lane-fixture\"\ninclude(\":demos:vulnerable-web-app\", \":platform\", \":enforcer\", \":profiler\", \":portals:codegen\")\n");
         write(root, "demos/vulnerable-web-app/build.gradle.kts", "tasks.register(\"unitCheck\") { doLast { println(\"DEMO_HOST_GATE_OK\") } }\n");
         for (String module : List.of("platform", "enforcer", "profiler", "portals/codegen")) {
-            write(root, module + "/build.gradle.kts", "plugins { java }\n");
+            if (module.equals("enforcer")) {
+                write(root, module + "/build.gradle.kts", """
+                    plugins { java }
+                    tasks.register("checkKotlinAbi") {
+                        val failAbi = providers.gradleProperty("failAbi").orNull
+                        doLast {
+                            if (failAbi == "true") throw GradleException("ABI_MISMATCH")
+                            println("ABI_OK")
+                        }
+                    }
+                    """);
+            } else {
+                write(root, module + "/build.gradle.kts", "plugins { java }\n");
+            }
             String name = module.replace('/', '_');
             write(root, module + "/src/main/java/" + name + ".java", "public class " + name + " {}\n");
         }
@@ -49,6 +62,8 @@ public final class CoreLaneFunctionalTest {
                 systemProperty("fixture.task", name)
             }
             tasks.register("buildLogicCheck")
+            tasks.register("verifySupportedApiSurface") { doLast { println("API_SURFACE_OK") } }
+            tasks.register("verifyPackageTopology") { doLast { println("PACKAGE_TOPOLOGY_OK") } }
             tasks.register("verifyGradleReproducibility") { doLast { println("REPRODUCIBILITY_OK") } }
             """ + harness + AggregateVerificationFunctionalTest.declaration(source, "unitCheck")
             + "\ntasks.named(\"unitCheck\") { dependsOn(\"consumerHarnessTest\") }\n");
@@ -68,6 +83,13 @@ public final class CoreLaneFunctionalTest {
         }
         BuildResult host = run(root, core);
         require(host.task(":verifyGradleReproducibility") != null && host.getOutput().contains("REPRODUCIBILITY_OK"), "Core must execute reproducibility verification with unitCheck");
+        require(host.task(":verifySupportedApiSurface") != null && host.getOutput().contains("API_SURFACE_OK"), "Core must execute verifySupportedApiSurface via unitCheck");
+        require(host.task(":verifyPackageTopology") != null && host.getOutput().contains("PACKAGE_TOPOLOGY_OK"), "Core must execute verifyPackageTopology via unitCheck");
+        require(host.task(":enforcer:checkKotlinAbi") != null && host.getOutput().contains("ABI_OK"), "Core must execute module checkKotlinAbi via unitCheck");
+        var abiFailArgs = new ArrayList<>(core);
+        abiFailArgs.add("-PfailAbi=true");
+        BuildResult abiFailed = GradleRunner.create().withProjectDir(root.toFile()).withArguments(abiFailArgs).buildAndFail();
+        require(abiFailed.getOutput().contains("ABI_MISMATCH"), "Intentional ABI mismatch must fail the required CI host gate");
         String cacheProof = step(workflow, "Prove configuration-cache reuse");
         require(!cacheProof.contains(" help ") && count(cacheProof, ":unitCheck :verifyGradleReproducibility --dry-run") == 2 &&
             cacheProof.contains("Configuration cache entry reused"), "Core must prime and replay the actual host graph without task actions");

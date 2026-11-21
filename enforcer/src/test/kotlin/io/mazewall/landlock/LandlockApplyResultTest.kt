@@ -317,6 +317,53 @@ class LandlockApplyResultTest {
     }
 
     @Test
+    fun `restrict-self EPERM stays the rejection when ruleset close returns EIO`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        Platform.setProvider(MockPlatformProvider())
+        val engine = object : MockNativeEngine() {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                when (nr) {
+                    NativeConstants.LANDLOCK_CREATE_RULESET_NR ->
+                        LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition()
+                    NativeConstants.LANDLOCK_RESTRICT_SELF_NR ->
+                        LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1)
+                    else -> super.syscall(nr, a1, a2, a3, a4, a5, a6)
+                }
+        }
+        engine.fileSystem.onClose = { fd ->
+            if (fd.role == FileDescriptorRole.Ruleset) {
+                LinuxNative.SyscallResult.Error(NativeConstants.EIO, -1)
+            } else {
+                LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0L)
+            }
+        }
+        LinuxNative.setEngine(engine)
+
+        val session = LandlockSession(Policy.PURE_COMPUTE_UNSAFE.definition)
+        val rejected = assertIs<LandlockApplyResult.Rejected>(session.tryApplyRuleset())
+
+        assertEquals(NativeConstants.EPERM, rejected.errno)
+        assertContains(rejected.reason, "landlock_restrict_self")
+        val thrown = assertFailsWith<IllegalStateException> { rejected.orThrow() }
+        assertTrue(thrown !is NativeCloseFailure)
+        assertTrue(
+            thrown.suppressed.any {
+                it is NativeCloseFailure && it.message.orEmpty().contains("errno=${NativeConstants.EIO}")
+            },
+        )
+        val failed = assertIs<LandlockState.Failed>(session.state)
+        assertIs<LandlockState.Enforcing>(failed.previous)
+    }
+
+    @Test
     fun `ContainedExecutors install receipt is not installed when landlock is rejected`(
         @TempDir dir: Path,
     ) {

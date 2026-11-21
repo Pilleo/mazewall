@@ -1,0 +1,104 @@
+plugins { id 'java' }
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger())
+    }
+}
+
+dependencies {
+    implementation "io.mazewall:mazewall-lockdown:${providers.gradleProperty('consumerVersion').get()}"
+}
+
+tasks.register('verifyInternalEncapsulation', JavaExec) {
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.classpath.JavaLockdownConsumer'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doFirst {
+        args 'verify-encapsulation', sourceSets.main.compileClasspath.asPath
+    }
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JAVA_ENCAPSULATION_OK')) {
+            throw new GradleException("Missing JAVA_ENCAPSULATION_OK marker:\n${text}")
+        }
+    }
+}
+
+tasks.register('runClasspathLockdown', JavaExec) {
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.classpath.JavaLockdownConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doFirst {
+        args 'enforce'
+    }
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JAVA_CLASSPATH_LOCKDOWN_OK')) {
+            throw new GradleException("Missing JAVA_CLASSPATH_LOCKDOWN_OK marker:\n${text}")
+        }
+        if (text.contains('WARNING: A restricted method')) {
+            throw new GradleException("Unexpected native access warning:\n${text}")
+        }
+    }
+}
+
+tasks.register('runNonLinuxZeroWarning', JavaExec) {
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.classpath.JavaLockdownConsumer'
+    jvmArgs '-Dos.name=Mac OS X'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doFirst {
+        args 'expect-install-failure'
+    }
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JAVA_EXPECTED_FAILURE_OK:')) {
+            throw new GradleException("Missing JAVA_EXPECTED_FAILURE_OK marker:\n${text}")
+        }
+        if (text.contains('WARNING: A restricted method')) {
+            throw new GradleException("Unexpected restricted method warning on non-Linux:\n${text}")
+        }
+    }
+}
+
+tasks.register('runDeniedNativeAccess', JavaExec) {
+    onlyIf { providers.gradleProperty('consumerJdk').getOrElse('25').toInteger() >= 24 }
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.classpath.JavaLockdownConsumer'
+    jvmArgs '--illegal-native-access=deny'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doFirst {
+        args 'expect-install-failure'
+    }
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JAVA_EXPECTED_FAILURE_OK:')) {
+            throw new GradleException("Missing JAVA_EXPECTED_FAILURE_OK marker:\n${text}")
+        }
+        if (text.contains('ExceptionInInitializerError')) {
+            throw new GradleException("Leaked ExceptionInInitializerError:\n${text}")
+        }
+    }
+}

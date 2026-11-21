@@ -47,4 +47,62 @@ class ContainerStateTest {
 
         assertEquals(policy, nextState.landlockPolicy)
     }
+
+    @Test
+    fun `withNewSeccompPolicy enforces canonical action rank for default and explicit actions`() {
+        val dummyPolicy =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .allowMmapExec()
+                .allowNonThreadClone()
+                .allowUnsafePrctl()
+                .build()
+                .definition
+
+        val tracedState =
+            ContainerState(
+                filterDepth = 1,
+                defaultAction = SeccompAction.ACT_TRACE(7),
+                syscallActions = mapOf(Syscall.GETPPID to SeccompAction.ACT_TRACE(7)),
+            )
+
+        val notifiedState =
+            tracedState.withNewSeccompPolicy(
+                toInstall = dummyPolicy,
+                newBlocks = mapOf(Syscall.GETPPID to SeccompAction.ACT_NOTIFY),
+                newDefaultAction = SeccompAction.ACT_NOTIFY,
+            )
+        assertEquals(SeccompAction.ACT_NOTIFY, notifiedState.defaultAction)
+        assertEquals(SeccompAction.ACT_NOTIFY, notifiedState.syscallActions[Syscall.GETPPID])
+
+        // Attempting a weaker proposal retains ACT_NOTIFY.
+        val downgradedFromNotify =
+            notifiedState.withNewSeccompPolicy(
+                toInstall = dummyPolicy,
+                newBlocks = mapOf(Syscall.GETPPID to SeccompAction.ACT_TRACE(7)),
+                newDefaultAction = SeccompAction.ACT_TRACE(7),
+            )
+        assertEquals(SeccompAction.ACT_NOTIFY, downgradedFromNotify.defaultAction)
+        assertEquals(SeccompAction.ACT_NOTIFY, downgradedFromNotify.syscallActions[Syscall.GETPPID])
+
+        // ACT_ERRNO escalates over ACT_NOTIFY and rejects downgrade back to ACT_NOTIFY.
+        val errno = SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES)
+        val errnoState =
+            notifiedState.withNewSeccompPolicy(
+                toInstall = dummyPolicy,
+                newBlocks = mapOf(Syscall.GETPPID to errno),
+                newDefaultAction = errno,
+            )
+        assertEquals(errno, errnoState.defaultAction)
+        assertEquals(errno, errnoState.syscallActions[Syscall.GETPPID])
+
+        val downgradedFromErrno =
+            errnoState.withNewSeccompPolicy(
+                toInstall = dummyPolicy,
+                newBlocks = mapOf(Syscall.GETPPID to SeccompAction.ACT_NOTIFY),
+                newDefaultAction = SeccompAction.ACT_NOTIFY,
+            )
+        assertEquals(errno, downgradedFromErrno.defaultAction)
+        assertEquals(errno, downgradedFromErrno.syscallActions[Syscall.GETPPID])
+    }
 }

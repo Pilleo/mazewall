@@ -39,8 +39,6 @@ class ContainmentRegistryEffectTest {
             ContainmentRegistryEffect.SeccompInstalled(
                 processWide = false,
                 policy = policy,
-                blocks = mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()),
-                defaultAction = SeccompAction.ACT_ALLOW,
             ),
         )
 
@@ -78,7 +76,7 @@ class ContainmentRegistryEffectTest {
             .build()
             .definition
         val publish = ContainmentRegistryEffectInterpreter.prepare(
-            ContainmentRegistryEffect.SeccompInstalled(false, policy, mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()), SeccompAction.ACT_ALLOW),
+            ContainmentRegistryEffect.SeccompInstalled(false, policy),
         )
         java.util.concurrent.Executors.newSingleThreadExecutor().use { coordinator ->
             coordinator
@@ -127,7 +125,7 @@ class ContainmentRegistryEffectTest {
             .build()
             .definition
         val publish = ContainmentRegistryEffectInterpreter.prepare(
-            ContainmentRegistryEffect.SeccompInstalled(processWide, policy, mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()), SeccompAction.ACT_ALLOW),
+            ContainmentRegistryEffect.SeccompInstalled(processWide, policy),
         )
         val failure = IllegalStateException("installation rejected before coordinator publication")
         ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, failure))
@@ -157,7 +155,7 @@ class ContainmentRegistryEffectTest {
     fun `late publication retains current thread CET proof without promoting process proof`() {
         val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
         val publish = ContainmentRegistryEffectInterpreter.prepare(
-            ContainmentRegistryEffect.SeccompInstalled(false, policy, emptyMap(), SeccompAction.ACT_ALLOW),
+            ContainmentRegistryEffect.SeccompInstalled(false, policy),
         )
         val proof = CetThreadProof(Any(), Thread.currentThread())
         ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof))
@@ -175,5 +173,35 @@ class ContainmentRegistryEffectTest {
         val proof = CetThreadProof(Any(), Thread.ofPlatform().unstarted {})
         kotlin.test.assertFailsWith<IllegalStateException> { ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof)) }
         assertEquals(null, ContainmentStateRegistry.threadState.installationEvidence.cet)
+    }
+
+    @Test
+    fun `thread-scoped delta publication preserves process allow-list exceptions`() {
+        val processPolicy =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .defaultAction(SeccompAction.ACT_ERRNO())
+                .allow(Syscall.READ, Syscall.GETPPID)
+                .build()
+                .definition
+        ContainmentRegistryEffectInterpreter.apply(
+            ContainmentRegistryEffect.SeccompInstalled(processWide = true, policy = processPolicy),
+        )
+
+        val threadDelta =
+            PolicyBuilder<PolicyScope.ThreadLocalOnly>()
+                .defaultAction(SeccompAction.ACT_ALLOW)
+                .addAction(SeccompAction.ACT_ERRNO(), Syscall.GETPPID)
+                .allowMmapExec()
+                .build()
+        ContainmentRegistryEffectInterpreter.apply(
+            ContainmentRegistryEffect.SeccompInstalled(processWide = false, policy = threadDelta),
+        )
+
+        assertEquals(SeccompAction.ACT_ALLOW, ContainmentStateRegistry.threadState.defaultAction)
+        val merged = ContainmentStateRegistry.resolveCurrentState()
+        assertEquals(SeccompAction.ACT_ALLOW, merged.effectiveAction(Syscall.READ))
+        assertEquals(SeccompAction.ACT_ERRNO(), merged.effectiveAction(Syscall.GETPPID))
+        assertEquals(setOf(Syscall.READ), merged.allowedSyscalls)
     }
 }

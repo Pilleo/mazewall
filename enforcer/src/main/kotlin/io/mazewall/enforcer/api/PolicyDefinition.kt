@@ -73,7 +73,9 @@ public data class PolicyDefinition<out S : PolicyScope>(
          * Composes multiple policies into a single one.
          * Prefer [intersection] when the intent is "strictest wins".
          */
-        public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> {
+        public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> = combineAll(policies.asList())
+
+        internal fun <S : PolicyScope> combineAll(policies: List<PolicyDefinition<S>>): PolicyDefinition<S> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
 
             val combinedDefaultAction =
@@ -116,7 +118,7 @@ public data class PolicyDefinition<out S : PolicyScope>(
             if (enforceLandlock) {
                 for (sys in listOf(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)) {
                     val current = combinedSyscalls[sys] ?: combinedDefaultAction
-                    if (current.priority <= SeccompAction.ACT_ALLOW.priority) {
+                    if (current.restrictivenessRank() <= SeccompAction.ACT_ALLOW.restrictivenessRank()) {
                         combinedSyscalls[sys] = SeccompAction.ACT_ALLOW
                     }
                 }
@@ -192,7 +194,10 @@ internal fun <S : PolicyScope> PolicyDefinition<S>.frozenCopy(): PolicyDefinitio
 /**
  * Compiles the high-level policy into kernel-ready BPF instructions for the given [arch].
  */
-internal fun <S : PolicyScope> PolicyDefinition<S>.compile(arch: Arch): CompiledSandbox<S> {
-    val filters = BpfFilter.build(arch, this)
+internal fun <S : PolicyScope> PolicyDefinition<S>.compile(
+    arch: Arch,
+    warnOnUnsafePrctl: Boolean = true,
+): CompiledSandbox<S> {
+    val filters = BpfFilter.build(arch, this, warnOnUnsafePrctl = warnOnUnsafePrctl)
     return CompiledSandbox(this, filters)
 }

@@ -1,6 +1,87 @@
 # Getting Started with mazewall
 
-This guide shows how to evaluate kernel-enforced restrictions for selected JVM workers. Read the [threat model](docs/internals/designs/core/security-considerations.md) before applying a policy to an application.
+Read [STABILITY.md](STABILITY.md) and the [threat model](docs/internals/designs/core/security-considerations.md) before applying any containment policy to a service.
+
+---
+
+## 0.1.0 Stable Release: Process-Wide Execution Lockdown (`io.mazewall:mazewall-lockdown`)
+
+For the `0.1.0` release, `:lockdown` (`io.mazewall:mazewall-lockdown`, JPMS module `io.mazewall.lockdown`) is the standalone, supported stable library. Across every thread in the JVM process, it blocks `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`, and `prctl` subcommands outside the 6 safe options (`PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM`, returns `ENOSYS` for `clone3` (falling back to `clone`), and leaves `fork`/`vfork`/`clone` permitted (with inherited filter).
+
+### Supported Matrix (`:lockdown` `0.1.0`)
+
+| Requirement | Supported |
+|---|---|
+| **JVM runtime** | JDK 22–25 (`--release 22` bytecode) with `--enable-native-access=io.mazewall.lockdown` (module path) or `ALL-UNNAMED` (classpath) |
+| **Linux architecture** | `x86_64` (`amd64`) and `aarch64` (`arm64`) |
+| **Linux kernel** | Kernel 3.17+ with Seccomp-BPF and `SECCOMP_FILTER_FLAG_TSYNC` |
+| **Privileges / Native libs** | Non-root user permitted; zero native `.so` / JNI libraries |
+
+### Gradle Dependency
+
+Released artifacts use the `io.mazewall:mazewall-lockdown:0.1.0` coordinate:
+
+```kotlin
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation("io.mazewall:mazewall-lockdown:0.1.0")
+}
+```
+
+Before `0.1.0` is published to Maven Central, evaluate from source with a JDK 25 checkout: publish `:lockdown` to your local Maven repository (`./gradlew :lockdown:publishToMavenLocal`), then request the snapshot:
+
+```kotlin
+repositories {
+    mavenLocal {
+        content { includeGroup("io.mazewall") }
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation("io.mazewall:mazewall-lockdown:0.1.0-SNAPSHOT")
+}
+```
+
+### Startup Placement & Runtime Profiles
+
+Call `Mazewall.installOnProcess` once on a **platform thread** (`!Thread.currentThread().isVirtual()`) at application startup, after any required helper child processes exit and before opening network listeners:
+
+```java
+import io.mazewall.lockdown.Mazewall;
+import io.mazewall.lockdown.MazewallInstallationException;
+import io.mazewall.lockdown.ProcessInstallation;
+import io.mazewall.lockdown.ProcessPolicy;
+import io.mazewall.lockdown.RuntimeProfile;
+
+public final class ApplicationMain {
+    public static void main(String[] args) {
+        try {
+            ProcessInstallation installation = Mazewall.installOnProcess(
+                ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
+            );
+            System.out.println("Lockdown active (" + installation.architecture() + ")");
+        } catch (MazewallInstallationException failure) {
+            // Fail closed: do not swallow on unsupported OS/kernel, missing native access, or virtual thread.
+            throw failure;
+        }
+    }
+}
+```
+
+- Use `RuntimeProfile.HOTSPOT_JIT` on standard HotSpot JVMs so JIT compilation can continue allocating executable code-cache pages.
+- Use `RuntimeProfile.NATIVE_IMAGE` on GraalVM Native Image / AOT runtimes where executable `mmap`/`mprotect`/`pkey_mprotect` (`PROT_EXEC`) mappings should also be denied. Once `NATIVE_IMAGE` is installed, attempting to relax back to `HOTSPOT_JIT` fails closed with `MazewallInstallationException`.
+- **Startup verification:** Default installation checks `prctl(PR_GET_SECCOMP) == 2` and `getpid()` liveness without firing synthetic denied syscalls; pass `-Dio.mazewall.selfVerify=true` in CI/staging to enable active denied-syscall probing.
+- **Operational limits:** Once installed, the filter is **irreversible** for the lifetime of the OS process. It fails closed with `MazewallInstallationException` on macOS/Windows, missing `--enable-native-access`, or incompatible containers. Blocking `io_uring_setup`/`io_uring_enter`, `memfd_create`, and non-allowlisted `prctl` subcommands is incompatible with Netty `IoUringIoHandler` (use standard Epoll or NIO transport) and libraries invoking `memfd_create` or restricted `prctl` options after lockdown installation.
+
+---
+
+## Experimental In-Repository Evaluation (`:enforcer` and `:profiler`, unpublished in `0.1.0`)
+
+The remainder of this guide covers evaluating kernel-enforced per-worker restrictions and automated profiling using the unpublished `0.1.0-SNAPSHOT` `:enforcer` and `:profiler` modules.
 
 ---
 

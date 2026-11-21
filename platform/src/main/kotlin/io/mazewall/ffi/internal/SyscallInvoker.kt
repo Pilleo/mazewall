@@ -1,10 +1,15 @@
 package io.mazewall.ffi.internal
 
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ErrnoSegment
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.LinuxNative
 import java.lang.foreign.MemorySegment
 import java.lang.invoke.MethodHandle
+import java.lang.invoke.MethodType
 
 /**
  * Dedicated utility to perform FFM downcalls and immediately capture errno,
@@ -110,9 +115,16 @@ internal object SyscallInvoker {
 
     fun close(
         handle: MethodHandle,
-        fd: Int,
+        fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return intCall { handle.invokeExact(it, fd) as Int }
+        require(handle.type() == MethodType.methodType(Int::class.javaPrimitiveType, MemorySegment::class.java, Int::class.javaPrimitiveType))
+        val value = fd.value
+        return ErrnoSegment.withCapturedState { capturedState ->
+            val segment = capturedState.segment
+            if (!fd.claimForClose()) return@withCapturedState LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
+            val ret = handle.invokeExact(segment, value) as Int
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
     }
 
     fun readlink(

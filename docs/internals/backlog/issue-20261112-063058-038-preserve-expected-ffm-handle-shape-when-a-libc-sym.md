@@ -21,5 +21,9 @@ The missing-symbol branch constructs an int-returning throwing handle from descr
 **Needed:**
 1. Add focused missing-symbol tests for actual expected handle type, int and long returns, captured errno state and throwable identity, then preserve fail-closed behavior without changing native capability or timeout policy.
 
+## Progress Evidence
+- Updated `RealNativeHelper.downcall` in `platform/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt` to build missing-symbol failing MethodHandles matching `linker.downcallHandle(fd, *options).type().dropParameterTypes(0, 1)` across return types, parameters, `captureCallState`, and variadic options.
+- Added focused regressions in `platform/src/test/kotlin/io/mazewall/ffi/RealNativeHelperDowncallTest.kt`; awaiting final `:platform:test` + `unitCheck` gate re-run before archival.
+
 ---
 <!-- id: issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym  file: issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md -->

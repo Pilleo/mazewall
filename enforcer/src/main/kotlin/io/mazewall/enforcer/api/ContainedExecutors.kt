@@ -487,9 +487,11 @@ public object ContainedExecutors {
     ): io.mazewall.enforcer.api.InstallationReceipt {
         // FAST PATH: Check if the current thread state already satisfies the policy without locking
         val fastState = installationState(processWide)
-        val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
-        if (!fastPlan.needsNewFilter && scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
-        if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
+        val fastDecision = FilterInstallationPlanner.plan(combinedPolicy, fastState)
+        if (fastDecision is FilterInstallationPlanner.PlanDecision.AlreadySatisfied && scopingPolicy is InstallationScoping.Live) {
+            error("Live supervision requires a new listener")
+        }
+        if (fastDecision is FilterInstallationPlanner.PlanDecision.AlreadySatisfied && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
             return io.mazewall.enforcer.api.InstallationReceipt(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
@@ -502,17 +504,25 @@ public object ContainedExecutors {
 
         synchronized(processLock) {
             val state = installationState(processWide)
-            val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
-
-            if (!plan.needsNewFilter && scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
-            val session = if (plan.needsNewFilter) {
-                // Kernel depth belongs to this thread's complete filter tree, even
-                // though process policy coverage is planned from processState only.
-                FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
-                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy, attempt)
-            } else {
-                null
-            }
+            val session =
+                when (val decision = FilterInstallationPlanner.plan(combinedPolicy, state)) {
+                    is FilterInstallationPlanner.PlanDecision.AlreadySatisfied -> {
+                        if (scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
+                        null
+                    }
+                    is FilterInstallationPlanner.PlanDecision.Install -> {
+                        // Kernel depth belongs to this thread's complete filter tree, even
+                        // though process policy coverage is planned from processState only.
+                        FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
+                        applyBpfFilter(
+                            processWide,
+                            decision.fragment,
+                            scopingPolicy,
+                            attempt,
+                            warnOnUnsafePrctl = combinedPolicy.allowUnsafePrctl,
+                        )
+                    }
+                }
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
                 if (session is io.mazewall.enforcer.internal.supervisor.SupervisorSession) {
@@ -676,10 +686,9 @@ public object ContainedExecutors {
     private fun applyBpfFilter(
         processWide: Boolean,
         toInstall: PolicyDefinition<*>,
-        newBlocks: Map<Syscall, SeccompAction>,
-        newDefaultAction: SeccompAction,
         scopingPolicy: InstallationScoping,
         attempt: InstallationAttempt,
+        warnOnUnsafePrctl: Boolean = toInstall.allowUnsafePrctl,
     ): AutoCloseable? {
         val arch = io.mazewall.platform.syscall.Arch
             .current()
@@ -691,8 +700,6 @@ public object ContainedExecutors {
                     ContainmentRegistryEffect.SeccompInstalled(
                         processWide = false,
                         policy = toInstall,
-                        blocks = newBlocks,
-                        defaultAction = newDefaultAction,
                     ),
                 )
             val onApplied = {
@@ -718,22 +725,26 @@ public object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.enforcer.api.PolicyCompilationCache
-                .getOrCompile(toInstall, arch)
+                .getOrCompile(toInstall, arch, warnOnUnsafePrctl = warnOnUnsafePrctl)
             val currentState = ContainerState.resolveCurrentState()
             val priorFilterDepth = currentState.filterDepth
 
             // Compute merged state for union-aware self-verification (issue-20260824-011900)
-            val mergedState = currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
+            val mergedState = currentState.withAppliedFilter(toInstall)
 
             val publish = ContainmentRegistryEffectInterpreter.prepare(
                 ContainmentRegistryEffect.SeccompInstalled(
                     processWide,
                     toInstall,
-                    newBlocks,
-                    newDefaultAction,
                 ),
             )
-            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native, platform = attempt.platform) {
+            PureJavaBpfEngine.installWithPublication(
+                compiledSandbox,
+                processWide,
+                native = attempt.native,
+                isLinux = attempt.platform.isLinux,
+                tsyncSupported = if (processWide) attempt.platform.capabilities.matrix.seccompTsyncSupported else false,
+            ) {
                 attempt.seccompApplied = true
                 publish()
             }

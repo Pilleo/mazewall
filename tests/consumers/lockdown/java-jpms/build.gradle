@@ -1,0 +1,61 @@
+plugins { id 'java' }
+
+java {
+    modularity.inferModulePath = true
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger())
+    }
+}
+
+dependencies {
+    implementation "io.mazewall:mazewall-lockdown:${providers.gradleProperty('consumerVersion').get()}"
+}
+
+sourceSets {
+    create('probe') {
+        compileClasspath += configurations.compileClasspath
+        runtimeClasspath += configurations.runtimeClasspath
+    }
+}
+
+tasks.register('verifyJpmsEncapsulation', JavaExec) {
+    dependsOn tasks.named('probeClasses')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.probe.output + sourceSets.probe.runtimeClasspath
+    mainClass = 'consumer.jpms.JpmsEncapsulationProbe'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doFirst {
+        args configurations.compileClasspath.asPath
+    }
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JPMS_ENCAPSULATION_OK')) {
+            throw new GradleException("Missing JPMS_ENCAPSULATION_OK marker:\n${text}")
+        }
+    }
+}
+
+tasks.register('runJpmsLockdown', JavaExec) {
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainModule = 'consumer.lockdown.jpms'
+    mainClass = 'consumer.jpms.JpmsLockdownConsumer'
+    jvmArgs '--enable-native-access=io.mazewall.lockdown'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('JAVA_JPMS_LOCKDOWN_OK')) {
+            throw new GradleException("Missing JAVA_JPMS_LOCKDOWN_OK marker:\n${text}")
+        }
+        if (text.contains('WARNING: A restricted method')) {
+            throw new GradleException("Unexpected restricted method warning in JPMS run:\n${text}")
+        }
+    }
+}

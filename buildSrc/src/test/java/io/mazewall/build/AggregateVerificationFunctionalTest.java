@@ -22,6 +22,8 @@ final class AggregateVerificationFunctionalTest {
                 """);
             write(fixture, "build.gradle.kts",
                 "tasks.register(\"optionalNativeBuild\") { throw GradleException(\"UNSELECTED_NATIVE_TASK_REALIZED\") }\n"
+                    + "tasks.register(\"verifySupportedApiSurface\") { doLast { println(\"surface gate executed\") } }\n"
+                    + "tasks.register(\"verifyPackageTopology\") { doLast { println(\"topology gate executed\") } }\n"
                     + declaration(source, "unitCheck") + "\n" + declaration(source, "kernelCheck"));
             String javaModule = """
                 plugins { java }
@@ -31,6 +33,7 @@ final class AggregateVerificationFunctionalTest {
                 tasks.register("ktlintCheck") { doLast { println("style gate executed") } }
                 tasks.register("detektMain") { doLast { println("analysis gate executed") } }
                 tasks.register("spotbugsMain") { doLast { println("Java analysis gate executed") } }
+                tasks.register("checkKotlinAbi") { doLast { println("ABI gate executed") } }
                 tasks.register("kernelCheck") {
                     doLast { println("kernel gate executed") }
                 }
@@ -66,10 +69,11 @@ final class AggregateVerificationFunctionalTest {
 
     private static void assertSelectedGates(BuildResult result) {
         for (String selected : List.of(
+            ":verifySupportedApiSurface", ":verifyPackageTopology",
             ":group:leaf:unitCheck", ":group:leaf:kernelCheck",
             ":plain:unitCheck", ":plain:kernelCheck", ":custom:unitCheck",
-            ":group:leaf:ktlintCheck", ":group:leaf:detektMain", ":group:leaf:spotbugsMain",
-            ":plain:ktlintCheck", ":plain:detektMain", ":plain:spotbugsMain"
+            ":group:leaf:ktlintCheck", ":group:leaf:detektMain", ":group:leaf:spotbugsMain", ":group:leaf:checkKotlinAbi",
+            ":plain:ktlintCheck", ":plain:detektMain", ":plain:spotbugsMain", ":plain:checkKotlinAbi"
         )) {
             var task = result.task(selected);
             if (task == null || task.getOutcome() != TaskOutcome.SUCCESS) {
@@ -77,8 +81,8 @@ final class AggregateVerificationFunctionalTest {
             }
         }
         for (String excluded : List.of(
-            ":group:unitCheck", ":group:kernelCheck", ":custom:kernelCheck",
-            ":demos:ignored:unitCheck", ":demos:ignored:kernelCheck"
+            ":group:unitCheck", ":group:kernelCheck", ":custom:kernelCheck", ":custom:checkKotlinAbi",
+            ":demos:ignored:unitCheck", ":demos:ignored:kernelCheck", ":demos:ignored:checkKotlinAbi"
         )) {
             if (result.task(excluded) != null) {
                 throw new AssertionError("Aggregate selected an absent or excluded gate: " + excluded);
