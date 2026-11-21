@@ -8,10 +8,11 @@ a replacement for normal service boundaries.
 ## What crosses the boundary
 
 Generated stubs copy request and response values. Supported values include
-primitives, strings, byte arrays, `UUID`, `Instant`, `BigDecimal`, enum names,
-and validated constructor-backed records/objects composed from those values.
-`Capability.ReadFd` is the explicit advanced inbound capability type. It is
-never returned and never flows worker-to-host.
+primitives, strings, byte arrays (`byte[]`/`ByteArray`), `UUID`, `Instant`,
+`BigDecimal`, enum names, copied `List`/`MutableList` and `Map`/`MutableMap`
+contracts, and validated constructor-backed records/objects composed from those
+values. `Capability.ReadFd` is the explicit advanced inbound capability type. It
+is never returned and never flows worker-to-host.
 
 Paths, callbacks, object identity, Java serialization, returned streams, and
 reactive streams are unsupported. Raw `InputStream` contracts remain rejected
@@ -25,8 +26,11 @@ operator-selected directory and owns/deletes its spill data.
 
 Apply the portal codegen plugin and choose a dedicated worker source set. It
 generates host stubs, worker dispatchers, immutable service manifests, and a
-`portalWorkerBundle` ZIP with its SHA-256 sidecar. The bundle contains only
-JARs under `lib/`.
+`portalWorkerBundle` ZIP with its SHA-256 sidecar. Configured stub, dispatcher,
+manifest, and worker-resource output directories must be pairwise disjoint
+non-overlapping trees (including relative/symlinked aliases); overlapping
+publication plans fail before modifying prior generated files. The bundle
+contains only JARs under `lib/`.
 
 For a generated Gradle build, `publishPortalWorkerArtifactMetadata` publishes
 opaque bundle bytes and digest-addressed resource metadata in the host artifact.

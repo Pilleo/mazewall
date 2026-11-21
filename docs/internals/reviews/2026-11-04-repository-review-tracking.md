@@ -141,13 +141,13 @@ remain those in the detailed finding register; a mapping is not a closure claim.
 | HS-02 | P1 | W11 | [issue-20261021-115502-293](../backlog/issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md) |
 | HS-QUAL | P1 | W10 | [issue-20261005-193140-042](../backlog/issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-.md) |
 | PRT-04 | P1 | W06 | [issue-20261007-201438-646](../backlog/issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an.md) |
-| CG01 | P1 | W07 | [issue-20261103-095305-625](../backlog/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) |
+| CG01 | P1 | W07 | [issue-20261103-095305-625](../backlog/resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) |
 | CG02 | P1 | W07 | [issue-20261103-095306-294](../backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) |
 | CG03 | P1 | W07 | [issue-20261103-095306-992](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |
 | CG04 | P1 | W07 | [issue-20261103-095307-699](../backlog/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) |
 | CG05 | P1 | W07 | [issue-20261103-095308-453](../backlog/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) |
 | CG06 | P1 | W07 | [issue-20261103-095309-136](../backlog/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) |
-| CG07 | P1 | W07 | [issue-20261103-095309-827](../backlog/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) |
+| CG07 | P1 | W07 | [issue-20261103-095309-827](../backlog/resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) |
 | PCG-08 | P1 | W12 | [issue-20261007-213121-162](../backlog/issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in.md) |
 | PCG-09 | P1 | W12 | [issue-20261103-090025-581](../backlog/issue-20261103-090025-581-simplify-portal-registration-and-single-project-wo.md) |
 | SPR-01 | P1 | W13 | [issue-20261008-033416-558](../backlog/issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md) |

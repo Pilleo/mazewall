@@ -37,7 +37,7 @@ CG06: a generated dispatcher encoded 16385 list elements rejected by its own rea
 4. Preserve valid wire bytes and service-error handling. Make the writer reusable by submit-time snapshots while P03 retains admission/deadline ownership and P10 retains measurement-driven optimization.
 
 **Scope and dependencies:**
-- Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md). [Review CG06](../reviews/2026-11-03-portal-codegen-hardening.md#cg06--enforce-bounds-while-encoding) records actual oversized encoded arrays.
+- Follows [CG01](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md). [Review CG06](../reviews/2026-11-03-portal-codegen-hardening.md#cg06--enforce-bounds-while-encoding) records actual oversized encoded arrays.
 - The writer path is planned, not an existing source file. Reuse a matching writer if P03 implementation has already introduced one; do not create competing encoders.
 - This bounds library-controlled encoding work and allocations. A malicious user getter/iterator can itself block or allocate; no purity or arbitrary callback memory bound is implied.
 

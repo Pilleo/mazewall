@@ -12,8 +12,13 @@ adapters consume its owned execution contract without adding Spring/Koog
 dependencies to `:portals:runtime` or altering the boundary defined here.
 
 The generated boundary currently supports copied primitive values, strings,
-byte arrays, `UUID`, `Instant`, `BigDecimal`, enums by constant name, and
+byte arrays (`byte[]`/`ByteArray`), `UUID`, `Instant`, `BigDecimal`, enums by
+constant name, copied `List`/`MutableList` and `Map`/`MutableMap` contracts
+(including inherited generic contracts and supported nested collections), and
 validated records/constructor-backed value objects composed from those types.
+Codegen publication validates that all configured destination and staging
+directories (after canonicalizing symlinks and relative segments) are pairwise
+disjoint before creating, moving, or deleting output trees.
 It rejects streams unless an explicit snapshot adapter is configured. An
 inbound `InputStream` opts in only with
 `@PortalInputSnapshotAdapter(maximumBytes = ...)`: the generated host adapter

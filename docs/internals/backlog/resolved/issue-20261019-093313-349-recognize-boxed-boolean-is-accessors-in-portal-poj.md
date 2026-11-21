@@ -1,7 +1,7 @@
 ---
 title: "Recognize boxed Boolean is-accessors in Portal POJO boundaries"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "codegen"
@@ -41,6 +41,10 @@ passes, and the full optional build exits0. Evidence:
 `codegen-suite.log`, and
 `.superpowers/sdd/2026-10-19-strict-analyzer-repair/completion-receipt.json`.
 Keep open for scoped integration with recursive analyzer qualification.
+
+## Resolution Evidence (2026-11-21)
+- `BoundaryTypes.readableAccessor` (`portals/codegen/src/main/kotlin/io/mazewall/portal/codegen/BoundaryTypes.kt:260`) recognizes `Boolean::class.javaPrimitiveType` and `Boolean::class.javaObjectType`, and `PortalCodegenFunctionalTest` (`generated sources round trip primitive and boxed Boolean is accessors`) compiles and round-trips both primitive and boxed `Boolean` `is*` accessors.
+- Confirmed SpotBugs recursive analyzer qualification and suite pass via `./gradlew :portals:codegen:ktlintCheck :portals:codegen:detektMain :portals:codegen:spotbugsMain :detektWarningRatchet :portals:codegen:test --no-daemon --console=plain` (`54` tests passed, `0` failures, `0` skips).
 
 ---
 <!-- id: issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj  file: issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md -->

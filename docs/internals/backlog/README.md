@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 410 | *Total Resolved Issues:* 775
+*Total Active Issues:* 407 | *Total Resolved Issues:* 778
 
-Active status detail: 408 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 405 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -248,13 +248,13 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-101536-305](issue-20261103-101536-305-expose-and-validate-aggregate-portal-capacity-befo.md) | Expose and validate aggregate Portal capacity before worker startup | high | portal-runtime |
 | [issue-20261103-101536-562](issue-20261103-101536-562-qualify-portal-process-boundary-usage-safeguards-w.md) | Qualify Portal process-boundary usage safeguards with real consumers | high | portal-runtime |
 | Archived [issue-20261103-101247-569](resolved/issue-20261103-101247-569-add-a-standalone-ordinary-jvm-hotspot-observation-.md) | Add a standalone ordinary-JVM HotSpot observation example | high | core |
-| [issue-20261103-095305-625](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin | high | portal-codegen |
+| Archived [issue-20261103-095305-625](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-095306-294](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission | high | portal-codegen |
 | [issue-20261103-095306-992](issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) | Fingerprint the complete versioned Portal wire schema | high | portal-codegen |
 | [issue-20261103-095307-699](issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads | high | portal-codegen |
 | [issue-20261103-095308-453](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation | high | portal-runtime |
 | [issue-20261103-095309-136](issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) | Bound generated Portal encoding before allocation and traversal | high | portal-runtime |
-| [issue-20261103-095309-827](issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication | high | portal-codegen |
+| Archived [issue-20261103-095309-827](resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-085927-123](issue-20261103-085927-123-compare-warm-portal-calls-with-executor-and-persis.md) | Compare warm Portal calls with executor and persistent HTTP baselines | high | benchmarks |
 | [issue-20261103-090025-581](issue-20261103-090025-581-simplify-portal-registration-and-single-project-wo.md) | Simplify Portal registration and single-project worker packaging | high | portal-codegen |
 | [issue-20261103-090025-757](issue-20261103-090025-757-generate-typed-portal-operations-with-bounded-subm.md) | Generate typed Portal operations with bounded submit-time snapshots | high | portal-runtime |
@@ -413,7 +413,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261019-203415-734](issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md) | Reuse nested Gradle TestKit caches across disposable CI checkouts | high | ci |
 | [issue-20261019-182206-556](issue-20261019-182206-556-remove-serialized-ci-validation-delay-while-preser.md) | Remove serialized CI validation delay while preserving complete gates | high | ci |
 | [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
-| [issue-20261019-093313-349](issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries | high | codegen |
+| Archived [issue-20261019-093313-349](resolved/issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries (resolved 2026-11-21) | high | codegen |
 | [issue-20261019-075429-286](issue-20261019-075429-286-qualify-portable-fresh-cache-native-boundary-check.md) | Qualify portable fresh-cache native boundary checking with explicit artifact custody | low | benchmarks |
 | [issue-20261019-073259-804](issue-20261019-073259-804-run-integration-boundary-host-controls-from-the-st.md) | Run integration-boundary host controls from the standard check task | low | benchmarks |
 | [issue-20261019-070717-313](issue-20261019-070717-313-verify-spring-thread-dispatch-with-real-owned-runt.md) | Verify Spring thread dispatch with real owned-runtime host contracts | low | testing |

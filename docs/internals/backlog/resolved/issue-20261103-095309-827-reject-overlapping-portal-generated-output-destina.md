@@ -1,7 +1,7 @@
 ---
 title: "Reject overlapping Portal generated-output destinations before publication"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "portal-codegen"
@@ -29,7 +29,7 @@ CG07: a direct publisher probe reports success for child-then-parent destination
 4. Preserve the original/fatal failure across rollback and staging cleanup, reusing the repository's existing error-preservation pattern. Inject failures at backup, publication, rollback and cleanup boundaries.
 
 **Scope and dependencies:**
-- Independent corrective task. [Review CG07](../reviews/2026-11-03-portal-codegen-hardening.md#cg07--validate-publication-paths-before-moving-anything) reproduces output loss; cleanup-error masking is source-confirmed and still needs fault injection.
+- Independent corrective task. [Review CG07](../../reviews/2026-11-03-portal-codegen-hardening.md#cg07--validate-publication-paths-before-moving-anything) reproduces output loss; cleanup-error masking is source-confirmed and still needs fault injection.
 - Default sibling output paths and the public Gradle configuration surface remain valid. Keep the existing publisher; a new filesystem transaction framework is unnecessary.
 - Preserve existing user edits in the functional fixtures. P02 build conventions and P03's additional artifacts reuse the corrected publisher.
 
@@ -40,18 +40,23 @@ CG07: a direct publisher probe reports success for child-then-parent destination
 - No output/staging cleanup traverses a path owned by another publication entry. Tests cover both overlap orderings and filesystem aliases.
 
 **Verification:**
-- [Junior implementation walkthrough: CG07](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg07--disjoint-output-publication) details sentinel fixtures, path-alias cases and failure-injection observations.
+- [Junior implementation walkthrough: CG07](../../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg07--disjoint-output-publication) details sentinel fixtures, path-alias cases and failure-injection observations.
 - Run the publisher/failure-injection and rerun/relocation cases in `PortalCodegenFunctionalTest`, then `./gradlew :portals:codegen:test`.
 - Run `./gradlew build`, backlog and whitespace checks at implementation completion. Record preservation of old/new output sentinels at each failure boundary.
 
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[CG07/PCG-07](../reviews/2026-11-04-repository-review-findings.md#cg07) freshly reproduces
+[CG07/PCG-07](../../reviews/2026-11-04-repository-review-findings.md#cg07) freshly reproduces
 ancestor/descendant publication deleting successful child output. Cleanup can additionally
 mask primary failure (source-confirmed). Validate disjoint staging/destinations and aliases
 before mutation; test both orders, symlinks and failure suppression with prior-output sentinels.
 Ordinary default siblings remain unaffected; bundle cache equivalence is separate PCG-08 work.
+
+## Resolution Evidence (2026-11-21)
+- Updated `GeneratedOutputPublisher` (`PortalCodegenPlugin.kt`) to canonicalize existing ancestors/symlinks and reject pairwise equal/overlapping destinations, overlapping staging directories, and staging/destination/backup overlaps prior to creating parent directories, backing up, moving, or deleting output trees.
+- Preserved primary and fatal (`Error`) precedence across backup cleanup in `GeneratedOutputPublisher.publish` and staging cleanup in `GeneratePortalStubsTask.generate`.
+- Added unit tests for both overlap orderings, `..` relative aliases, symlinked ancestors, staging overlap, and backup/publish/rollback/cleanup fault injection in `PortalStubGeneratorTest.kt`, plus TestKit overlap regression in `PortalCodegenFunctionalTest.kt`; verified with `./gradlew :portals:codegen:ktlintCheck :portals:codegen:detektMain :portals:codegen:spotbugsMain :detektWarningRatchet :portals:codegen:test --no-daemon --console=plain` (`54` tests passed, `0` failures, `0` skips).
 
 ---
 <!-- id: issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina  file: issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md -->

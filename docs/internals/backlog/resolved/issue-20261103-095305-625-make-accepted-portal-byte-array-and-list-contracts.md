@@ -1,7 +1,7 @@
 ---
 title: "Make accepted Portal byte-array and list contracts generate compilable Kotlin"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "portal-codegen"
@@ -30,7 +30,7 @@ CG01: compiled review probes show byte[] signatures become Array<Byte> although 
 
 **Scope and dependencies:**
 - Independent prerequisite for the model/codec tasks; no wire-format, method-ID or public generator signature change.
-- [Review CG01](../reviews/2026-11-03-portal-codegen-hardening.md#cg01--make-accepted-types-actually-compile) records actual compiler failures, not an inferred KotlinPoet behavior.
+- [Review CG01](../../reviews/2026-11-03-portal-codegen-hardening.md#cg01--make-accepted-types-actually-compile) records actual compiler failures, not an inferred KotlinPoet behavior.
 - Preserve the existing user-owned edits in `PortalCodegenFunctionalTest.kt`; extend its fixture rather than replacing it.
 
 **Acceptance:**
@@ -39,17 +39,22 @@ CG01: compiled review probes show byte[] signatures become Array<Byte> although 
 - Existing scalar/DTO/map/overload fixtures remain green; valid encoded bytes and stable method IDs do not change.
 
 **Verification:**
-- [Junior implementation walkthrough: CG01](../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg01--compilable-boundary-types) gives the concrete compiler fixture, RED/GREEN sequence and proof limits.
+- [Junior implementation walkthrough: CG01](../../../superpowers/plans/2026-11-03-portal-developer-experience-execution-guide.md#cg01--compilable-boundary-types) gives the concrete compiler fixture, RED/GREEN sequence and proof limits.
 - Run `PortalStubGeneratorTest` and the affected `PortalCodegenFunctionalTest` compile/round-trip cases, then `./gradlew :portals:codegen:test`.
 - At implementation completion run `./gradlew build`, `./scripts/adkw check-backlog` and `git diff --check`. Record compiled-source evidence before closing this issue.
 
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[CG01/PCG-01](../reviews/2026-11-04-repository-review-findings.md#cg01) freshly reproduced
+[CG01/PCG-01](../../reviews/2026-11-04-repository-review-findings.md#cg01) freshly reproduced
 unmodified emitted byte-array/list compilation failures. Fix declarations and codecs once;
 P01 byte-array benchmarks and downstream CG/P tasks must consume real generated output rather
 than manual repairs. Compile/round-trip both Java and Kotlin contract variants before closure.
+
+## Resolution Evidence (2026-11-21)
+- Updated `PortalStubGenerator` (`scalarTypeName`, `parameterizedTypeName`, `decode`, plus Kotlin `KType` collection-mutability and inherited generic type-parameter resolution) so `byte[]`/`ByteArray` maps to `kotlin.ByteArray`, Java `java.util.List`/`Map` and Kotlin read-only `List`/`Map` emit `List`/`Map` (`buildList`/`buildMap`), and Kotlin `MutableList`/`MutableMap` emit `MutableList`/`MutableMap` (`.toMutableList()`/`.toMutableMap()`).
+- Added unit and compiled TestKit round-trip coverage for Java `ArrayAndListService`, `StringCollection`, and Kotlin `GenericKotlinCollectionService<T>` / `BinaryAndCollectionService` (empty and non-empty `ByteArray`, `List`, `MutableList`, and nested `Map`/`MutableMap`) across `SampleServices.kt`, `PortalStubGeneratorTest.kt`, and `PortalCodegenFunctionalTest.kt`.
+- Verified with `./gradlew :portals:codegen:ktlintCheck :portals:codegen:detektMain :portals:codegen:spotbugsMain :detektWarningRatchet :portals:codegen:test --no-daemon --console=plain` (`54` tests passed across 4 suites, `0` failures, `0` skips).
 
 ---
 <!-- id: issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts  file: issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md -->

@@ -70,47 +70,54 @@ public abstract class GeneratePortalStubsTask : DefaultTask() {
         val stagedDispatchers = Files.createDirectory(stagingRoot.resolve("dispatchers"))
         val stagedManifests = Files.createDirectory(stagingRoot.resolve("manifests"))
         val stagedResources = Files.createDirectory(stagingRoot.resolve("resources"))
-        try {
-            val urls = classpath.files.map { it.toURI().toURL() }.toTypedArray()
-            URLClassLoader(urls, PortalStubGenerator::class.java.classLoader).use { loader ->
-                val configuredRegistrations = registrations.get()
-                require(configuredRegistrations.map { it.serviceId }.distinct().size == configuredRegistrations.size) {
-                    "portal service registrations must have unique serviceId values"
+        val primaryFailure =
+            runCatching {
+                val urls = classpath.files.map { it.toURI().toURL() }.toTypedArray()
+                URLClassLoader(urls, PortalStubGenerator::class.java.classLoader).use { loader ->
+                    val configuredRegistrations = registrations.get()
+                    require(configuredRegistrations.map { it.serviceId }.distinct().size == configuredRegistrations.size) {
+                        "portal service registrations must have unique serviceId values"
+                    }
+                    require(configuredRegistrations.isEmpty() || generateWorker.get()) {
+                        "portal service registrations require a dedicated workerSourceSet"
+                    }
+                    val services =
+                        (interfaceNames.get() + configuredRegistrations.map { it.contractName })
+                        .distinct()
+                        .sorted()
+                        .map { name -> Class.forName(name, false, loader) }
+                    PortalGeneratedNames.requireUnique(services)
+                    services.forEach { type ->
+                        writeService(type, stagedStubs, stagedDispatchers, stagedResources)
+                    }
+                    val servicesByName = services.associateBy { it.name }
+                    configuredRegistrations.sortedBy { it.serviceId }.forEach { registration ->
+                        val manifest = PortalManifestGenerator.generate(servicesByName.getValue(registration.contractName), registration)
+                        writeManifest(manifest, stagedManifests)
+                        writeManifest(manifest, stagedResources)
+                    }
+                    if (configuredRegistrations.isNotEmpty()) {
+                        writeManifestIndex(configuredRegistrations, stagedManifests)
+                        writeManifestIndex(configuredRegistrations, stagedResources)
+                    }
                 }
-                require(configuredRegistrations.isEmpty() || generateWorker.get()) {
-                    "portal service registrations require a dedicated workerSourceSet"
-                }
-                val services =
-                    (interfaceNames.get() + configuredRegistrations.map { it.contractName })
-                    .distinct()
-                    .sorted()
-                    .map { name -> Class.forName(name, false, loader) }
-                PortalGeneratedNames.requireUnique(services)
-                services.forEach { type ->
-                    writeService(type, stagedStubs, stagedDispatchers, stagedResources)
-                }
-                val servicesByName = services.associateBy { it.name }
-                configuredRegistrations.sortedBy { it.serviceId }.forEach { registration ->
-                    val manifest = PortalManifestGenerator.generate(servicesByName.getValue(registration.contractName), registration)
-                    writeManifest(manifest, stagedManifests)
-                    writeManifest(manifest, stagedResources)
-                }
-                if (configuredRegistrations.isNotEmpty()) {
-                    writeManifestIndex(configuredRegistrations, stagedManifests)
-                    writeManifestIndex(configuredRegistrations, stagedResources)
-                }
+                GeneratedOutputPublisher.publish(
+                    listOf(
+                        stagedStubs to stubOutputDir.get().asFile.toPath(),
+                        stagedDispatchers to dispatcherOutputDir.get().asFile.toPath(),
+                        stagedManifests to manifestOutputDir.get().asFile.toPath(),
+                        stagedResources to workerResourceDir.get().asFile.toPath(),
+                    ),
+                )
+            }.exceptionOrNull()
+        val cleanupFailure = runCatching { deleteTree(stagingRoot) }.exceptionOrNull()
+        val failure =
+            when {
+                primaryFailure != null && cleanupFailure != null ->
+                    GeneratedOutputPublisher.preferFatal(primaryFailure, cleanupFailure)
+                else -> primaryFailure ?: cleanupFailure
             }
-            GeneratedOutputPublisher.publish(
-                listOf(
-                    stagedStubs to stubOutputDir.get().asFile.toPath(),
-                    stagedDispatchers to dispatcherOutputDir.get().asFile.toPath(),
-                    stagedManifests to manifestOutputDir.get().asFile.toPath(),
-                    stagedResources to workerResourceDir.get().asFile.toPath(),
-                ),
-            )
-        } finally {
-            deleteTree(stagingRoot)
-        }
+        if (failure != null) throw failure
     }
 
     private fun writeService(
@@ -155,33 +162,102 @@ public abstract class GeneratePortalStubsTask : DefaultTask() {
 }
 
 internal object GeneratedOutputPublisher {
-    fun publish(outputs: List<Pair<Path, Path>>) {
-        require(outputs.map { it.second.toAbsolutePath().normalize() }.distinct().size == outputs.size) {
-            "portal generated output directories must be distinct"
-        }
+    fun publish(
+        outputs: List<Pair<Path, Path>>,
+        moveDirectory: (Path, Path) -> Unit = ::atomicMove,
+        deleteDirectory: (Path) -> Unit = ::deleteTree,
+    ) {
         val entries =
             outputs.map { (staged, destination) ->
-                Files.createDirectories(destination.toAbsolutePath().normalize().parent)
+                val normalizedDestination = destination.toAbsolutePath().normalize()
+                requireNotNull(normalizedDestination.parent) {
+                    "portal generated output directory must have a parent: $normalizedDestination"
+                }
                 PublishedOutput(
                     staged.toAbsolutePath().normalize(),
-                    destination.toAbsolutePath().normalize(),
-                    destination.resolveSibling(".${destination.fileName}.backup-${UUID.randomUUID()}"),
+                    normalizedDestination,
+                    normalizedDestination.resolveSibling(".${normalizedDestination.fileName}.backup-${UUID.randomUUID()}"),
                 )
             }
+        validateDisjointOutputs(entries)
+        entries.forEach { entry -> Files.createDirectories(checkNotNull(entry.destination.parent)) }
         val failure =
             runCatching {
                 entries.forEach { entry ->
                     if (Files.exists(entry.destination)) {
-                        atomicMove(entry.destination, entry.backup)
+                        moveDirectory(entry.destination, entry.backup)
                         entry.backedUp = true
                     }
-                    atomicMove(entry.staged, entry.destination)
+                    moveDirectory(entry.staged, entry.destination)
                     entry.published = true
                 }
             }.exceptionOrNull()
-        if (failure != null) rollback(entries, failure)
-        entries.forEach { entry -> if (entry.backedUp) deleteTree(entry.backup) }
+        if (failure != null) rollback(entries, failure, moveDirectory, deleteDirectory)
+        var cleanupFailure: Throwable? = null
+        entries.forEach { entry ->
+            if (entry.backedUp) {
+                val deletionFailure = runCatching { deleteDirectory(entry.backup) }.exceptionOrNull()
+                if (deletionFailure != null) {
+                    cleanupFailure = cleanupFailure?.let { preferFatal(it, deletionFailure) } ?: deletionFailure
+                }
+            }
+        }
+        if (cleanupFailure != null) throw cleanupFailure
     }
+
+    private fun validateDisjointOutputs(entries: List<PublishedOutput>) {
+        val canonical =
+            entries.map { entry ->
+                Triple(
+                    canonicalizePath(entry.staged),
+                    canonicalizePath(entry.destination),
+                    canonicalizePath(entry.backup),
+                )
+            }
+        for (i in entries.indices) {
+            val (stagedI, destinationI, _) = canonical[i]
+            for (j in i + 1 until entries.size) {
+                val (stagedJ, destinationJ, _) = canonical[j]
+                require(destinationI != destinationJ) {
+                    "portal generated output directories must be distinct: ${entries[i].destination} vs ${entries[j].destination}"
+                }
+                require(!pathsOverlap(destinationI, destinationJ)) {
+                    "portal generated output directories must not overlap: ${entries[i].destination} vs ${entries[j].destination}"
+                }
+                require(!pathsOverlap(stagedI, stagedJ)) {
+                    "portal generated staging directories must not overlap: ${entries[i].staged} vs ${entries[j].staged}"
+                }
+            }
+        }
+        for (i in entries.indices) {
+            val staged = canonical[i].first
+            for (j in entries.indices) {
+                val destination = canonical[j].second
+                val backup = canonical[j].third
+                require(!pathsOverlap(staged, destination) && !pathsOverlap(staged, backup)) {
+                    "portal generated staging and destination directories must not overlap: ${entries[i].staged} vs ${entries[j].destination}"
+                }
+            }
+        }
+    }
+
+    private fun canonicalizePath(path: Path): Path {
+        val normalized = path.toAbsolutePath().normalize()
+        var existing: Path? = normalized
+        while (existing != null && !Files.exists(existing)) {
+            existing = existing.parent
+        }
+        return if (existing == null) {
+            normalized
+        } else {
+            existing.toRealPath().resolve(existing.relativize(normalized)).normalize()
+        }
+    }
+
+    private fun pathsOverlap(
+        left: Path,
+        right: Path,
+    ): Boolean = left.startsWith(right) || right.startsWith(left)
 
     private fun atomicMove(
         source: Path,
@@ -197,22 +273,28 @@ internal object GeneratedOutputPublisher {
     private fun rollback(
         entries: List<PublishedOutput>,
         original: Throwable,
+        moveDirectory: (Path, Path) -> Unit,
+        deleteDirectory: (Path) -> Unit,
     ): Nothing {
         var failure = original
         entries.asReversed().forEach { entry ->
-            val cleanup = cleanupFailure(entry)
+            val cleanup = cleanupFailure(entry, moveDirectory, deleteDirectory)
             if (cleanup != null) failure = preferFatal(failure, cleanup)
         }
         throw failure
     }
 
-    private fun cleanupFailure(entry: PublishedOutput): Throwable? =
+    private fun cleanupFailure(
+        entry: PublishedOutput,
+        moveDirectory: (Path, Path) -> Unit,
+        deleteDirectory: (Path) -> Unit,
+    ): Throwable? =
         runCatching {
-            if (entry.published) deleteTree(entry.destination)
-            if (entry.backedUp && Files.exists(entry.backup)) atomicMove(entry.backup, entry.destination)
+            if (entry.published) deleteDirectory(entry.destination)
+            if (entry.backedUp && Files.exists(entry.backup)) moveDirectory(entry.backup, entry.destination)
         }.exceptionOrNull()
 
-    private fun preferFatal(
+    internal fun preferFatal(
         current: Throwable,
         cleanup: Throwable,
     ): Throwable =

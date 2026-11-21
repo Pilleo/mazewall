@@ -2,6 +2,7 @@ package io.mazewall.portal.codegen
 
 import io.mazewall.portal.PortalGeneratedNames
 import io.mazewall.portal.codegen.testapi.BadStream
+import io.mazewall.portal.codegen.testapi.BinaryAndCollectionService
 import io.mazewall.portal.codegen.testapi.CompanionShadowService
 import io.mazewall.portal.codegen.testapi.FirstOuter
 import io.mazewall.portal.codegen.testapi.InheritedService
@@ -23,6 +24,10 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.createTempDirectory
 
 class PortalStubGeneratorTest {
     @Test
@@ -366,6 +371,161 @@ class PortalStubGeneratorTest {
         assertTrue(project.tasks.findByName("generatePortalStubs") != null)
         assertTrue(project.tasks.findByName("portalCheck") != null)
         assertTrue(project.tasks.findByName("portalDescribe") != null)
+    }
+
+    @Test
+    fun `byte array and list contracts emit compilable ByteArray List and Map signatures`() {
+        val files = PortalStubGenerator.generate(BinaryAndCollectionService::class.java)
+        val stub = files.single { it.name == "BinaryAndCollectionServicePortalStub" }.toString()
+        val dispatcher = files.single { it.name == "BinaryAndCollectionServicePortalDispatcher" }.toString()
+
+        assertTrue(stub.contains("override fun echoBytes(value_: ByteArray): ByteArray"), stub)
+        assertTrue(stub.contains("override fun echoReadOnly(values: List<ByteArray>): List<ByteArray>"), stub)
+        assertTrue(stub.contains("override fun echoMutable(values: MutableList<ByteArray>): MutableList<ByteArray>"), stub)
+        assertTrue(
+            stub.contains("override fun echoNested(values: Map<String, List<ByteArray>>): MutableMap<String, MutableList<ByteArray>>"),
+            stub,
+        )
+        assertFalse(stub.contains("Array<Byte>"), stub)
+        assertFalse(dispatcher.contains("Array<Byte>"), dispatcher)
+    }
+
+    @Test
+    fun `publisher rejects overlapping equal relative and symlinked output paths before mutating sentinels`() {
+        val root = createTempDirectory("portal-publisher-overlap-")
+        try {
+            val childDest = dirWithFile(root.resolve("output/child"), "child.sentinel", "old-child")
+            val parentSentinel = root.resolve("output/parent.sentinel")
+            Files.writeString(parentSentinel, "old-parent")
+            val childSentinel = childDest.resolve("child.sentinel")
+            val stageA = dirWithFile(root.resolve("stage-a"), "new-a", "a")
+            val stageB = dirWithFile(root.resolve("stage-b"), "new-b", "b")
+            val symlinkAlias = root.resolve("link-output")
+            Files.createSymbolicLink(symlinkAlias, root.resolve("output"))
+
+            listOf(
+                listOf(stageA to childDest, stageB to root.resolve("output")),
+                listOf(stageA to root.resolve("output"), stageB to childDest),
+                listOf(stageA to childDest, stageB to childDest.resolve("../child")),
+                listOf(stageA to childDest, stageB to symlinkAlias),
+                listOf(stageA to root.resolve("output"), root.resolve("output/nested-stage") to root.resolve("other-dest")),
+            ).forEach { invalidPlan ->
+                val failure = assertThrows(IllegalArgumentException::class.java) {
+                    GeneratedOutputPublisher.publish(invalidPlan)
+                }
+                val message = failure.message.orEmpty()
+                assertTrue(message.contains("overlap") || message.contains("distinct"), message)
+                assertTrue(Files.readString(parentSentinel) == "old-parent")
+                assertTrue(Files.readString(childSentinel) == "old-child")
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `publisher preserves prior sentinels on move failures and preserves primary and fatal errors across cleanup`() {
+        val root = createTempDirectory("portal-publisher-faults-")
+        try {
+            val destA = dirWithFile(root.resolve("dest-a"), "sentinel-a", "old-a")
+            val destB = dirWithFile(root.resolve("dest-b"), "sentinel-b", "old-b")
+            val stageA = dirWithFile(root.resolve("stage-a"), "fresh-a", "new-a")
+            val stageB = dirWithFile(root.resolve("stage-b"), "fresh-b", "new-b")
+
+            // Failure during backup of second entry restores first destination sentinel via rollback.
+            var backupFaultCount = 0
+            val backupFailure = assertThrows(IOException::class.java) {
+                GeneratedOutputPublisher.publish(
+                    outputs = listOf(stageA to destA, stageB to destB),
+                    moveDirectory = { src, dst ->
+                        backupFaultCount++
+                        if (backupFaultCount == 3) throw IOException("injected backup failure on B")
+                        Files.move(src, dst)
+                    },
+                )
+            }
+            assertTrue(backupFailure.message == "injected backup failure on B")
+            assertTrue(Files.readString(destA.resolve("sentinel-a")) == "old-a")
+            assertTrue(Files.readString(destB.resolve("sentinel-b")) == "old-b")
+
+            // Failure during second publication restores first destination sentinel via rollback.
+            val stageA1 = dirWithFile(root.resolve("stage-a1"), "fresh-a", "new-a")
+            val stageB1 = dirWithFile(root.resolve("stage-b1"), "fresh-b", "new-b")
+            var moveCount = 0
+            val rollbackSuccess = assertThrows(IOException::class.java) {
+                GeneratedOutputPublisher.publish(
+                    outputs = listOf(stageA1 to destA, stageB1 to destB),
+                    moveDirectory = { src, dst ->
+                        moveCount++
+                        if (moveCount == 4) throw IOException("injected publish failure on B")
+                        Files.move(src, dst)
+                    },
+                )
+            }
+            assertTrue(rollbackSuccess.message == "injected publish failure on B")
+            assertTrue(Files.readString(destA.resolve("sentinel-a")) == "old-a")
+            assertTrue(Files.readString(destB.resolve("sentinel-b")) == "old-b")
+            assertFalse(Files.exists(destA.resolve("fresh-a")))
+
+            // Rollback failure attaches suppressed exception to primary failure; fatal Error during rollback wins.
+            val stageA2 = dirWithFile(root.resolve("stage-a2"), "fresh-a2", "new-a2")
+            val stageB2 = dirWithFile(root.resolve("stage-b2"), "fresh-b2", "new-b2")
+            val suppressedRollback = assertThrows(IOException::class.java) {
+                var calls = 0
+                GeneratedOutputPublisher.publish(
+                    outputs = listOf(stageA2 to destA, stageB2 to destB),
+                    moveDirectory = { src, dst ->
+                        calls++
+                        if (calls == 4) throw IOException("primary publish failure")
+                        if (src.fileName.toString().startsWith(".")) throw IOException("rollback move failed")
+                        Files.move(src, dst)
+                    },
+                )
+            }
+            assertTrue(suppressedRollback.message == "primary publish failure")
+            assertTrue(suppressedRollback.suppressed.any { it.message == "rollback move failed" })
+
+            val fatalRollback = assertThrows(AssertionError::class.java) {
+                var calls = 0
+                val destD = dirWithFile(root.resolve("dest-d"), "sentinel-d", "old-d")
+                val destE = dirWithFile(root.resolve("dest-e"), "sentinel-e", "old-e")
+                val stageD = dirWithFile(root.resolve("stage-d"), "fresh-d", "new-d")
+                val stageE = dirWithFile(root.resolve("stage-e"), "fresh-e", "new-e")
+                GeneratedOutputPublisher.publish(
+                    outputs = listOf(stageD to destD, stageE to destE),
+                    moveDirectory = { src, dst ->
+                        calls++
+                        if (calls == 4) throw IOException("primary failure")
+                        if (src.fileName.toString().startsWith(".")) throw AssertionError("fatal rollback error")
+                        Files.move(src, dst)
+                    },
+                )
+            }
+            assertTrue(fatalRollback.message == "fatal rollback error")
+            assertTrue(fatalRollback.suppressed.any { it.message == "primary failure" })
+
+            val stageA3 = dirWithFile(root.resolve("stage-a3"), "fresh-a3", "new-a3")
+            val destC = dirWithFile(root.resolve("dest-c"), "sentinel-c", "old-c")
+            val cleanupError = assertThrows(AssertionError::class.java) {
+                GeneratedOutputPublisher.publish(
+                    outputs = listOf(stageA3 to destC),
+                    deleteDirectory = { throw AssertionError("fatal backup delete error") },
+                )
+            }
+            assertTrue(cleanupError.message == "fatal backup delete error")
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    private fun dirWithFile(
+        dir: Path,
+        fileName: String,
+        content: String,
+    ): Path {
+        Files.createDirectories(dir)
+        Files.writeString(dir.resolve(fileName), content)
+        return dir
     }
 }
 

@@ -233,7 +233,7 @@ Use only changed modules while iterating; use `./gradlew build` at completion.
 
 **Read first:** `PortalStubGenerator.kt` type mapping and the existing generated-source
 round-trip case in `PortalCodegenFunctionalTest.kt`. Exact paths are in
-[CG01](../../internals/backlog/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md).
+[CG01](../../internals/backlog/resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md).
 
 - [ ] Add the following Java interface to a compiler-backed fixture and generate
   **both** host and worker sources without hand edits:
@@ -421,7 +421,7 @@ bytes stay compatible. A late frame-size assertion is not a memory bound.
 ## CG07 — Disjoint output publication
 
 **Read first:** `GeneratedOutputPublisher` in `PortalCodegenPlugin.kt` and
-[CG07](../../internals/backlog/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md).
+[CG07](../../internals/backlog/resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md).
 
 - [ ] Create old-generation sentinel files in an owned temporary fixture. Publish
   `output/child` followed by `output`; reverse that order in a second test. The

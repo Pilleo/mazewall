@@ -142,3 +142,15 @@ interface ComputedDtoService {
 interface DelegatedDtoService {
     fun consume(value: DelegatedDto): Int
 }
+
+interface GenericKotlinCollectionService<T> {
+    fun echoReadOnly(values: List<T>): List<T>
+
+    fun echoMutable(values: MutableList<T>): MutableList<T>
+}
+
+interface BinaryAndCollectionService : GenericKotlinCollectionService<ByteArray> {
+    fun echoBytes(value: ByteArray): ByteArray
+
+    fun echoNested(values: Map<String, List<ByteArray>>): MutableMap<String, MutableList<ByteArray>>
+}

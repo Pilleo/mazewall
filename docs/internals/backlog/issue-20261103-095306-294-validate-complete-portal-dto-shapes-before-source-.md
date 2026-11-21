@@ -38,7 +38,7 @@ CG02: current resolution accepts abstract DTOs and nullable Kotlin DTO fields th
 4. Drive source declarations and codecs from that model. Reject unsupported nullable/nested shapes with contract/method/parameter-or-result/field paths; retain enough metadata for CG03 fingerprints and P02 diagnostics.
 
 **Scope and dependencies:**
-- Follows [CG01](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md)'s compiler-backed type agreement.
+- Follows [CG01](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md)'s compiler-backed type agreement.
 - [Review CG02](../reviews/2026-11-03-portal-codegen-hardening.md#cg02--resolve-a-complete-position-aware-dto-model) distinguishes reproduced acceptance defects from the erased nested-generic rejection.
 - Reuse the current resolver and public entrypoints. This issue tightens validation; new nullable wire representations or arbitrary polymorphic serialization are not required.
 - Runtime DTO constructors/getters remain trusted application code. Shape validation must not execute them or claim to prove them pure. P02 owns the user-facing diagnostic command.

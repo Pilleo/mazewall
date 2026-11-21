@@ -8,6 +8,7 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.LIST
+import com.squareup.kotlinpoet.MAP
 import com.squareup.kotlinpoet.MUTABLE_LIST
 import com.squareup.kotlinpoet.MUTABLE_MAP
 import com.squareup.kotlinpoet.NameAllocator
@@ -25,6 +26,11 @@ import java.lang.reflect.Method
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 import java.util.Locale
+import kotlin.reflect.KClass
+import kotlin.reflect.KParameter
+import kotlin.reflect.KType
+import kotlin.reflect.KTypeParameter
+import kotlin.reflect.jvm.kotlinFunction
 
 public object PortalStubGenerator {
     private const val GENERATED_ID_MODULUS = 1_000_000_000
@@ -88,18 +94,20 @@ public object PortalStubGenerator {
         val companion = TypeSpec.companionObjectBuilder()
         schema.methods.forEach { method ->
             companion.addProperty(methodIdProperty(constants.getValue(method.method), method.id))
-            type.addFunction(hostMethod(method, brokerName, constants.getValue(method.method), companionClass))
+            type.addFunction(hostMethod(schema.service, method, brokerName, constants.getValue(method.method), companionClass))
         }
         type.addType(companion.build())
         return FileSpec.builder(service.packageName, stubName).addType(type.build()).build()
     }
 
     private fun hostMethod(
+        service: Class<*>,
         method: PortalMethodSchema,
         brokerName: String,
         constantName: String,
         companionClass: ClassName,
     ): FunSpec {
+        val kotlinTypes = resolveMethodKotlinTypes(service, method.method)
         val names = NameAllocator()
         val parameterNames =
             method.parameters.associateWith { parameter -> names.newName(parameter.sourceName, parameter) }
@@ -110,9 +118,12 @@ public object PortalStubGenerator {
             FunSpec
                 .builder(method.method.name)
                 .addModifiers(KModifier.PUBLIC, KModifier.OVERRIDE)
-                .returns(typeName(method.returnType).copy(nullable = method.returnNullable))
-        method.parameters.forEach { parameter ->
-            spec.addParameter(parameterNames.getValue(parameter), typeName(parameter.type).copy(nullable = parameter.nullable))
+                .returns(typeName(method.returnType, kotlinTypes.returnType, kotlinTypes.bindings).copy(nullable = method.returnNullable))
+        method.parameters.forEachIndexed { index, parameter ->
+            spec.addParameter(
+                parameterNames.getValue(parameter),
+                typeName(parameter.type, kotlinTypes.parameters.getOrNull(index), kotlinTypes.bindings).copy(nullable = parameter.nullable),
+            )
         }
 
         val payloadParts =
@@ -150,7 +161,16 @@ public object PortalStubGenerator {
         } else {
             spec.addStatement("val %N = %L", resultName, invocation)
             spec.addStatement("val %N = %T(%N)", readerName, codecReader, resultName)
-            spec.addStatement("return %L", decode(method.returnKind, CodeBlock.of("%N", readerName), method.returnNullable))
+            spec.addStatement(
+                "return %L",
+                decode(
+                    method.returnKind,
+                    CodeBlock.of("%N", readerName),
+                    method.returnNullable,
+                    kotlinTypes.returnType,
+                    kotlinTypes.bindings,
+                ),
+            )
         }
         if (declaredExceptions.isNotEmpty()) {
             val allowed =
@@ -192,6 +212,7 @@ public object PortalStubGenerator {
                 .beginControlFlow("when (%N.wire)", methodName)
 
         schema.methods.forEach { method ->
+            val kotlinTypes = resolveMethodKotlinTypes(schema.service, method.method)
             val names = outerNames.copy()
             val argumentNames = method.parameters.associateWith { names.newName(it.sourceName, it) }
             val readerName = names.newName("reader", DispatcherLocal.Reader)
@@ -199,7 +220,7 @@ public object PortalStubGenerator {
             var descriptorIndex = 0
             handle.beginControlFlow("%N ->", constants.getValue(method.method))
             handle.addStatement("val %N = %T(%N)", readerName, codecReader, payloadName)
-            method.parameters.forEach { parameter ->
+            method.parameters.forEachIndexed { index, parameter ->
                 val argumentName = argumentNames.getValue(parameter)
                 if (parameter.kind is BoundaryTypes.Kind.ReadFd) {
                     handle.addComment("Capability slot %L: %N", descriptorIndex, argumentName)
@@ -208,7 +229,13 @@ public object PortalStubGenerator {
                     handle.addStatement(
                         "val %N = %L",
                         argumentName,
-                        decode(parameter.kind, CodeBlock.of("%N", readerName), parameter.nullable),
+                        decode(
+                            parameter.kind,
+                            CodeBlock.of("%N", readerName),
+                            parameter.nullable,
+                            kotlinTypes.parameters.getOrNull(index),
+                            kotlinTypes.bindings,
+                        ),
                     )
                 }
             }
@@ -220,7 +247,7 @@ public object PortalStubGenerator {
                 handle.addStatement(
                     "val %N: %T = %N.%N(%L)",
                     returnName,
-                    typeName(method.returnType).copy(nullable = method.returnNullable),
+                    typeName(method.returnType, kotlinTypes.returnType, kotlinTypes.bindings).copy(nullable = method.returnNullable),
                     implName,
                     method.method.name,
                     arguments,
@@ -262,18 +289,99 @@ public object PortalStubGenerator {
         id: Int,
     ): PropertySpec = PropertySpec.builder(name, Int::class, KModifier.PRIVATE, KModifier.CONST).initializer("%L", id).build()
 
-    private fun typeName(type: Type): TypeName =
-        when (type) {
-            is ParameterizedType -> parameterizedTypeName(type)
+    private fun typeName(
+        type: Type,
+        kotlinType: KType? = null,
+        bindings: Map<KTypeParameter, KType> = emptyMap(),
+    ): TypeName {
+        val resolvedKotlinType = resolveKotlinType(kotlinType, bindings)
+        return when (type) {
+            is ParameterizedType -> parameterizedTypeName(type, resolvedKotlinType, bindings)
             else -> scalarTypeName(type)
         }
+    }
 
-    private fun parameterizedTypeName(type: ParameterizedType): TypeName =
-        when (type.rawType) {
-            java.util.List::class.java -> MUTABLE_LIST.parameterizedBy(type.actualTypeArguments.map(::typeName))
-            java.util.Map::class.java -> MUTABLE_MAP.parameterizedBy(type.actualTypeArguments.map(::typeName))
-            else -> (typeName(type.rawType) as ClassName).parameterizedBy(type.actualTypeArguments.map(::typeName))
+    private fun parameterizedTypeName(
+        type: ParameterizedType,
+        kotlinType: KType?,
+        bindings: Map<KTypeParameter, KType>,
+    ): TypeName {
+        val kotlinArguments = kotlinType?.arguments?.map { it.type }
+        val renderedArguments =
+            type.actualTypeArguments.mapIndexed { index, argument ->
+                typeName(argument, kotlinArguments?.getOrNull(index), bindings)
+            }
+        return when (type.rawType) {
+            java.util.List::class.java -> {
+                val collectionType =
+                    if (isMutableKotlinCollection(kotlinType, "kotlin.collections.MutableList")) MUTABLE_LIST else LIST
+                collectionType.parameterizedBy(renderedArguments)
+            }
+            java.util.Map::class.java -> {
+                val mapType =
+                    if (isMutableKotlinCollection(kotlinType, "kotlin.collections.MutableMap")) MUTABLE_MAP else MAP
+                mapType.parameterizedBy(renderedArguments)
+            }
+            else -> (typeName(type.rawType) as ClassName).parameterizedBy(renderedArguments)
         }
+    }
+
+    private fun resolveMethodKotlinTypes(
+        service: Class<*>,
+        method: Method,
+    ): MethodKotlinTypes {
+        val empty = MethodKotlinTypes(List(method.parameterCount) { null }, null, emptyMap())
+        val function =
+            method.declaringClass
+                .takeIf { it.getAnnotation(Metadata::class.java) != null }
+                ?.let { method.kotlinFunction }
+                ?: return empty
+        val valueParameters = function.parameters.filter { it.kind == KParameter.Kind.VALUE }
+        val bindings =
+            if (service.getAnnotation(Metadata::class.java) != null) {
+                findKotlinTypeBindings(service.kotlin, method.declaringClass.kotlin).orEmpty()
+            } else {
+                emptyMap()
+            }
+        return MethodKotlinTypes(valueParameters.map { it.type }, function.returnType, bindings)
+    }
+
+    private fun findKotlinTypeBindings(
+        current: KClass<*>,
+        target: KClass<*>,
+        inherited: Map<KTypeParameter, KType> = emptyMap(),
+    ): Map<KTypeParameter, KType>? {
+        if (current == target) return inherited
+        return current.supertypes.firstNotNullOfOrNull { supertype ->
+            val raw = supertype.classifier as? KClass<*>
+            val args = supertype.arguments.mapNotNull { it.type?.let { type -> resolveKotlinType(type, inherited) } }
+            if (raw != null && raw.typeParameters.size == args.size) {
+                val next = inherited + raw.typeParameters.zip(args).toMap()
+                if (raw == target) next else findKotlinTypeBindings(raw, target, next)
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun resolveKotlinType(
+        kotlinType: KType?,
+        bindings: Map<KTypeParameter, KType>,
+    ): KType? {
+        var current = kotlinType
+        val seen = mutableSetOf<KTypeParameter>()
+        var next = (current?.classifier as? KTypeParameter)?.takeIf(seen::add)?.let(bindings::get)
+        while (next != null) {
+            current = next
+            next = (current.classifier as? KTypeParameter)?.takeIf(seen::add)?.let(bindings::get)
+        }
+        return current
+    }
+
+    private fun isMutableKotlinCollection(
+        kotlinType: KType?,
+        expectedRawName: String,
+    ): Boolean = kotlinType?.toString()?.substringBefore('<')?.removeSuffix("?") == expectedRawName
 
     private fun scalarTypeName(type: Type): TypeName =
         when (type) {
@@ -287,6 +395,7 @@ public object PortalStubGenerator {
             java.lang.Double.TYPE, java.lang.Double::class.java -> Double::class.asTypeName()
             Character.TYPE, Character::class.java -> Char::class.asTypeName()
             String::class.java -> String::class.asTypeName()
+            ByteArray::class.java -> ByteArray::class.asTypeName()
             is Class<*> -> type.asTypeName()
             else -> type.asTypeName()
         }
@@ -406,9 +515,16 @@ public object PortalStubGenerator {
         kind: BoundaryTypes.Kind,
         reader: CodeBlock,
         nullable: Boolean = false,
+        kotlinType: KType? = null,
+        bindings: Map<KTypeParameter, KType> = emptyMap(),
     ): CodeBlock {
+        val resolvedKotlinType = resolveKotlinType(kotlinType, bindings)
         if (nullable) {
-            return CodeBlock.of("if (!%L.boolean()) null else %L", reader, decode(kind, reader))
+            return CodeBlock.of(
+                "if (!%L.boolean()) null else %L",
+                reader,
+                decode(kind, reader, kotlinType = resolvedKotlinType, bindings = bindings),
+            )
         }
         return when (kind) {
             BoundaryTypes.Kind.BooleanT,
@@ -437,19 +553,26 @@ public object PortalStubGenerator {
                     .add(")")
                     .build()
             }
-            is BoundaryTypes.Kind.ListT ->
+            is BoundaryTypes.Kind.ListT -> {
+                val elementKotlinType = resolvedKotlinType?.arguments?.singleOrNull()?.type
+                val suffix = if (isMutableKotlinCollection(resolvedKotlinType, "kotlin.collections.MutableList")) ".toMutableList()" else ""
                 CodeBlock.of(
-                    "buildList { repeat(%L.collectionCount()) { add(%L) } }",
+                    "buildList { repeat(%L.collectionCount()) { add(%L) } }$suffix",
                     reader,
-                    decode(kind.element, reader),
+                    decode(kind.element, reader, kotlinType = elementKotlinType, bindings = bindings),
                 )
-            is BoundaryTypes.Kind.MapT ->
+            }
+            is BoundaryTypes.Kind.MapT -> {
+                val keyKotlinType = resolvedKotlinType?.arguments?.getOrNull(0)?.type
+                val valueKotlinType = resolvedKotlinType?.arguments?.getOrNull(1)?.type
+                val suffix = if (isMutableKotlinCollection(resolvedKotlinType, "kotlin.collections.MutableMap")) ".toMutableMap()" else ""
                 CodeBlock.of(
-                    "buildMap { repeat(%L.collectionCount()) { put(%L, %L) } }.toMutableMap()",
+                    "buildMap { repeat(%L.collectionCount()) { put(%L, %L) } }$suffix",
                     reader,
-                    decode(kind.key, reader),
-                    decode(kind.value, reader),
+                    decode(kind.key, reader, kotlinType = keyKotlinType, bindings = bindings),
+                    decode(kind.value, reader, kotlinType = valueKotlinType, bindings = bindings),
                 )
+            }
         }
     }
 
@@ -480,6 +603,12 @@ public object PortalStubGenerator {
             is BoundaryTypes.Kind.MapT,
             -> error("non-scalar portal boundary kind: $kind")
         }
+
+    private data class MethodKotlinTypes(
+        val parameters: List<KType?>,
+        val returnType: KType?,
+        val bindings: Map<KTypeParameter, KType>,
+    )
 
     private enum class HostLocal { Payload, Result, Reader }
 
