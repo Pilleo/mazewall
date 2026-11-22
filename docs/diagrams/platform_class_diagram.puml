@@ -24,6 +24,83 @@ class "TypedSegment" as io.mazewall.ffi.TypedSegment<P extends IoctlPayload> {
   + {static}ManagedSegment constructor-impl(ManagedSegment)
   + {static}boolean equals-impl0(ManagedSegment, ManagedSegment)
 }
+class "LiveStackBootstrap" as io.mazewall.ffi.internal.LiveStackBootstrap {
+}
+interface "LiveStackBridge" as io.mazewall.ffi.internal.LiveStackBridge {
+  + {abstract}long[] enroll(long, Class<?>[], Executable[])
+  + {abstract}void checkSeal(long, long)
+  + {abstract}void prepareWorker()
+}
+class "LiveStackLayouts" as io.mazewall.ffi.internal.LiveStackLayouts {
+  + {static}LiveStackLayouts INSTANCE
+  __
+  +StructLayout getRequest()
+  +StructLayout getFrame()
+  +StructLayout getSnapshot()
+  +StructLayout getReceipt()
+  +StructLayout getInfo()
+  +int getRequestBytes()
+  +int getSnapshotBytes()
+  +int getReceiptBytes()
+  +int getInfoBytes()
+  +long getAlignment()
+  +long getVersionOffset()
+  +long getBytesOffset()
+  +long getStatusOffset()
+  +long getReasonOffset()
+  +long getPayloadOffset()
+  +long getRequestVersion()
+  +long getRequestSize()
+  +long getRequestOperation()
+  +long getRequestCookie()
+  +long getRequestStartTicks()
+  +long getRequestInstallation()
+  +long getRequestWorker()
+  +long getRequestTask()
+  +long getRequestGeneration()
+  +long getRequestInvocation()
+  +long getRequestPid()
+  +long getRequestTid()
+  +long getRequestCapacity()
+  +long getSnapshotCookie()
+  +long getSnapshotStartTicks()
+  +long getSnapshotInstallation()
+  +long getSnapshotWorker()
+  +long getSnapshotTask()
+  +long getSnapshotGeneration()
+  +long getSnapshotInvocation()
+  +long getSnapshotParent()
+  +long getSnapshotPublication()
+  +long getSnapshotPid()
+  +long getSnapshotTid()
+  +long getSnapshotBinding()
+  +long getSnapshotCount()
+  +long getSnapshotFrames()
+  +long getFrameStride()
+  +long getFrameToken()
+  +long getFrameLocation()
+  +long getReceiptCookie()
+  +long getReceiptStartTicks()
+  +long getReceiptInstallation()
+  +long getReceiptWorker()
+  +long getReceiptTask()
+  +long getReceiptGeneration()
+  +long getReceiptInvocation()
+  +long getReceiptPid()
+  +long getReceiptTid()
+  +long getReceiptCapacity()
+  +long getReceiptSlots()
+  +long getInfoCookie()
+  +long getInfoStartTicks()
+  +long getInfoPid()
+  +long getInfoArch()
+  +long getInfoWorkers()
+  +long getInfoClasses()
+  +long getInfoMethods()
+  +long getInfoFrames()
+  +long getInfoBindings()
+  +long getInfoReserved()
+}
 class "NativeTransfer" as io.mazewall.ffi.internal.NativeTransfer {
   + {static}NativeTransfer INSTANCE
   __
@@ -33,6 +110,8 @@ class "NativeTransfer" as io.mazewall.ffi.internal.NativeTransfer {
   +void path(ManagedSegment)
   +void socketAddress(ManagedSegment, ManagedSegment)
 }
+class "ProductionDeploymentVerifier" as io.mazewall.ffi.internal.ProductionDeploymentVerifier {
+}
 class "RawNativeTransfer" as io.mazewall.ffi.internal.RawNativeTransfer {
   + {static}RawNativeTransfer INSTANCE
   __
@@ -41,6 +120,7 @@ class "RawNativeTransfer" as io.mazewall.ffi.internal.RawNativeTransfer {
 class "RealNativeEngine" as io.mazewall.ffi.internal.RealNativeEngine {
   + {static}RealNativeEngine INSTANCE
   __
+  +NativeStackContexts getStackContexts()
   +NativeFileSystem getFileSystem()
   +NativeNetworking getNetworking()
   +NativeProcess getProcess()
@@ -58,6 +138,7 @@ class "RealNativeEngine" as io.mazewall.ffi.internal.RealNativeEngine {
 class "RealNativeFileSystem" as io.mazewall.ffi.internal.RealNativeFileSystem {
   + {static}RealNativeFileSystem INSTANCE
   __
+  +SyscallResult removeExtendedAttribute(ManagedSegment, ManagedSegment)
   +SyscallResult open(ManagedSegment, int, int)
   +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int, int)
   +SyscallResult openat2(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, long)
@@ -107,9 +188,32 @@ class "RealNativeProcess" as io.mazewall.ffi.internal.RealNativeProcess {
   +SyscallResult archPrctl(int, long)
   +SyscallResult archPrctl(int, ManagedSegment)
 }
+class "RealNativeStackContexts" as io.mazewall.ffi.internal.RealNativeStackContexts {
+  + {static}Companion Companion
+  __
+  +boolean matchesReceiptKey(Object)
+  +WorkerRegistrationReceipt prepareWorkerReceipt(InstallationOwner)
+  +LiveSetup<WorkerOwner> registerCurrent(InstallationOwner, WorkerRegistrationReceipt)
+  +LiveSetup<WorkerOwner> recoverWorker(WorkerRegistrationReceipt)
+  +TaskBeginReceipt prepareTaskReceipt(WorkerOwner)
+  +LiveSetup<TaskLease> beginCurrent(WorkerOwner, TaskBeginReceipt)
+  +LiveSetup<TaskLease> recoverTask(TaskBeginReceipt)
+  +LiveSetup<InstallationOwner> reserve(int)
+  +LiveSetup<Enrollment> enroll(InstallationOwner, List<? extends Class<?>>, List<? extends Executable>)
+  +LiveSetup<InstallationOwner> seal(InstallationOwner, Enrollment)
+  +LiveSetup<WorkerOwner> registerCurrent(InstallationOwner)
+  +LiveSetup<TaskLease> beginCurrent(WorkerOwner)
+  +LiveCompletion endCurrent(TaskLease)
+  +LiveCompletion invalidate(InstallationOwner)
+  +LiveCompletion retireWorker(WorkerOwner)
+  +LiveCompletion retireInstallation(InstallationOwner)
+  +LiveRead copy(TaskLease, InvocationId)
+}
 class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
   + {static}SyscallInvoker INSTANCE
   __
+  +int liveInfoStatus(MethodHandle, MemorySegment, int)
+  +int liveBufferStatus(MethodHandle, MemorySegment, int, MemorySegment, int)
   +SyscallResult syscall(MethodHandle, long, long, long, long, long, long, long)
   +SyscallResult ioctlAddr(MethodHandle, int, long, MemorySegment)
   +SyscallResult ioctlLong(MethodHandle, int, long, long)
@@ -495,6 +599,8 @@ class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtil
   +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
   +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R, Function0<Unit>)
   +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R, NativeEngine, Function0<Unit>)
+  +void rejectUnexpectedAncillary(MemorySegment, MemorySegment, NativeFileSystem)
+  +FileDescriptor<R, Open, Owned> validateReceivedDescriptor(long, MemorySegment, MemorySegment, R, NativeFileSystem)
 }
 class "UnixServerSocket" as io.mazewall.ffi.networking.UnixServerSocket {
   + {static}UnixServerSocket INSTANCE
@@ -534,6 +640,7 @@ class "FdEpoch" as io.mazewall.platform.fd.FdEpoch {
   +long adoptKernelReuse(int)
   +boolean retire(int, long)
   +boolean isLive(int, long)
+  +void revive(int, long)
   +boolean isRetired(int)
   +boolean isOwnedThroughEpoch(int, long)
   +boolean verifyKernelLiveness(int)
@@ -569,12 +676,17 @@ class "FileDescriptor" as io.mazewall.platform.fd.FileDescriptor<R extends FileD
   +void markClosed()
   +void retireForClose()
   +boolean claimForClose()
-  +void closeResource()
+  +void revokeForCloseClaim()
+  +void closeResource(NativeFileSystem)
 }
 interface "FileDescriptorRole" as io.mazewall.platform.fd.FileDescriptorRole {
 }
+class "NativeCloseFailure" as io.mazewall.platform.fd.NativeCloseFailure {
+}
 class "NativeDescriptorReceipt" as io.mazewall.platform.fd.NativeDescriptorReceipt {
   + {static}Companion Companion
+}
+class "PreDispatchCloseFailure" as io.mazewall.platform.fd.PreDispatchCloseFailure {
 }
 class "ResourceRetirement" as io.mazewall.platform.fd.ResourceRetirement {
   + {static}Companion Companion
@@ -732,6 +844,85 @@ class "Uid" as io.mazewall.platform.lifecycle.Uid {
   + {static}int constructor-impl(int)
   + {static}boolean equals-impl0(int, int)
 }
+class "ClassCount" as io.mazewall.platform.native.ClassCount {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "ClassToken" as io.mazewall.platform.native.ClassToken {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "CodeGeneration" as io.mazewall.platform.native.CodeGeneration {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "EnrolledClass" as io.mazewall.platform.native.EnrolledClass {
+  +long getToken()
+  +Class<?> getIdentity()
+  +EnrolledClass copy(long, Class<?>)
+}
+class "EnrolledMethod" as io.mazewall.platform.native.EnrolledMethod {
+  +long getToken()
+  +Executable getIdentity()
+  +String getName()
+  +String getDescriptor()
+  +int getModifiers()
+  +EnrolledMethod copy(long, Executable, String, String, int)
+}
+class "Enrollment" as io.mazewall.platform.native.Enrollment {
+  +InstallationOwner getOwner()
+  +long getGeneration()
+  +List<EnrolledClass> getClasses()
+  +List<EnrolledMethod> getMethods()
+  +int getClassCount()
+  +int getMethodCount()
+}
+class "FrameCount" as io.mazewall.platform.native.FrameCount {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "InstallationId" as io.mazewall.platform.native.InstallationId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "InstallationOwner" as io.mazewall.platform.native.InstallationOwner {
+  +NativeStackContexts getCapability()
+  +ProcessIdentity getProcess()
+  +long getInstallation()
+  +int getCapacity()
+  +InstallationState getState()
+  +InstallationOwner sealed(Enrollment)
+}
+interface "InstallationState" as io.mazewall.platform.native.InstallationState {
+}
+class "InvocationId" as io.mazewall.platform.native.InvocationId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
 class "LinuxNative" as io.mazewall.platform.native.LinuxNative {
   + {static}LinuxNative INSTANCE
   __
@@ -748,6 +939,126 @@ class "LinuxNative" as io.mazewall.platform.native.LinuxNative {
   +NativeBpf getBpf()
   +boolean isDescriptorLive(int)
 }
+enum "LiveAbsentReason" as io.mazewall.platform.native.LiveAbsentReason {
+  NoTask
+  NoActiveInvocation
+  __
+  + {static}EnumEntries<LiveAbsentReason> getEntries()
+}
+enum "LiveBinding" as io.mazewall.platform.native.LiveBinding {
+  Open0
+  Openat0
+  __
+  + {static}EnumEntries<LiveBinding> getEntries()
+}
+interface "LiveCompletion" as io.mazewall.platform.native.LiveCompletion {
+}
+class "LiveFailure" as io.mazewall.platform.native.LiveFailure {
+  +LiveFailureStatus getStatus()
+  +LiveFailureReason getReason()
+  +Throwable getCause()
+}
+enum "LiveFailureReason" as io.mazewall.platform.native.LiveFailureReason {
+  SlotContended
+  IdentityMismatch
+  GenerationInvalid
+  Shutdown
+  MissingBinding
+  RuntimeMismatch
+  AbiMismatch
+  Capacity
+  IdExhausted
+  Malformed
+  RegistrationMissing
+  NativeFailure
+  RetransformUnavailable
+  InstallationRevoked
+  NotPhysicallyRetired
+  CleanupPending
+  AdapterNotImplemented
+  __
+  + {static}EnumEntries<LiveFailureReason> getEntries()
+}
+enum "LiveFailureStatus" as io.mazewall.platform.native.LiveFailureStatus {
+  Busy
+  Stale
+  Unsupported
+  InvalidArgument
+  Exhausted
+  InternalFailure
+  __
+  + {static}EnumEntries<LiveFailureStatus> getEntries()
+}
+class "LiveFrame" as io.mazewall.platform.native.LiveFrame {
+  +long getMethod()
+  +long getLocation()
+  +LiveFrame copy(long, long)
+}
+enum "LiveIncompleteReason" as io.mazewall.platform.native.LiveIncompleteReason {
+  CaptureFailed
+  Overflow
+  UnknownMethod
+  NestedOrCallback
+  MalformedNativeResult
+  InvalidArgument
+  IdExhausted
+  NativeFailure
+  __
+  + {static}EnumEntries<LiveIncompleteReason> getEntries()
+}
+enum "LivePendingReason" as io.mazewall.platform.native.LivePendingReason {
+  SlotContended
+  NotPhysicallyRetired
+  CleanupPending
+  __
+  + {static}EnumEntries<LivePendingReason> getEntries()
+}
+interface "LiveRead" as io.mazewall.platform.native.LiveRead {
+}
+interface "LiveSetup" as io.mazewall.platform.native.LiveSetup<T> {
+}
+class "LiveSnapshot" as io.mazewall.platform.native.LiveSnapshot {
+  +TaskLease getTask()
+  +long getInvocation()
+  +long getPublication()
+  +LiveBinding getBinding()
+  +List<LiveFrame> getFrames()
+  +int getFrameCount()
+  +InvocationId getParentInvocation()
+}
+enum "LiveStaleReason" as io.mazewall.platform.native.LiveStaleReason {
+  IdentityMismatch
+  GenerationInvalid
+  Shutdown
+  InstallationRevoked
+  __
+  + {static}EnumEntries<LiveStaleReason> getEntries()
+}
+enum "LiveUnsupportedReason" as io.mazewall.platform.native.LiveUnsupportedReason {
+  MissingBinding
+  RuntimeMismatch
+  AbiMismatch
+  RetransformUnavailable
+  AdapterNotImplemented
+  __
+  + {static}EnumEntries<LiveUnsupportedReason> getEntries()
+}
+class "MethodCount" as io.mazewall.platform.native.MethodCount {
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "MethodToken" as io.mazewall.platform.native.MethodToken {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
 interface "NativeBpf" as io.mazewall.platform.native.NativeBpf {
   + {abstract}SyscallResult command(long, ManagedSegment, long)
 }
@@ -760,6 +1071,7 @@ interface "NativeEngine" as io.mazewall.platform.native.NativeEngine {
   +NativeBpf getBpf()
 }
 interface "NativeFileSystem" as io.mazewall.platform.native.NativeFileSystem {
+  +SyscallResult removeExtendedAttribute(ManagedSegment, ManagedSegment)
   +SyscallResult open(ManagedSegment, int)
   + {abstract}SyscallResult open(ManagedSegment, int, int)
   +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
@@ -770,6 +1082,7 @@ interface "NativeFileSystem" as io.mazewall.platform.native.NativeFileSystem {
   + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open, Owned>)
 }
 class "NativeMapping" as io.mazewall.platform.native.NativeMapping {
+  ..
   + {static}Companion Companion
   __
   +long getAddress()
@@ -803,6 +1116,57 @@ interface "NativeProcess" as io.mazewall.platform.native.NativeProcess {
   + {abstract}SyscallResult archPrctl(int, long)
   + {abstract}SyscallResult archPrctl(int, ManagedSegment)
 }
+interface "NativeStackContextProvider" as io.mazewall.platform.native.NativeStackContextProvider {
+  + {abstract}NativeStackContexts getStackContexts()
+}
+interface "NativeStackContexts" as io.mazewall.platform.native.NativeStackContexts {
+  + {abstract}LiveSetup<InstallationOwner> reserve(int)
+  + {abstract}LiveSetup<Enrollment> enroll(InstallationOwner, List<? extends Class<?>>, List<? extends Executable>)
+  + {abstract}LiveSetup<InstallationOwner> seal(InstallationOwner, Enrollment)
+  + {abstract}LiveSetup<WorkerOwner> registerCurrent(InstallationOwner)
+  +WorkerRegistrationReceipt prepareWorkerReceipt(InstallationOwner)
+  +LiveSetup<WorkerOwner> registerCurrent(InstallationOwner, WorkerRegistrationReceipt)
+  +LiveSetup<WorkerOwner> recoverWorker(WorkerRegistrationReceipt)
+  + {abstract}LiveSetup<TaskLease> beginCurrent(WorkerOwner)
+  +TaskBeginReceipt prepareTaskReceipt(WorkerOwner)
+  +LiveSetup<TaskLease> beginCurrent(WorkerOwner, TaskBeginReceipt)
+  +LiveSetup<TaskLease> recoverTask(TaskBeginReceipt)
+  + {abstract}LiveCompletion endCurrent(TaskLease)
+  + {abstract}LiveCompletion invalidate(InstallationOwner)
+  + {abstract}LiveCompletion retireWorker(WorkerOwner)
+  + {abstract}LiveCompletion retireInstallation(InstallationOwner)
+  + {abstract}LiveRead copy(TaskLease, InvocationId)
+}
+class "ProcessCookie" as io.mazewall.platform.native.ProcessCookie {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "ProcessIdentity" as io.mazewall.platform.native.ProcessIdentity {
+  +int getPid()
+  +long getCookie()
+  +long getStartTicks()
+  +ProcessIdentity copy(int, long, long)
+}
+class "ProcessStartTicks" as io.mazewall.platform.native.ProcessStartTicks {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "PublicationId" as io.mazewall.platform.native.PublicationId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
 class "RawBackedBpf" as io.mazewall.platform.native.RawBackedBpf {
   +SyscallResult command(long, ManagedSegment, long)
 }
@@ -816,13 +1180,80 @@ interface "RawSyscallOperations" as io.mazewall.platform.native.RawSyscallOperat
   + {abstract}SyscallResult poll(ManagedSegment, long, int)
 }
 class "RuntimeSnapshot" as io.mazewall.platform.native.RuntimeSnapshot {
+  +NativeStackContexts getStackContexts()
   +Object getEngineIdentity()
+  +boolean isRealEngine()
   +NativeFileSystem getFileSystem()
   +NativeNetworking getNetworking()
   +NativeProcess getProcess()
   +NativeMemory getMemory()
   +RawSyscallOperations getRaw()
   +NativeBpf getBpf()
+}
+interface "TaskBeginReceipt" as io.mazewall.platform.native.TaskBeginReceipt {
+}
+class "TaskId" as io.mazewall.platform.native.TaskId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "TaskLease" as io.mazewall.platform.native.TaskLease {
+  +WorkerOwner getWorker()
+  +long getTask()
+}
+class "UnsupportedNativeStackContexts" as io.mazewall.platform.native.UnsupportedNativeStackContexts {
+  + {static}UnsupportedNativeStackContexts INSTANCE
+  __
+  +LiveSetup<InstallationOwner> reserve(int)
+  +LiveSetup<Enrollment> enroll(InstallationOwner, List<? extends Class<?>>, List<? extends Executable>)
+  +LiveSetup<InstallationOwner> seal(InstallationOwner, Enrollment)
+  +LiveSetup<WorkerOwner> registerCurrent(InstallationOwner)
+  +LiveSetup<TaskLease> beginCurrent(WorkerOwner)
+  +LiveCompletion endCurrent(TaskLease)
+  +LiveCompletion invalidate(InstallationOwner)
+  +LiveCompletion retireWorker(WorkerOwner)
+  +LiveCompletion retireInstallation(InstallationOwner)
+  +LiveRead copy(TaskLease, InvocationId)
+  +LiveSetup<WorkerOwner> registerCurrent(InstallationOwner, WorkerRegistrationReceipt)
+  +WorkerRegistrationReceipt prepareWorkerReceipt(InstallationOwner)
+  +LiveSetup<WorkerOwner> recoverWorker(WorkerRegistrationReceipt)
+  +LiveSetup<TaskLease> beginCurrent(WorkerOwner, TaskBeginReceipt)
+  +TaskBeginReceipt prepareTaskReceipt(WorkerOwner)
+  +LiveSetup<TaskLease> recoverTask(TaskBeginReceipt)
+}
+class "UnsupportedTaskReceipt" as io.mazewall.platform.native.UnsupportedTaskReceipt {
+  + {static}UnsupportedTaskReceipt INSTANCE
+}
+class "UnsupportedWorkerReceipt" as io.mazewall.platform.native.UnsupportedWorkerReceipt {
+  + {static}UnsupportedWorkerReceipt INSTANCE
+}
+class "WorkerCapacity" as io.mazewall.platform.native.WorkerCapacity {
+  __
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "WorkerId" as io.mazewall.platform.native.WorkerId {
+  +long getValue()
+  + {static}String toString-impl(long)
+  + {static}int hashCode-impl(long)
+  + {static}boolean equals-impl(long, Object)
+  + {static}long constructor-impl(long)
+  + {static}boolean equals-impl0(long, long)
+}
+class "WorkerOwner" as io.mazewall.platform.native.WorkerOwner {
+  +InstallationOwner getOwner()
+  +long getWorker()
+  +int getTid()
+  +Enrollment getEnrollment()
+}
+interface "WorkerRegistrationReceipt" as io.mazewall.platform.native.WorkerRegistrationReceipt {
 }
 class "ChildProcessResources" as io.mazewall.platform.process.ChildProcessResources {
   + {static}long PUMP_JOIN_TIMEOUT_MS
@@ -841,12 +1272,15 @@ class "ChildProcessResources" as io.mazewall.platform.process.ChildProcessResour
   +void close()
 }
 class "ChildStartupTransaction" as io.mazewall.platform.process.ChildStartupTransaction {
+  + {static}Companion Companion
+  __
   +PrivateUnixEndpoint getEndpoint()
   +Thread getShutdownHook()
   +T runStartup(Function1<? super ChildStartupTransaction, ? extends T>)
   +Process start(JvmChildSpec)
   +void startOutputPump(String, Function1<? super String, Unit>, String, Function0<Unit>)
   +void registerShutdownHook()
+  +void registerShutdownHook(Function0<Unit>)
   +void awaitReady(long)
   +ChildProcessResources commit()
   +void close()
@@ -869,6 +1303,7 @@ class "JvmChildProcess" as io.mazewall.platform.process.JvmChildProcess {
   __
   +List<String> commandLine(JvmChildSpec)
   +Process start(ProcessLauncher, JvmChildSpec, boolean)
+  +Process start(ProcessLauncher, JvmChildSpec, boolean, JvmLaunchPreparation)
   +ChildStdoutPump startStdoutPump(Process, String, Function1<? super String, Unit>, String, Function0<Unit>)
   +boolean awaitReady(ChildStdoutPump, long)
   +void stripInheritedJvmOptions(Map<String, String>)
@@ -884,8 +1319,12 @@ class "JvmChildSpec" as io.mazewall.platform.process.JvmChildSpec {
   +boolean getDisableJvmci()
   +String getClasspath()
 }
+interface "JvmLaunchPreparation" as io.mazewall.platform.process.JvmLaunchPreparation {
+  + {abstract}void prepare(ProcessBuilder)
+}
 interface "ProcessLauncher" as io.mazewall.platform.process.ProcessLauncher {
   + {abstract}Process startProcess(List<String>, boolean)
+  +Process startProcess(List<String>, boolean, JvmLaunchPreparation)
   + {abstract}void addShutdownHook(Thread)
   + {abstract}void removeShutdownHook(Thread)
   + {abstract}Path createTempDirectory(String, FileAttribute<?>[])
@@ -896,6 +1335,7 @@ interface "ProcessLauncher" as io.mazewall.platform.process.ProcessLauncher {
 class "RealProcessLauncher" as io.mazewall.platform.process.RealProcessLauncher {
   + {static}RealProcessLauncher INSTANCE
   __
+  +Process startProcess(List<String>, boolean, JvmLaunchPreparation)
   +Process startProcess(List<String>, boolean)
   +void addShutdownHook(Thread)
   +void removeShutdownHook(Thread)
@@ -941,12 +1381,23 @@ class "ControlSocketExchange" as io.mazewall.platform.seccomp.daemon.ControlSock
 class "ControlSocketFailure" as io.mazewall.platform.seccomp.daemon.ControlSocketFailure {
   +int getErrno()
 }
+class "EventFdCompletionWakeup" as io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup {
+  + {static}Companion Companion
+  __
+  +int getPollFd()
+  +void signal()
+  +void drain()
+  +void close()
+  +SessionRetirement retire()
+}
 class "HandshakeDeadlineRegistry" as io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry {
   +long getOrCreate(SeccompConnection, Function0<Deadline>)
   +Deadline remove(SeccompConnection)
   +int getSize()
 }
 interface "HandshakeWriteOutcome" as io.mazewall.platform.seccomp.daemon.HandshakeWriteOutcome {
+}
+interface "LiveListenerAdmission" as io.mazewall.platform.seccomp.daemon.LiveListenerAdmission {
 }
 abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
 }
@@ -956,6 +1407,9 @@ enum "NotifResult" as io.mazewall.platform.seccomp.daemon.NotifResult {
   PASS_THROUGH
   __
   + {static}EnumEntries<NotifResult> getEntries()
+}
+interface "NotificationCompletionWakeup" as io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup {
+  + {abstract}void signal()
 }
 class "NotificationLivenessCounters" as io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters {
   +NotificationLivenessSnapshot snapshot()
@@ -998,8 +1452,11 @@ class "NotificationReplyLease" as io.mazewall.platform.seccomp.daemon.Notificati
   +boolean claim()
 }
 interface "NotificationWork" as io.mazewall.platform.seccomp.daemon.NotificationWork {
+  +void bindCompletionWakeup(NotificationCompletionWakeup)
   + {abstract}NotificationProgress poll(NativeArena)
   +void close()
+}
+interface "PreludeOutcome" as io.mazewall.platform.seccomp.daemon.PreludeOutcome {
 }
 interface "ReceiveOutcome" as io.mazewall.platform.seccomp.daemon.ReceiveOutcome {
 }
@@ -1013,6 +1470,12 @@ class "SeccompCleanupInterpreter" as io.mazewall.platform.seccomp.daemon.Seccomp
 }
 interface "SeccompCleanupOutcome" as io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome {
 }
+class "SeccompConnectionHooks" as io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks {
+  +Function1<FileDescriptor<UnixSocket, ? extends Open, Owned>, FileDescriptor<UnixSocket, Open, Owned>> getConnectionAcceptor()
+  +Function2<FileDescriptor<UnixSocket, ? extends Open, Owned>, Deadline, PreludeOutcome> getBeforeListener()
+  +Function3<LiveListenerAdmission, FileDescriptor<UnixSocket, ? extends Open, Owned>, FileDescriptor<SeccompNotif, ? extends Open, Owned>, SeccompNotifHandler> getLiveListenerFactory()
+  +Function2<FileDescriptor<UnixSocket, ? extends Open, Owned>, SeccompCleanupOutcome, Unit> getAfterConnectionClosed()
+}
 class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine {
   + {static}Companion Companion
   +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
@@ -1024,30 +1487,56 @@ class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemon
   +UnixListenDaemonTransition applyEvent(UnixListenDaemonEvent)
   +boolean isGlobalShutdown()
   +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +void retryConnectionCleanup(FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +SeccompCleanupOutcome retryCleanup()
   +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
   +HandshakeWriteOutcome writeHandshakeAck(FileDescriptor<?, ? extends Open, Owned>, ManagedSegment, long)
 }
 interface "SeccompNotifHandler" as io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
+  +void endStream(SeccompStreamEnd)
   + {abstract}NotificationWork beginNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>, long)
 }
 class "SeccompSessionHandler" as io.mazewall.platform.seccomp.daemon.SeccompSessionHandler {
   + {static}Companion Companion
   __
+  +SessionRetirement completionRetirementSnapshot()
+  +SessionRetirement retireCompletion()
   +int pollTimeoutMillis()
+  +int getCompletionWakeupPollFd()
   +boolean isTerminated()
   +void close()
   +SeccompCleanupOutcome closeWithResult()
   +SeccompCleanupOutcome closeWithResult(Function1<? super SeccompCleanupOutcome, Unit>)
   +LoopAction handleActiveListener(NativeArena, ManagedSegment)
 }
+enum "SeccompStreamEnd" as io.mazewall.platform.seccomp.daemon.SeccompStreamEnd {
+  PRODUCER_EXIT
+  PASS_THROUGH
+  __
+  + {static}EnumEntries<SeccompStreamEnd> getEntries()
+}
+interface "SessionCompletionWakeup" as io.mazewall.platform.seccomp.daemon.SessionCompletionWakeup {
+  + {abstract}int getPollFd()
+  + {abstract}void drain()
+  +SessionRetirement retire()
+}
+interface "SessionRetirement" as io.mazewall.platform.seccomp.daemon.SessionRetirement {
+}
 class "UserNotifReceive" as io.mazewall.platform.seccomp.daemon.UserNotifReceive {
+  ..
   + {static}UserNotifReceive INSTANCE
   __
   +ReceiveOutcome receiveOne(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open, Owned>, ManagedSegment)
 }
-class "NativeCloseFailure" as io.mazewall.platform.socket.NativeCloseFailure {
+class "NativeSocketManager" as io.mazewall.platform.socket.NativeSocketManager {
+  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
+  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
+  +void close(FileDescriptor<?, ? extends Open, Owned>)
+  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
+  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
+  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
 }
 class "PrivateUnixEndpoint" as io.mazewall.platform.socket.PrivateUnixEndpoint {
   + {static}Companion Companion
@@ -1062,6 +1551,7 @@ class "PrivateUnixEndpoint" as io.mazewall.platform.socket.PrivateUnixEndpoint {
 class "RealSocketManager" as io.mazewall.platform.socket.RealSocketManager {
   + {static}RealSocketManager INSTANCE
   __
+  +SocketManager capture(NativeEngine)
   +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
   +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
   +FileDescriptor<UnixSocket, Open, Owned> connect(String)
@@ -1148,14 +1638,17 @@ io.mazewall.ffi.IoctlCommand <--> io.mazewall.ffi.IoctlCommand
 io.mazewall.ffi.IoctlCommand --> io.mazewall.ffi.TypedSegment
 io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
 io.mazewall.ffi.TypedSegment --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.ffi.internal.LiveStackLayouts --> io.mazewall.ffi.internal.LiveStackLayouts
 io.mazewall.ffi.internal.NativeTransfer --> io.mazewall.ffi.internal.NativeTransfer
 io.mazewall.ffi.internal.RawNativeTransfer --> io.mazewall.ffi.internal.RawNativeTransfer
 io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.platform.native.NativeEngine
 io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.platform.native.NativeStackContextProvider
 io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeMemory
 io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeProcess
 io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.ffi.internal.RealNativeEngine
 io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeNetworking
+io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeStackContexts
 io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.platform.native.NativeFileSystem
 io.mazewall.ffi.internal.RealNativeFileSystem .u.|> io.mazewall.platform.native.NativeFileSystem
 io.mazewall.ffi.internal.RealNativeFileSystem --> io.mazewall.ffi.internal.RealNativeFileSystem
@@ -1166,6 +1659,16 @@ io.mazewall.ffi.internal.RealNativeNetworking .u.|> io.mazewall.platform.native.
 io.mazewall.ffi.internal.RealNativeNetworking --> io.mazewall.ffi.internal.RealNativeNetworking
 io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.platform.native.NativeProcess
 io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
+io.mazewall.ffi.internal.RealNativeStackContexts .u.|> io.mazewall.platform.native.NativeStackContexts
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.ffi.internal.LiveStackBridge
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveUnsupportedReason
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.RuntimeSnapshot
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveFailure
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveIncompleteReason
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveFailureReason
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveFailureStatus
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.ProcessIdentity
+io.mazewall.ffi.internal.RealNativeStackContexts --> io.mazewall.platform.native.LiveStaleReason
 io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
 io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.ffi.memory.SeccompSessionBuffers --> io.mazewall.ffi.memory.NativeArena
@@ -1204,14 +1707,36 @@ io.mazewall.platform.fd.FileDescriptor <--> io.mazewall.platform.fd.FileDescript
 io.mazewall.platform.fd.NativeDescriptorReceipt --> io.mazewall.platform.fd.FileDescriptor
 io.mazewall.platform.lifecycle.MazewallContext --> io.mazewall.platform.lifecycle.ContextId
 io.mazewall.platform.lifecycle.MazewallContext --> io.mazewall.platform.lifecycle.MazewallContext
+io.mazewall.platform.native.Enrollment --> io.mazewall.platform.native.InstallationOwner
+io.mazewall.platform.native.Enrollment --> io.mazewall.platform.native.EnrolledMethod
+io.mazewall.platform.native.Enrollment --> io.mazewall.platform.native.EnrolledClass
+io.mazewall.platform.native.InstallationOwner --> io.mazewall.platform.native.InstallationState
+io.mazewall.platform.native.InstallationOwner --> io.mazewall.platform.native.ProcessIdentity
+io.mazewall.platform.native.InstallationOwner --> io.mazewall.platform.native.NativeStackContexts
 io.mazewall.platform.native.LinuxNative .u.|> io.mazewall.platform.native.NativeEngine
 io.mazewall.platform.native.LinuxNative --> io.mazewall.platform.native.NativeEngine
 io.mazewall.platform.native.LinuxNative --> io.mazewall.platform.native.LinuxNative
+io.mazewall.platform.native.LiveFailure --> io.mazewall.platform.native.LiveFailureReason
+io.mazewall.platform.native.LiveFailure --> io.mazewall.platform.native.LiveFailureStatus
+io.mazewall.platform.native.LiveSnapshot --> io.mazewall.platform.native.LiveBinding
+io.mazewall.platform.native.LiveSnapshot --> io.mazewall.platform.native.LiveFrame
+io.mazewall.platform.native.LiveSnapshot --> io.mazewall.platform.native.TaskLease
 io.mazewall.platform.native.NativeMapping --> io.mazewall.platform.native.RawSyscallOperations
 io.mazewall.platform.native.RawBackedBpf .u.|> io.mazewall.platform.native.NativeBpf
 io.mazewall.platform.native.RawBackedBpf --> io.mazewall.platform.native.RawSyscallOperations
 io.mazewall.platform.native.RuntimeSnapshot .u.|> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.native.RuntimeSnapshot .u.|> io.mazewall.platform.native.NativeStackContextProvider
 io.mazewall.platform.native.RuntimeSnapshot --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.native.TaskLease --> io.mazewall.platform.native.WorkerOwner
+io.mazewall.platform.native.UnsupportedNativeStackContexts .u.|> io.mazewall.platform.native.NativeStackContexts
+io.mazewall.platform.native.UnsupportedNativeStackContexts --> io.mazewall.platform.native.UnsupportedNativeStackContexts
+io.mazewall.platform.native.UnsupportedNativeStackContexts --> io.mazewall.platform.native.LiveFailure
+io.mazewall.platform.native.UnsupportedTaskReceipt .u.|> io.mazewall.platform.native.TaskBeginReceipt
+io.mazewall.platform.native.UnsupportedTaskReceipt --> io.mazewall.platform.native.UnsupportedTaskReceipt
+io.mazewall.platform.native.UnsupportedWorkerReceipt .u.|> io.mazewall.platform.native.WorkerRegistrationReceipt
+io.mazewall.platform.native.UnsupportedWorkerReceipt --> io.mazewall.platform.native.UnsupportedWorkerReceipt
+io.mazewall.platform.native.WorkerOwner --> io.mazewall.platform.native.InstallationOwner
+io.mazewall.platform.native.WorkerOwner --> io.mazewall.platform.native.Enrollment
 io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.process.ProcessLauncher
 io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.process.ChildStdoutPump
 io.mazewall.platform.process.ChildProcessResources --> io.mazewall.platform.socket.PrivateUnixEndpoint
@@ -1228,27 +1753,46 @@ io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platfo
 io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.native.NativeMemory
 io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.fd.FileDescriptor
 io.mazewall.platform.seccomp.daemon.ControlSocketExchange --> io.mazewall.platform.native.RawSyscallOperations
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup .u.|> io.mazewall.platform.seccomp.daemon.SessionCompletionWakeup
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup .u.|> io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup --> io.mazewall.ffi.memory.NativeArena
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup --> io.mazewall.platform.native.NativeEngine
+io.mazewall.platform.seccomp.daemon.EventFdCompletionWakeup --> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry --> io.mazewall.platform.lifecycle.Deadline
 io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry --> io.mazewall.ffi.networking.SeccompConnection
 io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters --> io.mazewall.platform.seccomp.daemon.NotificationLivenessSnapshot
 io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics --> io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics
 io.mazewall.platform.seccomp.daemon.NotificationLivenessMetrics --> io.mazewall.platform.seccomp.daemon.NotificationLivenessCounters
 io.mazewall.platform.seccomp.daemon.SeccompCleanupInterpreter --> io.mazewall.platform.seccomp.daemon.SeccompCleanupInterpreter
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.seccomp.daemon.LiveListenerAdmission
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.seccomp.daemon.PreludeOutcome
+io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks --> io.mazewall.platform.lifecycle.Deadline
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.fd.FileDescriptor
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
+io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.daemon.UnixListenDaemonState
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.native.NativeEngine
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.fd.FileDescriptor
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.native.RawSyscallOperations
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.HandshakeDeadlineRegistry
 io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.networking.SeccompConnection
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.SessionRetirement
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.native.NativeEngine
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.fd.FileDescriptor
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.SeccompSessionBuffers
 io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.SessionCompletionWakeup
+io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup
+io.mazewall.platform.seccomp.daemon.SessionCompletionWakeup .u.|> io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup
 io.mazewall.platform.seccomp.daemon.UserNotifReceive --> io.mazewall.platform.seccomp.daemon.UserNotifReceive
+io.mazewall.platform.socket.NativeSocketManager .u.|> io.mazewall.platform.socket.SocketManager
+io.mazewall.platform.socket.NativeSocketManager --> io.mazewall.platform.native.NativeEngine
 io.mazewall.platform.socket.PrivateUnixEndpoint --> io.mazewall.platform.process.ProcessLauncher
 io.mazewall.platform.socket.RealSocketManager .u.|> io.mazewall.platform.socket.SocketManager
 io.mazewall.platform.socket.RealSocketManager --> io.mazewall.platform.socket.RealSocketManager

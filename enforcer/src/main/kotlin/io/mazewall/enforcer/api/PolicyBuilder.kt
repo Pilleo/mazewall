@@ -163,23 +163,16 @@ internal class PolicyBuilder<S : PolicyScope> internal constructor(
         return this
     }
 
-    internal fun setFilesystem(policy: FileSystemPolicy): PolicyBuilder<S> {
+    internal fun replaceFilesystemGrants(
+        restricted: Boolean,
+        readPaths: Collection<SandboxedPath> = emptyList(),
+        writePaths: Collection<SandboxedPath> = emptyList(),
+    ): PolicyBuilder<S> {
         allowedFsReadPaths.clear()
         allowedFsWritePaths.clear()
-        when (policy) {
-            FileSystemPolicy.Unrestricted -> filesystemRestricted = false
-            FileSystemPolicy.DenyAll -> filesystemRestricted = true
-            is FileSystemPolicy.AllowResources -> {
-                filesystemRestricted = true
-                allowedFsReadPaths.addAll(policy.readPaths)
-                allowedFsWritePaths.addAll(policy.writePaths)
-            }
-        }
-        return this
-    }
-
-    public fun forRuntime(runtime: RuntimeProfile): PolicyBuilder<S> {
-        this.allowMmapExec = runtime.allowsExecutableMappings
+        filesystemRestricted = restricted
+        allowedFsReadPaths.addAll(readPaths)
+        allowedFsWritePaths.addAll(writePaths)
         return this
     }
 

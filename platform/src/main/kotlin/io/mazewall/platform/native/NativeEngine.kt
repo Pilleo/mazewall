@@ -153,6 +153,7 @@ internal interface NativeFileSystem {
         offset: Long,
     ): SyscallResult<Long, SyscallHandledState.Unhandled>
 
+    /** Prepare first, then atomically claim the generation before any close attempt; never restore it. */
     fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): SyscallResult<Long, SyscallHandledState.Unhandled>
 }
 

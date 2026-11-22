@@ -118,3 +118,19 @@ historical locks to make a new candidate resolve.
 Native packaged enforcement, Portal executables, merged-final-source publication,
 and framework application behavior belong to subsequent coordinated release
 gates. No remote repository availability is established by this local gate.
+
+## Standalone `:lockdown` packaged consumer (`tests/consumers/lockdown/`)
+
+`tests/consumers/lockdown/` is an isolated external Gradle build with zero
+project dependencies, verifying staged `io.mazewall:mazewall-lockdown` across
+pure Java classpath, pure Java JPMS `--module-path`, and stable Kotlin:
+
+```bash
+./gradlew :lockdownConsumerCheck
+```
+
+It stages only `:lockdown` into a temporary file Maven repository, rejects any
+transitive dependencies outside `io.mazewall:mazewall-lockdown` and Kotlin
+stdlib, and executes live EPERM enforcement, non-Linux zero-warning failure,
+`--illegal-native-access=deny` failure (JDK 24+), and internal/JPMS encapsulation
+checks across JDK 22 and JDK 25.

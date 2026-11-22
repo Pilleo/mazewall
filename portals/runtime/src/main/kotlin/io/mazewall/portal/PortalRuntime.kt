@@ -56,13 +56,28 @@ public class PortalRuntime private constructor(
         val manifest = registry.resolve(type, id)
         return proxies
             .computeIfAbsent(manifest.serviceId) {
-            val broker = brokerFor(manifest)
-            val delegate = Portal.create(type, broker)
+                val broker = brokerFor(manifest)
+                val delegate = Portal.create(type, broker)
+                createServiceProxy(type, manifest, delegate)
+            }.let { value ->
+                ensureOpen()
+                type.cast(value)
+            }
+    }
+
+    internal fun <T : Any> createServiceProxy(
+        type: Class<T>,
+        manifest: PortalServiceManifest,
+        delegate: T,
+    ): T =
+        type.cast(
             Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, arguments ->
-                when (method.name) {
-                    "equals" -> if (method.parameterCount == 1) proxy === arguments?.singleOrNull() else null
-                    "hashCode" -> if (method.parameterCount == 0) System.identityHashCode(proxy) else null
-                    "toString" -> if (method.parameterCount == 0) "PortalProxy(${manifest.serviceId.value})" else null
+                when {
+                    method.name == "equals" &&
+                        method.parameterCount == 1 &&
+                        method.parameterTypes[0] == Any::class.java -> proxy === arguments?.singleOrNull()
+                    method.name == "hashCode" && method.parameterCount == 0 -> System.identityHashCode(proxy)
+                    method.name == "toString" && method.parameterCount == 0 -> "PortalProxy(${manifest.serviceId.value})"
                     else ->
                         statefulGate.invoke(manifest) {
                             ensureOpen()
@@ -73,12 +88,8 @@ public class PortalRuntime private constructor(
                             }
                         }
                 }
-            }
-        }.let { value ->
-            ensureOpen()
-            type.cast(value)
-        }
-    }
+            },
+        )
 
     /** Returns local group health without contacting or controlling a worker. */
     public fun health(): List<PortalServiceHealth> =

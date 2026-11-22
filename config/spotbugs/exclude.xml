@@ -7,7 +7,10 @@
     <!-- SpotBugs incorrectly flags the static engine field modification as a bug.
          This is intentional for testability (fault injection). -->
     <Match>
-        <Class name="io.mazewall.platform.native.LinuxNative" />
+        <Or>
+            <Class name="io.mazewall.platform.native.LinuxNative" />
+            <Class name="io.mazewall.lockdown.internal.platform.sys.LinuxNative" />
+        </Or>
         <Or>
             <Method name="setEngine" />
             <Method name="resetToDefault" />
@@ -47,7 +50,10 @@
          (access-order eviction, issue-20260823-171953). get/remove are invoked via
          Map interface call sites, which the analyzer cannot see for anonymous classes. -->
     <Match>
-        <Class name="~io\.mazewall\.enforcer\.api\.PolicyCompilationCache.*" />
+        <Or>
+            <Class name="~io\.mazewall\.enforcer\.api\.PolicyCompilationCache.*" />
+            <Class name="~io\.mazewall\.lockdown\.internal\.enforcer\.api\.PolicyCompilationCache.*" />
+        </Or>
         <Or>
             <Bug pattern="UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS" />
             <Bug pattern="UMAC" />
@@ -62,7 +68,10 @@
     <!-- Kotlin object accessors intentionally configure these singleton seams.
          Keep every other field and bug category analyzed. -->
     <Match>
-        <Class name="io.mazewall.enforcer.diagnostics.MazewallEvents" />
+        <Or>
+            <Class name="io.mazewall.enforcer.diagnostics.MazewallEvents" />
+            <Class name="io.mazewall.lockdown.internal.enforcer.diagnostics.MazewallEvents" />
+        </Or>
         <Field name="failOnListenerError" />
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>

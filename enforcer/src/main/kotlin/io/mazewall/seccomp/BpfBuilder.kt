@@ -5,12 +5,18 @@ import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
 import java.util.function.Function
 
-/** Identity tokens prevent one builder from satisfying another builder's jumps. */
+/** Identity tokens prevent one builder or fragment scope from satisfying another's jumps. */
 internal class BpfLabel private constructor(
     val name: String,
     private val owner: BpfBuilder,
+    private val scopeId: Int,
 ) {
     internal fun issuedBy(owner: BpfBuilder): Boolean = this.owner === owner
+
+    internal fun issuedInScope(
+        owner: BpfBuilder,
+        scopeId: Int,
+    ): Boolean = this.owner === owner && this.scopeId == scopeId
 
     override fun toString(): String = name
 
@@ -18,7 +24,8 @@ internal class BpfLabel private constructor(
         internal fun issue(
             name: String,
             owner: BpfBuilder,
-        ): BpfLabel = BpfLabel(name, owner)
+            scopeId: Int,
+        ): BpfLabel = BpfLabel(name, owner, scopeId)
     }
 }
 
@@ -26,14 +33,28 @@ internal class BpfLabel private constructor(
 internal class BpfBuilder private constructor() {
     private val ops = mutableListOf<BpfMacro>()
     private var labelCounter = 0
+    private var nextScopeId = 0
+    private var currentScopeId = 0
     private var stage = Stage.INITIAL
 
     private enum class Stage { INITIAL, ARCH_CHECKED, ACTIVE }
 
-    private fun nextLabel(prefix: String): BpfLabel = BpfLabel.issue("${prefix}_${++labelCounter}", this)
+    private fun nextLabel(prefix: String): BpfLabel = BpfLabel.issue("${prefix}_${++labelCounter}", this, currentScopeId)
 
     private fun requireIssued(label: BpfLabel) {
         require(label.issuedBy(this)) { "BPF label '${label.name}' was not issued by this builder" }
+        require(label.issuedInScope(this, currentScopeId)) {
+            "BPF label '${label.name}' belongs to an enclosing or completed scope and cannot cross an expect fragment boundary"
+        }
+    }
+
+    private fun validateExpectFragment(
+        fragmentStart: Int,
+        fragmentEnd: Int,
+    ) {
+        val fragment = compile(ops.subList(fragmentStart, fragmentEnd))
+        BpfStaticVerifier.verify(fragment)
+        requireAllInstructionsReachable(fragment.instructions)
     }
 
     class Uninitialized internal constructor(
@@ -100,7 +121,17 @@ internal class BpfBuilder private constructor() {
             val skip = nextLabel("skip")
             loadAbsolute(0)
             jumpIfEqual(nr, jf = skip)
-            block().requireCurrent(owner)
+            val fragmentStart = owner.ops.size
+            val previousScopeId = owner.currentScopeId
+            owner.currentScopeId = ++owner.nextScopeId
+            val terminated =
+                try {
+                    block()
+                } finally {
+                    owner.currentScopeId = previousScopeId
+                }
+            terminated.requireCurrent(owner)
+            owner.validateExpectFragment(fragmentStart, owner.ops.size)
             mark(skip)
             return this
         }
@@ -292,4 +323,23 @@ private fun resolveLabel(
     val offset = position - index - 1
     require(offset >= 0) { "Backward jumps are not allowed: ${label.name}" }
     return offset
+}
+
+private fun requireAllInstructionsReachable(instructions: List<BpfInstruction>) {
+    val reachable = BooleanArray(instructions.size)
+    reachable[0] = true
+    for ((index, instruction) in instructions.withIndex()) {
+        require(reachable[index]) {
+            "Unreachable instruction in BPF inspection fragment at index $index"
+        }
+        when (instruction) {
+            is BpfInstruction.Ld, is BpfInstruction.Alu -> reachable[index + 1] = true
+            is BpfInstruction.Ja -> reachable[index + 1 + instruction.k] = true
+            is BpfInstruction.Jmp -> {
+                reachable[index + 1 + instruction.jt.toInt()] = true
+                reachable[index + 1 + instruction.jf.toInt()] = true
+            }
+            is BpfInstruction.Ret -> Unit
+        }
+    }
 }

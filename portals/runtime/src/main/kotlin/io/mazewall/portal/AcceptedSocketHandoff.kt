@@ -60,7 +60,7 @@ internal class AcceptedSocketHandoff(
         val failure = runCatching { retire(pending) }.exceptionOrNull()
         if (failure != null) {
             synchronized(this) {
-                if (failure is io.mazewall.platform.socket.NativeCloseFailure && descriptor === pending) descriptor = null
+                if (failure is io.mazewall.platform.fd.NativeCloseFailure && descriptor === pending) descriptor = null
                 retiring = false
             }
             throw failure

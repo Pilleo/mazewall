@@ -1,0 +1,83 @@
+plugins { id 'java-base' }
+
+allprojects {
+    repositories {
+        maven {
+            url = uri(providers.gradleProperty('consumerRepository').get())
+            content { includeGroup 'io.mazewall' }
+        }
+        mavenCentral {
+            content { excludeGroup 'io.mazewall' }
+        }
+    }
+}
+
+ext.verifyLockdownClosure = { Configuration configuration ->
+    def resolvedDeps = configuration.incoming.resolutionResult.allDependencies
+    if (resolvedDeps.any {
+        it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
+            it.selected.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier
+    }) {
+        throw new GradleException("${configuration.name}: project/source substitution is forbidden")
+    }
+    def expectedVersion = providers.gradleProperty('consumerVersion').get()
+    def artifacts = configuration.resolvedConfiguration.resolvedArtifacts
+    def allowedCoordinates = ['io.mazewall:mazewall-lockdown', 'org.jetbrains.kotlin:kotlin-stdlib', 'org.jetbrains:annotations'] as Set
+    def unexpectedDeps = artifacts.collect { "${it.moduleVersion.id.group}:${it.moduleVersion.id.name}".toString() }.findAll { !(it in allowedCoordinates) }
+    if (!unexpectedDeps.isEmpty()) {
+        throw new GradleException("${configuration.name}: unexpected dependency closure members ${unexpectedDeps}")
+    }
+    def mazewallArtifacts = artifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
+    if (mazewallArtifacts.collect { it.moduleVersion.id.name } != ['mazewall-lockdown']) {
+        throw new GradleException("${configuration.name}: expected only io.mazewall:mazewall-lockdown, found ${mazewallArtifacts.collect { it.moduleVersion.id }}")
+    }
+    def lockdownArtifact = mazewallArtifacts.first()
+    if (lockdownArtifact.moduleVersion.id.version != expectedVersion) {
+        throw new GradleException("${configuration.name}: unexpected version ${lockdownArtifact.moduleVersion.id.version}")
+    }
+    def repoRoot = new File(providers.gradleProperty('consumerRepository').get())
+    def artifactDir = new File(repoRoot, "io/mazewall/mazewall-lockdown/${expectedVersion}")
+    def expectedJar = new File(artifactDir, "mazewall-lockdown-${expectedVersion}.jar")
+    if (lockdownArtifact.file.canonicalFile != expectedJar.canonicalFile) {
+        throw new GradleException("${configuration.name}: resolved jar ${lockdownArtifact.file} != staged ${expectedJar}")
+    }
+    ['.jar', '-sources.jar', '-javadoc.jar', '.pom', '.module'].each { suffix ->
+        def sibling = new File(artifactDir, "mazewall-lockdown-${expectedVersion}${suffix}")
+        if (!sibling.isFile() || sibling.length() <= 0L) {
+            throw new GradleException("Missing staged artifact file: ${sibling}")
+        }
+    }
+}
+
+subprojects {
+    tasks.register('verifyClosure') {
+        doLast {
+            def launcher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger())
+            }.get()
+            logger.lifecycle("Lockdown consumer ${project.name}: JDK ${launcher.metadata.languageVersion}, ${launcher.metadata.vendor}")
+            ['compileClasspath', 'runtimeClasspath'].each { cfgName ->
+                def cfg = configurations.getByName(cfgName)
+                cfg.resolvedConfiguration.resolvedArtifacts.sort { it.moduleVersion.id.toString() }.each {
+                    logger.lifecycle("  ${project.name} ${cfgName}: ${it.moduleVersion.id} -> ${it.file}")
+                }
+                rootProject.verifyLockdownClosure(cfg)
+            }
+        }
+    }
+}
+
+tasks.register('verifyAll') {
+    dependsOn(
+        ':java-classpath:verifyClosure',
+        ':java-classpath:verifyInternalEncapsulation',
+        ':java-classpath:runClasspathLockdown',
+        ':java-classpath:runNonLinuxZeroWarning',
+        ':java-classpath:runDeniedNativeAccess',
+        ':java-jpms:verifyClosure',
+        ':java-jpms:verifyJpmsEncapsulation',
+        ':java-jpms:runJpmsLockdown',
+        ':kotlin-api:verifyClosure',
+        ':kotlin-api:runKotlinLockdown',
+    )
+}

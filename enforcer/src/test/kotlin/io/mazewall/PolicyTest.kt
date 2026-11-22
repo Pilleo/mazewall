@@ -640,4 +640,86 @@ class PolicyTest {
         assertTrue(promoted.definition.allowedFsReadPaths.any { it.value == SandboxedPath.of(rPath, true).value })
         assertTrue(promoted.definition.allowedFsWritePaths.any { it.value == SandboxedPath.of(wPath, true).value })
     }
+
+    @Test
+    fun `combine and intersection prefer ACT_NOTIFY over ACT_TRACE across explicit and default actions`() {
+        val notifyExplicit =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .addAction(SeccompAction.ACT_NOTIFY, Syscall.GETPPID)
+                .build()
+        val traceExplicit =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .addAction(SeccompAction.ACT_TRACE(7), Syscall.GETPPID)
+                .build()
+
+        for (combined in listOf(
+            Policy.combine(notifyExplicit, traceExplicit).definition,
+            Policy.combine(traceExplicit, notifyExplicit).definition,
+            Policy.restrictFurtherWith(notifyExplicit, traceExplicit).definition,
+            Policy.restrictFurtherWith(traceExplicit, notifyExplicit).definition,
+            PolicyDefinition.combine(notifyExplicit.definition, traceExplicit.definition),
+            PolicyDefinition.combine(traceExplicit.definition, notifyExplicit.definition),
+            PolicyDefinition.intersection(notifyExplicit.definition, traceExplicit.definition),
+            PolicyDefinition.intersection(traceExplicit.definition, notifyExplicit.definition),
+        )) {
+            assertEquals(SeccompAction.ACT_NOTIFY, combined.syscallActions[Syscall.GETPPID])
+            for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+                assertEquals(
+                    SeccompAction.ACT_NOTIFY,
+                    combined.syscallActionNumbers(arch)[Syscall.GETPPID.numberFor(arch)],
+                    "Expected ACT_NOTIFY on ${arch.name}",
+                )
+            }
+        }
+
+        val notifyDefault =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .defaultAction(SeccompAction.ACT_NOTIFY)
+                .build()
+        val traceDefault =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .defaultAction(SeccompAction.ACT_TRACE(7))
+                .build()
+
+        assertEquals(SeccompAction.ACT_NOTIFY, Policy.combine(notifyDefault, traceDefault).defaultAction)
+        assertEquals(SeccompAction.ACT_NOTIFY, Policy.combine(traceDefault, notifyDefault).defaultAction)
+
+        // Explicit-versus-default intersections preserve ACT_NOTIFY over ACT_TRACE in both orders.
+        for (combined in listOf(
+            Policy.combine(traceDefault, notifyExplicit).definition,
+            Policy.combine(notifyExplicit, traceDefault).definition,
+            Policy.combine(notifyDefault, traceExplicit).definition,
+            Policy.combine(traceExplicit, notifyDefault).definition,
+        )) {
+            assertEquals(SeccompAction.ACT_NOTIFY, combined.syscallActions[Syscall.GETPPID])
+        }
+        assertEquals(SeccompAction.ACT_TRACE(7), Policy.combine(traceDefault, notifyExplicit).defaultAction)
+        assertEquals(SeccompAction.ACT_NOTIFY, Policy.combine(notifyDefault, traceExplicit).defaultAction)
+
+        // Adjacent action controls remain unchanged.
+        val errnoExplicit =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .addAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES), Syscall.GETPPID)
+                .build()
+        val logExplicit =
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .addAction(SeccompAction.ACT_LOG, Syscall.GETPPID)
+                .build()
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(errnoExplicit, notifyExplicit).syscallActions[Syscall.GETPPID],
+        )
+        assertEquals(
+            SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES),
+            Policy.combine(notifyExplicit, errnoExplicit).syscallActions[Syscall.GETPPID],
+        )
+        assertEquals(SeccompAction.ACT_TRACE(7), Policy.combine(traceExplicit, logExplicit).syscallActions[Syscall.GETPPID])
+        assertEquals(SeccompAction.ACT_TRACE(7), Policy.combine(logExplicit, traceExplicit).syscallActions[Syscall.GETPPID])
+    }
 }

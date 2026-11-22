@@ -15,6 +15,7 @@ import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.parallel.Isolated
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
@@ -355,7 +356,8 @@ class FileDescriptorTest {
         assertTrue(replaced.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNotEquals(leftover, replaced)
-        replaced.close()
+        // The integer is really closed, so the close result is observable EBADF.
+        assertThrows<NativeCloseFailure> { replaced.close() }
     }
 
     @Test
@@ -369,7 +371,8 @@ class FileDescriptorTest {
             .adopt(intFd, FileDescriptorRole.SeccompNotif)
         assertTrue(received.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
-        received.close()
+        // The integer is really closed, so the close result is observable EBADF.
+        assertThrows<NativeCloseFailure> { received.close() }
     }
 
     @Test
@@ -384,7 +387,8 @@ class FileDescriptorTest {
         assertEquals(FileDescriptorRole.Granted, received.role)
         assertTrue(received.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
-        received.close()
+        // The integer is really closed, so the close result is observable EBADF.
+        assertThrows<NativeCloseFailure> { received.close() }
     }
 
     @Test

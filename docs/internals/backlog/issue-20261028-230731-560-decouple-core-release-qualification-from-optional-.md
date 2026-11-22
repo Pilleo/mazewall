@@ -40,5 +40,10 @@ before reproducible-release claims; mutable tags are not compromise evidence.
 The [current full build failed](../reviews/2026-11-04-repository-review-evidence.md#the-one-full-build-checkpoint).
 This review neither qualifies a core promotion nor authorizes publication or relaxed gates.
 
+## Progress Evidence
+- Decoupled core publication (`publish` job in `.github/workflows/ci.yml`) from `optional-integrations` and switched `needs` to `[core-quality, mutation-tests, security-check, build-logic-validation]`.
+- Scoped CI GitHub Packages publication strictly to `:lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository` without optional `-PincludeSpringIntegration` / `-PincludeKoogIntegration` / `-PkoogBootstrap` flags, enforced by `CheckCiCachePolicy` (`PUBLISH_GRAPH`) and `CiCachePolicyTest`.
+- Remaining before full archival: approve and implement an independent release/qualification graph for optional adapters (`optional-integrations` vs core) and pin Actions/toolchain identities in CI.
+
 ---
 <!-- id: issue-20261028-230731-560-decouple-core-release-qualification-from-optional-  file: issue-20261028-230731-560-decouple-core-release-qualification-from-optional-.md -->

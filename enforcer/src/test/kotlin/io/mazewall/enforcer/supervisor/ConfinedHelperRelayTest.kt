@@ -433,7 +433,7 @@ class ConfinedHelperRelayTest {
                     if (case == RelayCase.RootCloseFailure) {
                         parent.native.fileSystem.onClose = { fd ->
                             parent.closed += fd.value
-                            LinuxNative.SyscallResult.Error(5, -1L)
+                            if (fd.value == 813) LinuxNative.SyscallResult.Error(5, -1L) else LinuxNative.SyscallResult.Success(0L)
                         }
                         assertFails { advance() }
                         observed.join().setup.get(2, TimeUnit.SECONDS)
@@ -606,7 +606,7 @@ class ConfinedHelperRelayTest {
                     if (case == RelayCase.IntermediateCloseFailure) {
                         helper.native.fileSystem.onClose = { fd ->
                             helper.closed += fd.value
-                            LinuxNative.SyscallResult.Error(13, -1L)
+                            if (fd.value == 814) LinuxNative.SyscallResult.Error(13, -1L) else LinuxNative.SyscallResult.Success(0L)
                         }
                         val failure = assertFails { relay.accept(ConfinedRelayEvent.Tick) }
                         assertTrue(failure.message.orEmpty().contains("errno=13"))

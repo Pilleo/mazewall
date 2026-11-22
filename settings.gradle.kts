@@ -36,6 +36,7 @@ plugins {
 // Learn more about structuring projects with Gradle - https://docs.gradle.org/8.7/userguide/multi_project_builds.html
 include(":platform")
 include(":enforcer")
+include(":lockdown")
 include(":profiler")
 include(":portals")
 include(":portals:runtime")

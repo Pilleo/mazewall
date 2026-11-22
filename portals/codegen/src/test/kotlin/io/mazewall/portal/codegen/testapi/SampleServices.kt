@@ -142,3 +142,99 @@ interface ComputedDtoService {
 interface DelegatedDtoService {
     fun consume(value: DelegatedDto): Int
 }
+
+interface GenericKotlinCollectionService<T> {
+    fun echoReadOnly(values: List<T>): List<T>
+
+    fun echoMutable(values: MutableList<T>): MutableList<T>
+}
+
+interface BinaryAndCollectionService : GenericKotlinCollectionService<ByteArray> {
+    fun echoBytes(value: ByteArray): ByteArray
+
+    fun echoNested(values: Map<String, List<ByteArray>>): MutableMap<String, MutableList<ByteArray>>
+}
+
+data class StrictDto(
+    val label: String,
+    val count: Int,
+) {
+    init {
+        require(label != "invalid-dto") { "rejected by dto" }
+    }
+}
+
+interface StrictContractService {
+    fun unitOp()
+
+    fun echoInt(value: Int): Int
+
+    fun echoBool(value: Boolean): Boolean
+
+    fun echoString(value: String): String
+
+    fun echoMap(values: Map<String, Int>): Map<String, Int>
+
+    fun buildDto(label: String): StrictDto
+
+    fun acceptDto(value: StrictDto): Int
+
+    fun readGrant(
+        fd: Capability.ReadFd,
+        label: String,
+    ): Int
+}
+
+abstract class AbstractDto(
+    val count: Int,
+)
+
+interface AbstractDtoService {
+    fun echo(dto: AbstractDto): Int
+}
+
+data class NullableMemberDto(
+    val name: String?,
+)
+
+interface NullableMemberDtoService {
+    fun echo(dto: NullableMemberDto): Int
+}
+
+class EnclosingScope {
+    inner class NonStaticMemberDto(
+        val value: Int,
+    )
+}
+
+interface NonStaticMemberDtoService {
+    fun echo(dto: EnclosingScope.NonStaticMemberDto): Int
+}
+
+interface PrivateConstructorPojoService {
+    fun echo(dto: PrivateConstructorPojo): Int
+}
+
+interface NamesRecordService {
+    fun echo(names: NamesRecord): NamesRecord
+}
+
+interface NamesPojoService {
+    fun echo(pojo: NamesPojo): NamesPojo
+}
+
+data class KotlinGenericDto(
+    val values: List<String>,
+)
+
+interface KotlinGenericDtoService {
+    fun echo(dto: KotlinGenericDto): KotlinGenericDto
+}
+
+data class NullableListMemberDto(
+    val values: List<String?>,
+)
+
+interface NullableListMemberDtoService {
+    fun echo(dto: NullableListMemberDto): Int
+}

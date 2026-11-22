@@ -2,6 +2,7 @@ package io.mazewall.portal.worker
 
 import io.mazewall.portal.Capability
 import io.mazewall.portal.PortalFrame
+import io.mazewall.portal.PortalMalformedPayloadException
 import io.mazewall.portal.PortalMethod
 import io.mazewall.portal.PortalPayload
 import io.mazewall.portal.PortalRemoteFailure
@@ -100,7 +101,7 @@ internal class PortalWorkerDriver(
         }
         val capabilityFailure = captureFailure { Capability.closeAll(received.capabilities) }
         val actualFailure = dispatchFailure
-        if (actualFailure != null && actualFailure !is Exception) {
+        if (actualFailure != null && (actualFailure !is Exception || actualFailure is PortalMalformedPayloadException)) {
             state = PortalWorkerMachine.evaluate(state, PortalWorkerEvent.FatalDispatchFailed).state
             capabilityFailure?.takeIf { it !== actualFailure }?.let(actualFailure::addSuppressed)
             raiseWorkerFailure(actualFailure)

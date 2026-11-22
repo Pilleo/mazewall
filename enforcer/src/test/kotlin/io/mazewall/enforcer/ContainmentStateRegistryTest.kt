@@ -3,6 +3,7 @@ package io.mazewall.enforcer
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
@@ -303,12 +304,22 @@ internal class ContainmentStateRegistryTest {
     @org.junit.jupiter.params.ParameterizedTest(name = "thread {0} + process {1} -> merged {2}")
     @org.junit.jupiter.params.provider.MethodSource("allowedSyscallsCombinations")
     fun `test composite allowedSyscalls set intersection`(
-        threadAllowed: Set<io.mazewall.platform.syscall.Syscall>?,
-        processAllowed: Set<io.mazewall.platform.syscall.Syscall>?,
-        expectedMerged: Set<io.mazewall.platform.syscall.Syscall>?,
+        threadAllowed: Set<Syscall>?,
+        processAllowed: Set<Syscall>?,
+        expectedMerged: Set<Syscall>?,
     ) {
-        ContainmentStateRegistry.threadState = ContainerState(allowedSyscalls = threadAllowed)
-        ContainmentStateRegistry.processState = ContainerState(allowedSyscalls = processAllowed)
+        fun allowListState(allowed: Set<Syscall>?): ContainerState =
+            if (allowed == null) {
+                ContainerState()
+            } else {
+                ContainerState(
+                    defaultAction = SeccompAction.ACT_ERRNO(),
+                    syscallActions = allowed.associateWith { SeccompAction.ACT_ALLOW },
+                )
+            }
+
+        ContainmentStateRegistry.threadState = allowListState(threadAllowed)
+        ContainmentStateRegistry.processState = allowListState(processAllowed)
 
         val resolved = ContainmentStateRegistry.resolveCurrentState()
         assertEquals(expectedMerged, resolved.allowedSyscalls)
@@ -356,5 +367,99 @@ internal class ContainmentStateRegistryTest {
         val resolved = ContainmentStateRegistry.resolveCurrentState()
         assertEquals(expectedMergedAction, resolved.defaultAction)
         assertEquals(expectedMergedAction, resolved.syscallActions[io.mazewall.platform.syscall.Syscall.READ])
+    }
+
+    @Test
+    fun `resolveCurrentState merges thread and process states using canonical Linux rank`() {
+        val errno = SeccompAction.ACT_ERRNO(NativeConstants.EACCES)
+        val notify = SeccompAction.ACT_NOTIFY
+        val trace = SeccompAction.ACT_TRACE(7)
+        val pairs =
+            listOf(
+                Triple(trace, errno, errno),
+                Triple(errno, trace, errno),
+                Triple(trace, notify, notify),
+                Triple(notify, trace, notify),
+                Triple(notify, errno, errno),
+                Triple(errno, notify, errno),
+            )
+        for ((threadAction, processAction, expected) in pairs) {
+            ContainmentStateRegistry.threadState =
+                ContainerState(
+                    defaultAction = threadAction,
+                    syscallActions = mapOf(Syscall.GETPPID to threadAction),
+                )
+            ContainmentStateRegistry.processState =
+                ContainerState(
+                    defaultAction = processAction,
+                    syscallActions = mapOf(Syscall.GETPPID to processAction),
+                )
+            val resolved = ContainmentStateRegistry.resolveCurrentState()
+            assertEquals(expected, resolved.defaultAction, "default merge $threadAction vs $processAction")
+            assertEquals(
+                expected,
+                resolved.syscallActions[Syscall.GETPPID],
+                "explicit GETPPID merge $threadAction vs $processAction",
+            )
+        }
+
+        // Tie control on explicit syscallActions preserves the thread-local action payload.
+        val eperm = SeccompAction.ACT_ERRNO(NativeConstants.EPERM)
+        ContainmentStateRegistry.threadState =
+            ContainerState(syscallActions = mapOf(Syscall.GETPPID to eperm))
+        ContainmentStateRegistry.processState =
+            ContainerState(syscallActions = mapOf(Syscall.GETPPID to errno))
+        assertEquals(
+            eperm,
+            ContainmentStateRegistry.resolveCurrentState().syscallActions[Syscall.GETPPID],
+        )
+    }
+
+    @Test
+    fun `resolveCurrentState intersects explicit exceptions with opposite state defaults in both directions`() {
+        val eperm = SeccompAction.ACT_ERRNO(NativeConstants.EPERM)
+
+        // Restrictive process default + thread LOG/ALLOW exceptions.
+        ContainmentStateRegistry.processState =
+            ContainerState(
+                defaultAction = eperm,
+                syscallActions = mapOf(Syscall.READ to SeccompAction.ACT_ALLOW),
+            )
+        ContainmentStateRegistry.threadState =
+            ContainerState(
+                defaultAction = SeccompAction.ACT_ALLOW,
+                syscallActions =
+                    mapOf(
+                        Syscall.WRITE to SeccompAction.ACT_LOG,
+                        Syscall.GETPPID to SeccompAction.ACT_ALLOW,
+                        Syscall.READ to SeccompAction.ACT_LOG,
+                    ),
+            )
+        val processRestrictiveMerged = ContainmentStateRegistry.resolveCurrentState()
+        assertEquals(eperm, processRestrictiveMerged.effectiveAction(Syscall.WRITE))
+        assertEquals(eperm, processRestrictiveMerged.effectiveAction(Syscall.GETPPID))
+        assertEquals(SeccompAction.ACT_LOG, processRestrictiveMerged.effectiveAction(Syscall.READ))
+        assertEquals(emptySet<Syscall>(), processRestrictiveMerged.allowedSyscalls)
+
+        // Reverse direction: restrictive thread default + process LOG/ALLOW exceptions.
+        ContainmentStateRegistry.threadState =
+            ContainerState(
+                defaultAction = eperm,
+                syscallActions = mapOf(Syscall.READ to SeccompAction.ACT_ALLOW),
+            )
+        ContainmentStateRegistry.processState =
+            ContainerState(
+                defaultAction = SeccompAction.ACT_ALLOW,
+                syscallActions =
+                    mapOf(
+                        Syscall.WRITE to SeccompAction.ACT_LOG,
+                        Syscall.GETPPID to SeccompAction.ACT_ALLOW,
+                    ),
+            )
+        val threadRestrictiveMerged = ContainmentStateRegistry.resolveCurrentState()
+        assertEquals(eperm, threadRestrictiveMerged.effectiveAction(Syscall.WRITE))
+        assertEquals(eperm, threadRestrictiveMerged.effectiveAction(Syscall.GETPPID))
+        assertEquals(SeccompAction.ACT_ALLOW, threadRestrictiveMerged.effectiveAction(Syscall.READ))
+        assertEquals(setOf(Syscall.READ), threadRestrictiveMerged.allowedSyscalls)
     }
 }

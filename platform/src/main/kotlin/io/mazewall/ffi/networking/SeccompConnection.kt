@@ -5,7 +5,7 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
-import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.fd.NativeCloseFailure
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
 import java.nio.channels.ClosedByInterruptException
@@ -58,6 +58,7 @@ internal sealed class SeccompConnection(
                 socketClosedFlag.set(true)
                 failures += failure
             } catch (failure: Exception) {
+                if (!FdEpoch.isOwnedThroughEpoch(socketFd.value, socketFd.generation)) socketClosedFlag.set(true)
                 failures += failure
             }
         }
@@ -70,6 +71,7 @@ internal sealed class SeccompConnection(
                 listenerClosedFlag.set(true)
                 failures += failure
             } catch (failure: Exception) {
+                if (!FdEpoch.isOwnedThroughEpoch(lFd.value, lFd.generation)) listenerClosedFlag.set(true)
                 failures += failure
             }
         }

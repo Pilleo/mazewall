@@ -14,12 +14,12 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.NativeCloseFailure
 import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.seccomp.UserNotifReply
 import io.mazewall.platform.seccomp.UserNotifReplyResult
-import io.mazewall.platform.socket.NativeCloseFailure
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
 

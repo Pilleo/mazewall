@@ -74,8 +74,8 @@ Portal developer-experience plan P03: make a generated operation bind directly t
 ## Repository review acceptance links — 2026-11-04 (P03)
 
 P03 must consume the shared helper corrections owned by
-[PRT-05](issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md)
-and [PCG-10](issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md):
+[PRT-05](resolved/issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md)
+and [PCG-10](resolved/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md):
 legal Object-name overloads dispatch to the guest, while declared-exception constructor
 Errors retain exact fatal identity through generated/stateful paths. Require real
 generated Java/Kotlin call and dispatch/non-reuse controls alongside existing CG04–06

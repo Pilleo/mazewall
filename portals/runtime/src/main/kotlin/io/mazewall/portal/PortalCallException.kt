@@ -23,6 +23,22 @@ public class PortalRemoteCallException(
         PortalInvocationEvidence.COMPLETED,
     )
 
+/**
+ * A generated Portal request or reply violated canonical binary wire encoding,
+ * left trailing payload bytes, or supplied an unexpected capability count.
+ * Distinct from completed business exceptions ([PortalRemoteCallException])
+ * and exceptions thrown by trusted host DTO constructors or worker service code.
+ */
+public class PortalMalformedPayloadException(
+    message: String,
+    public val context: String? = null,
+    cause: Throwable? = null,
+) : PortalCallException(
+        if (context.isNullOrBlank()) message else "$context: $message",
+        PortalInvocationEvidence.UNKNOWN_COMPLETION,
+        cause,
+    )
+
 /** Bounded, non-serializing representation of a worker-side exception. */
 public data class PortalRemoteFailure(
     val type: String,

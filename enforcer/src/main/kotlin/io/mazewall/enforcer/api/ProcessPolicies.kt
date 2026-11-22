@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.api
 
 import io.mazewall.platform.syscall.Syscall
+import io.mazewall.seccomp.ProcessFilterInstaller
 
 /**
  * Capability-named process-wide factories. Every call takes an explicit
@@ -13,12 +14,7 @@ public object ProcessPolicies {
      */
     @JvmStatic
     public fun denyProcessCreation(runtime: RuntimeProfile): Policy<PolicyScope.ProcessWideSafe, Uncompiled> =
-        ProcessPolicyBuilder
-            .denyList(runtime)
-            .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
-            .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
-            .forRuntime(runtime)
-            .build()
+        Policy(ProcessFilterInstaller.denyProcessCreationDefinition(allowExecutableMappings = runtime.allowsExecutableMappings))
 
     /**
      * Blocks connect/send/socket/listen/accept family.

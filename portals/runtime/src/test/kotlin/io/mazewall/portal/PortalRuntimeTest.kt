@@ -23,6 +23,14 @@ import java.util.zip.ZipOutputStream
 class PortalRuntimeTest {
     interface MissingService
 
+    interface OverloadedObjectService {
+        fun toString(id: Int): String
+
+        fun hashCode(seed: Int): Int
+
+        fun equals(id: Int): Boolean
+    }
+
     @Test
     fun `fatal stateful call preserves identity and terminal state loss`() {
         val manifest = sampleManifest("worker")
@@ -190,6 +198,117 @@ class PortalRuntimeTest {
             .of(config.workerClasspath(second))
 
         assertNotEquals(firstJar.parent.parent, secondJar.parent.parent)
+    }
+
+    @Test
+    fun `proxy dispatches Object-name overloads while retaining local Object identity`() {
+        val manifest =
+            sampleManifest("worker").copy(
+                serviceId = PortalServiceId("overload"),
+                contractName = OverloadedObjectService::class.java.name,
+            )
+        val runtime =
+            PortalRuntime.open(
+                PortalRuntimeConfig(
+                    manifests = listOf(manifest),
+                    workerProfiles = mapOf("restricted" to PortalWorkerProfile()),
+                ),
+            )
+        try {
+            val calls = AtomicInteger(0)
+            val delegate =
+                object : OverloadedObjectService {
+                    override fun toString(id: Int): String {
+                        calls.incrementAndGet()
+                        return "remote-$id"
+                    }
+
+                    override fun hashCode(seed: Int): Int {
+                        calls.incrementAndGet()
+                        return seed + 1
+                    }
+
+                    override fun equals(id: Int): Boolean {
+                        calls.incrementAndGet()
+                        return id == 7
+                    }
+                }
+
+            val proxy = runtime.createServiceProxy(OverloadedObjectService::class.java, manifest, delegate)
+
+            assertEquals("PortalProxy(overload)", proxy.toString())
+            assertEquals(System.identityHashCode(proxy), proxy.hashCode())
+            assertEquals(true, proxy.equals(proxy))
+            assertEquals(false, proxy.equals("other"))
+            assertEquals(0, calls.get())
+
+            assertEquals("remote-7", proxy.toString(7))
+            assertEquals(8, proxy.hashCode(7))
+            assertEquals(true, proxy.equals(7))
+            assertEquals(false, proxy.equals(8))
+            assertEquals(4, calls.get())
+
+            runtime.close()
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.toString(7) }
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.hashCode(7) }
+            assertThrows(PortalRuntimeClosedException::class.java) { proxy.equals(7) }
+            assertEquals(4, calls.get())
+        } finally {
+            runtime.close()
+        }
+    }
+
+    @Test
+    fun `stateful proxy distinguishes business and dto exceptions from malformed wire replies`() {
+        val manifest =
+            sampleManifest("worker").copy(
+                serviceId = PortalServiceId("stateful-echo"),
+                contractName = StatefulEchoService::class.java.name,
+            )
+        val runtime =
+            PortalRuntime.open(
+                PortalRuntimeConfig(
+                    manifests = listOf(manifest),
+                    workerProfiles = mapOf("restricted" to PortalWorkerProfile()),
+                ),
+            )
+        try {
+            val dtoError = IllegalArgumentException("rejected by dto")
+            val calls = AtomicInteger(0)
+            val delegate =
+                object : StatefulEchoService {
+                    override fun call(mode: String): String {
+                        calls.incrementAndGet()
+                        return when (mode) {
+                            "business" -> throw PortalRemoteCallException("fixture.Invalid", "bad input")
+                            "dto" -> throw dtoError
+                            "malformed" -> throw PortalMalformedPayloadException("trailing bytes", "test.call.return")
+                            else -> "ok-$mode"
+                        }
+                    }
+                }
+            val proxy = runtime.createServiceProxy(StatefulEchoService::class.java, manifest, delegate)
+
+            assertEquals("ok-first", proxy.call("first"))
+            val business = assertThrows(PortalRemoteCallException::class.java) { proxy.call("business") }
+            assertEquals(PortalInvocationEvidence.COMPLETED, business.evidence)
+            val actualDtoError = assertThrows(IllegalArgumentException::class.java) { proxy.call("dto") }
+            check(actualDtoError === dtoError)
+            assertEquals("ok-after-errors", proxy.call("after-errors"))
+            assertEquals(PortalServiceHealthState.AVAILABLE, runtime.health().single().state)
+
+            assertThrows(PortalMalformedPayloadException::class.java) { proxy.call("malformed") }
+            assertEquals(PortalServiceHealthState.STATE_LOST, runtime.health().single().state)
+            assertEquals(5, calls.get())
+            assertThrows(PortalStateLostException::class.java) { proxy.call("after-lost") }
+            assertEquals(5, calls.get())
+        } finally {
+            runtime.close()
+        }
+    }
+
+    private interface StatefulEchoService {
+        fun call(mode: String): String
     }
 
     private fun sampleManifest(artifact: String): PortalServiceManifest =

@@ -777,6 +777,8 @@ public final class io/mazewall/platform/syscall/Syscall : java/lang/Enum {
 	public static final field OPENAT Lio/mazewall/platform/syscall/Syscall;
 	public static final field OPENAT2 Lio/mazewall/platform/syscall/Syscall;
 	public static final field PAUSE Lio/mazewall/platform/syscall/Syscall;
+	public static final field PIDFD_GETFD Lio/mazewall/platform/syscall/Syscall;
+	public static final field PIDFD_OPEN Lio/mazewall/platform/syscall/Syscall;
 	public static final field PIVOT_ROOT Lio/mazewall/platform/syscall/Syscall;
 	public static final field PKEY_MPROTECT Lio/mazewall/platform/syscall/Syscall;
 	public static final field PRCTL Lio/mazewall/platform/syscall/Syscall;

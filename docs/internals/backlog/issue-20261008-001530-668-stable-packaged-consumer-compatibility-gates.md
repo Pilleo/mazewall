@@ -55,5 +55,8 @@ Kotlin lock/approval closure, TEST-04's scoped matrix/child budgets and ARCH-02'
 bridges where applicable. Existing historical source/JDK receipts remain valid for their pins,
 not current Kotlin2.4.21 native qualification. No blanket dependency/support expansion is authorized.
 
+## Progress Evidence — `0.1.0` `:lockdown` packaged consumer
+- Added standalone packaged consumer fixture `tests/consumers/lockdown/` (`java-classpath`, `java-jpms`, `kotlin-api`) and `./gradlew :lockdownConsumerCheck` (`LockdownPackagedConsumerTest`, tagged `lockdown-consumer`), staging only `io.mazewall:mazewall-lockdown` and running across JDK 22 and JDK 25 with Kotlin 2.4.21.
+
 ---
 <!-- id: issue-20261008-001530-668-stable-packaged-consumer-compatibility-gates  file: issue-20261008-001530-668-stable-packaged-consumer-compatibility-gates.md -->

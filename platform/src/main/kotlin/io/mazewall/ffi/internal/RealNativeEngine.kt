@@ -20,7 +20,6 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
-import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
@@ -56,6 +55,7 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations, NativeSta
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_LONG,
             ),
+            Linker.Option.firstVariadicArg(1),
             Linker.Option.captureCallState("errno"),
         )
     private val IOCTL_ADDR: MethodHandle =
@@ -67,6 +67,7 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations, NativeSta
                 ValueLayout.JAVA_LONG,
                 ValueLayout.ADDRESS,
             ),
+            Linker.Option.firstVariadicArg(2),
             Linker.Option.captureCallState("errno"),
         )
     private val IOCTL_LONG: MethodHandle =
@@ -78,6 +79,7 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations, NativeSta
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_LONG,
             ),
+            Linker.Option.firstVariadicArg(2),
             Linker.Option.captureCallState("errno"),
         )
     private val FCNTL: MethodHandle =
@@ -89,6 +91,7 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations, NativeSta
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_LONG,
             ),
+            Linker.Option.firstVariadicArg(2),
             Linker.Option.captureCallState("errno"),
         )
     private val POLL: MethodHandle =
@@ -241,6 +244,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
         RealNativeHelper.downcall(
             "open",
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.firstVariadicArg(2),
             Linker.Option.captureCallState("errno"),
         )
     private val CLOSE: MethodHandle =
@@ -279,6 +283,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
         RealNativeHelper.downcall(
             "openat",
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+            Linker.Option.firstVariadicArg(3),
             Linker.Option.captureCallState("errno"),
         )
 
@@ -345,8 +350,7 @@ internal object RealNativeFileSystem : NativeFileSystem {
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        if (!fd.claimForClose()) return LinuxNative.SyscallResult.Error(NativeConstants.EBADF, -1L)
-        return SyscallInvoker.close(CLOSE, fd.value)
+        return SyscallInvoker.close(CLOSE, fd)
     }
 
     override fun readlink(
@@ -574,6 +578,8 @@ internal object RealNativeNetworking : NativeNetworking {
 }
 
 internal object RealNativeProcess : NativeProcess {
+    private const val TASK_COMM_LEN = 16L
+
     private val PRCTL: MethodHandle =
         RealNativeHelper.downcall(
             "prctl",
@@ -585,6 +591,7 @@ internal object RealNativeProcess : NativeProcess {
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_LONG,
             ),
+            Linker.Option.firstVariadicArg(1),
             Linker.Option.captureCallState("errno"),
         )
     private val GETTID: MethodHandle =
@@ -631,6 +638,33 @@ internal object RealNativeProcess : NativeProcess {
     }
 
     override fun prctl(command: io.mazewall.platform.syscall.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        when (command) {
+            is PrctlCommand.SetSeccomp -> {
+                val filter = command.filter
+                if (filter is NativeArg.MemoryArg) {
+                    if (command.mode == NativeConstants.SECCOMP_MODE_FILTER.toLong()) {
+                        NativeTransfer.bytes(filter.value, Layouts.SOCK_FPROG.byteSize())
+                    } else {
+                        NativeTransfer.bytes(filter.value)
+                    }
+                }
+            }
+            is PrctlCommand.SetName -> NativeTransfer.path(command.name.value)
+            is PrctlCommand.GetName -> NativeTransfer.bytes(command.buffer.value, TASK_COMM_LEN, writable = true)
+            is PrctlCommand.SetMm -> {
+                val arg = command.arg
+                if (arg is NativeArg.MemoryArg) {
+                    NativeTransfer.bytes(arg.value)
+                }
+            }
+            is PrctlCommand.SetNoNewPrivs,
+            PrctlCommand.GetNoNewPrivs,
+            PrctlCommand.GetSeccomp,
+            is PrctlCommand.SetPdeathsig,
+            is PrctlCommand.CapAmbient,
+            is PrctlCommand.SetPtracer,
+            -> Unit
+        }
         return SyscallInvoker.prctl(
             PRCTL,
             command.option,
@@ -860,32 +894,18 @@ internal object RealNativeHelper {
         fd: FunctionDescriptor,
         vararg options: Linker.Option,
     ): MethodHandle {
-        val symbol =
-            stdlib.find(name).orElse(null) ?: run {
-                val ex = UnsupportedOperationException("Symbol $name not found in libc")
-                val throwingHandle =
-                    MethodHandles.insertArguments(
-                        MethodHandles.throwException(Int::class.java, UnsupportedOperationException::class.java),
-                        0,
-                        ex,
-                    )
-                return MethodHandles.dropArguments(
-                    throwingHandle,
-                    0,
-                    *fd.argumentLayouts().map { it.javaType() }.toTypedArray(),
-                )
-            }
-        return linker.downcallHandle(symbol, fd, *options)
-    }
-
-    private fun MemoryLayout.javaType(): Class<*> =
-        when (this) {
-            is ValueLayout.OfByte -> Byte::class.java
-            is ValueLayout.OfShort -> Short::class.java
-            is ValueLayout.OfInt -> Int::class.java
-            is ValueLayout.OfLong -> Long::class.java
-            is ValueLayout.OfFloat -> Float::class.java
-            is ValueLayout.OfDouble -> Double::class.java
-            else -> MemorySegment::class.java
+        val symbol = stdlib.find(name).orElse(null)
+        if (symbol != null) {
+            return linker.downcallHandle(symbol, fd, *options)
         }
+        val expectedType = linker.downcallHandle(fd, *options).type().dropParameterTypes(0, 1)
+        val ex = UnsupportedOperationException("Symbol $name not found in libc")
+        val throwingHandle =
+            MethodHandles.insertArguments(
+                MethodHandles.throwException(expectedType.returnType(), UnsupportedOperationException::class.java),
+                0,
+                ex,
+            )
+        return MethodHandles.dropArguments(throwingHandle, 0, expectedType.parameterList())
+    }
 }

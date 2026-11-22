@@ -144,6 +144,27 @@ internal class FdLifecycle(
 )
 
 /**
+ * Legacy adapter marker for a pre-dispatch failure. Ownership is determined by the
+ * original generation, not by this exception's type.
+ */
+internal class PreDispatchCloseFailure internal constructor(
+    message: String,
+    cause: Throwable,
+) : RuntimeException(message, cause)
+
+private sealed interface CloseOutcome {
+    data object Completed : CloseOutcome
+
+    data class StillOwned(
+        val failure: Throwable,
+    ) : CloseOutcome
+
+    data class Retired(
+        val failure: Throwable,
+    ) : CloseOutcome
+}
+
+/**
  * A type-safe wrapper for a Linux file descriptor.
  *
  * This class uses phantom types to distinguish between different roles of file descriptors
@@ -229,21 +250,67 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
     }
 
     /**
-     * Dispatches close(2) and then forgets this generation.
+     * Dispatches close(2) and observes the native result.
      *
-     * Linux still releases the integer when close(2) returns `EINTR`, so a later
-     * retry can close a reused fd. The token is retired even if the syscall result
-     * is an error; see docs/internals/designs/core/fd-token-ownership.md.
+     * After an actual dispatch the token retires terminally: an
+     * [Error][LinuxNative.SyscallResult.Error] result stays observable as
+     * [NativeCloseFailure] ("EINTR"/"EIO" results are not retried, matching the design
+     * doc). A throw retains the owner only while the original generation is still owned;
+     * a throw after the claim is terminal. Independent resources
+     * (the arena) close on terminal paths; their failure cannot replace the close failure.
+     * See docs/internals/designs/core/fd-token-ownership.md.
      */
     internal fun closeResource(native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem) {
         synchronized(lifecycle) {
             if (value < 0 || isClosedType() || !isLiveForIo()) return
-            try {
-                native.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
-            } finally {
-                markClosed()
-                arena?.close()
+            val closeFailure = dispatchClose(native)
+            markClosed()
+            closeArena(closeFailure)?.let { throw it }
+        }
+    }
+
+    /**
+     * Dispatches close(2) and classifies the outcome.
+     *
+     * A throw is retryable only while the original generation is still owned
+     * ([CloseOutcome.StillOwned] rethrows after retaining ownership); once the claim
+     * retired the generation or the adapter returned an [Error][LinuxNative.SyscallResult.Error]
+     * result, the failure is terminal and returned for the caller to report.
+     *
+     * SUPPRESSION-RATIONALE: Preserve any failure while classifying the original generation.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun dispatchClose(native: io.mazewall.platform.native.NativeFileSystem): Throwable? {
+        val outcome = try {
+            when (val result = native.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)) {
+                is LinuxNative.SyscallResult.Success -> CloseOutcome.Completed
+                is LinuxNative.SyscallResult.Error -> CloseOutcome.Retired(NativeCloseFailure("close(fd=$value) failed: $result"))
             }
+        } catch (failure: Throwable) {
+            if (FdEpoch.isOwnedThroughEpoch(value, generation)) CloseOutcome.StillOwned(failure) else CloseOutcome.Retired(failure)
+        }
+        return when (outcome) {
+            CloseOutcome.Completed -> null
+            is CloseOutcome.StillOwned -> throw outcome.failure
+            is CloseOutcome.Retired -> outcome.failure
+        }
+    }
+
+    /**
+     * Closes the arena on terminal paths; its failure cannot replace the close failure.
+     *
+     * SUPPRESSION-RATIONALE: Arena close failure must be folded as suppressed evidence rather than replacing a close failure.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun closeArena(closeFailure: Throwable?): Throwable? {
+        val arena = lifecycle.arena
+        if (arena == null || !arena.isAlive) return closeFailure
+        val primary = closeFailure
+        return try {
+            arena.close()
+            primary
+        } catch (arenaFailure: Throwable) {
+            if (primary == null) arenaFailure else primary.also { it.addSuppressed(arenaFailure) }
         }
     }
 
@@ -485,10 +552,13 @@ internal fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unh
  * on an Unowned descriptor (created via [unsafe], [generic], or role-specific factories).
  * Only descriptors obtained from native acquisition receipts can be closed.
  * Concurrent typed views share a lifecycle lock; native dispatch atomically retires
- * the active identity so even a failed native close cannot be retried.
+ * the active identity so even a failed native close cannot be retried. A native
+ * [Error][LinuxNative.SyscallResult.Error] result is observable as
+ * [NativeCloseFailure]; an exception before the claim retains the token owner for retry.
  *
  * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
  * @throws IllegalStateException if this descriptor is Unowned.
+ * @throws NativeCloseFailure if the native close(2) result is an error.
  */
 internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(
     native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem,
@@ -500,7 +570,9 @@ internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdO
 
 /**
  * Executes the given [block] with this file descriptor and then closes it correctly,
- * even if an exception is thrown.
+ * even if an exception is thrown. A close failure (native [NativeCloseFailure] or an
+ * adapter throw) is attached as suppressed evidence when a block failure already
+ * exists; otherwise it propagates from [use].
  */
 @Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally") // Preserve the primary failure and attach a native-close failure as evidence.
 internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(

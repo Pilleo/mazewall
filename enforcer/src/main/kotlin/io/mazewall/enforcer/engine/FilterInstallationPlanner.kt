@@ -26,6 +26,17 @@ internal object FilterInstallationPlanner {
     private const val MAX_SECCOMP_FILTERS = 32
     private const val WARN_FILTERS_THRESHOLD = 10
 
+    sealed interface PlanDecision {
+        data object AlreadySatisfied : PlanDecision
+
+        data class Install(
+            val fragment: PolicyDefinition<*>,
+            val nextProjection: ContainerState,
+            val newBlocks: Map<Syscall, SeccompAction>,
+            val newDefaultAction: SeccompAction,
+        ) : PlanDecision
+    }
+
     data class FilterPlan(
         val needsNewFilter: Boolean,
         val toInstall: PolicyDefinition<*>,
@@ -34,46 +45,27 @@ internal object FilterInstallationPlanner {
     )
 
     /**
-     * Calculates the minimal new [PolicyDefinition] (if any) needed to enforce the requested [policy]
-     * given the current [state].
+     * Computes whether [policy] adds restrictions beyond [state], and if so binds
+     * the minimal BPF [PlanDecision.Install.fragment] to the resulting [PlanDecision.Install.nextProjection].
      *
-     * It compares the incoming policy's default action and specific syscall actions against
-     * the currently applied actions. BPF semantics dictate that the kernel will enforce the
-     * most restrictive (highest priority) action across all stacked filters. Thus, a new filter
-     * block is only strictly required if the new action has a higher priority than the current one.
+     * Effective-action projection treats every explicit exception and default action as a
+     * single `(defaultAction, syscallActions)` function so allow-list narrowing and stricter
+     * defaults with identical allow sets are never skipped as redundant.
      */
-
-    fun calculateNewFilter(
+    fun plan(
         policy: PolicyDefinition<*>,
         state: ContainerState,
-    ): FilterPlan {
-        val effectiveNewDefaultAction = if (policy.defaultAction.priority > state.defaultAction.priority) {
-            policy.defaultAction
-        } else {
-            state.defaultAction
-        }
+    ): PlanDecision {
+        val effectiveNewDefaultAction = state.defaultAction.stricter(policy.defaultAction)
+        val needsDefaultActionEscalation = effectiveNewDefaultAction != state.defaultAction
 
-        val newBlocksMap = mutableMapOf<Syscall, SeccompAction>()
-
-        // Check explicitly mapped actions in the new policy
-        for ((sys, action) in policy.syscallActions) {
-            val currentAction = state.syscallActions[sys] ?: state.defaultAction
-            if (action.priority > currentAction.priority) {
-                newBlocksMap[sys] = action
-            }
-        }
-
-        // If the new policy operates as a whitelist (or has any restrictive default),
-        // we must check if there are syscalls currently allowed that the new policy restricts via its default action.
-        if (policy.defaultAction.priority > SeccompAction.ACT_ALLOW.priority && state.allowedSyscalls != null) {
-            val toInstallAllowed = Syscall.entries.filter { policy.isSyscallAllowed(it) }.toSet()
-            for (sys in state.allowedSyscalls) {
-                if (!toInstallAllowed.contains(sys)) {
-                    val currentAction = state.syscallActions[sys] ?: state.defaultAction
-                    if (policy.defaultAction.priority > currentAction.priority) {
-                        newBlocksMap[sys] = policy.defaultAction
-                    }
-                }
+        val newBlocksMap = LinkedHashMap<Syscall, SeccompAction>()
+        for (sys in state.syscallActions.keys + policy.syscallActions.keys) {
+            val currentAction = state.effectiveAction(sys)
+            val incomingAction = policy.syscallActions[sys] ?: policy.defaultAction
+            val tightenedAction = currentAction.stricter(incomingAction)
+            if (tightenedAction != currentAction) {
+                newBlocksMap[sys] = tightenedAction
             }
         }
 
@@ -81,41 +73,72 @@ internal object FilterInstallationPlanner {
         val needsCloneProtection = !policy.allowNonThreadClone && state.allowsNonThreadClone
         val needsPrctlProtection = !policy.allowUnsafePrctl && state.allowsUnsafePrctl
 
-        val needsDefaultActionEscalation = policy.defaultAction.priority > state.defaultAction.priority
+        val needsNewFilter =
+            needsDefaultActionEscalation ||
+                newBlocksMap.isNotEmpty() ||
+                needsMmapProtection ||
+                needsCloneProtection ||
+                needsPrctlProtection
 
-        val needsWhitelistEscalation = if (needsDefaultActionEscalation && policy.defaultAction != SeccompAction.ACT_ALLOW) {
-            val toInstallAllowed = Syscall.entries.filter { policy.isSyscallAllowed(it) }.toSet()
-            val currentlyAllowed = state.allowedSyscalls
-
-            if (currentlyAllowed != null) {
-                !toInstallAllowed.containsAll(currentlyAllowed)
-            } else {
-                true
-            }
-        } else {
-            needsDefaultActionEscalation
+        if (!needsNewFilter) {
+            return PlanDecision.AlreadySatisfied
         }
 
-        val needsNewFilter = needsWhitelistEscalation ||
-            newBlocksMap.isNotEmpty() ||
-            needsMmapProtection ||
-            needsCloneProtection ||
-            needsPrctlProtection
+        val fragment = buildInstallFragment(policy, state, needsDefaultActionEscalation, newBlocksMap)
+        return PlanDecision.Install(
+            fragment = fragment,
+            nextProjection = state.withAppliedFilter(fragment),
+            newBlocks = newBlocksMap.toMap(),
+            newDefaultAction = effectiveNewDefaultAction,
+        )
+    }
 
-        val toInstall = if (needsWhitelistEscalation) {
-            policy
-        } else {
-            val builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>()
-            for ((sys, action) in newBlocksMap) {
-                builder.addAction(action, sys)
-            }
-            if (policy.allowMmapExec || !state.allowsMmapExec) builder.allowMmapExec()
-            if (policy.allowNonThreadClone || !state.allowsNonThreadClone) builder.allowNonThreadClone()
-            if (policy.allowUnsafePrctl || !state.allowsUnsafePrctl) builder.allowUnsafePrctl()
-            builder.build()
+    private fun buildInstallFragment(
+        policy: PolicyDefinition<*>,
+        state: ContainerState,
+        needsDefaultActionEscalation: Boolean,
+        newBlocksMap: LinkedHashMap<Syscall, SeccompAction>,
+    ): PolicyDefinition<*> {
+        if (needsDefaultActionEscalation) {
+            return policy
+        }
+        val builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>()
+        for ((sys, action) in newBlocksMap) {
+            builder.addAction(action, sys)
+        }
+        if (policy.allowMmapExec || !state.allowsMmapExec) builder.allowMmapExec()
+        if (policy.allowNonThreadClone || !state.allowsNonThreadClone) builder.allowNonThreadClone()
+        if (policy.allowUnsafePrctl || !state.allowsUnsafePrctl) builder.allowUnsafePrctl()
+        return builder.build()
+    }
+
+    fun calculateNewFilter(
+        policy: PolicyDefinition<*>,
+        state: ContainerState,
+    ): FilterPlan =
+        when (val decision = plan(policy, state)) {
+            is PlanDecision.AlreadySatisfied ->
+                FilterPlan(
+                    needsNewFilter = false,
+                    toInstall = noopDeltaPolicy(state),
+                    newBlocks = emptyMap(),
+                    newDefaultAction = state.defaultAction,
+                )
+            is PlanDecision.Install ->
+                FilterPlan(
+                    needsNewFilter = true,
+                    toInstall = decision.fragment,
+                    newBlocks = decision.newBlocks,
+                    newDefaultAction = decision.newDefaultAction,
+                )
         }
 
-        return FilterPlan(needsNewFilter, toInstall, newBlocksMap, effectiveNewDefaultAction)
+    private fun noopDeltaPolicy(state: ContainerState): PolicyDefinition<PolicyScope.ThreadLocalOnly> {
+        val builder = PolicyBuilder<PolicyScope.ThreadLocalOnly>()
+        if (!state.allowsMmapExec) builder.allowMmapExec()
+        if (!state.allowsNonThreadClone) builder.allowNonThreadClone()
+        if (!state.allowsUnsafePrctl) builder.allowUnsafePrctl()
+        return builder.build()
     }
 
     fun verifyFilterDepth(currentDepth: Int) {

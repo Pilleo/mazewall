@@ -44,6 +44,7 @@ internal object PolicyCompilationCache {
     fun <S : PolicyScope> getOrCompile(
         definition: PolicyDefinition<S>,
         arch: Arch,
+        warnOnUnsafePrctl: Boolean = true,
     ): CompiledSandbox<S> {
         val key = CacheKey(definition, arch)
         synchronized(cache) {
@@ -52,7 +53,7 @@ internal object PolicyCompilationCache {
             }
         }
         // Compile OUTSIDE the lock: BpfFilter.build is pure CPU work on immutable inputs.
-        val compiled = definition.compile(arch)
+        val compiled = definition.compile(arch, warnOnUnsafePrctl = warnOnUnsafePrctl)
         synchronized(cache) {
             return cache.getOrPut(key) { compiled } as CompiledSandbox<S>
         }

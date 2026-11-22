@@ -8,10 +8,11 @@ a replacement for normal service boundaries.
 ## What crosses the boundary
 
 Generated stubs copy request and response values. Supported values include
-primitives, strings, byte arrays, `UUID`, `Instant`, `BigDecimal`, enum names,
-and validated constructor-backed records/objects composed from those values.
-`Capability.ReadFd` is the explicit advanced inbound capability type. It is
-never returned and never flows worker-to-host.
+primitives, strings, byte arrays (`byte[]`/`ByteArray`), `UUID`, `Instant`,
+`BigDecimal`, enum names, copied `List`/`MutableList` and `Map`/`MutableMap`
+contracts, and validated constructor-backed records/objects composed from those
+values. `Capability.ReadFd` is the explicit advanced inbound capability type. It
+is never returned and never flows worker-to-host.
 
 Paths, callbacks, object identity, Java serialization, returned streams, and
 reactive streams are unsupported. Raw `InputStream` contracts remain rejected
@@ -25,8 +26,11 @@ operator-selected directory and owns/deletes its spill data.
 
 Apply the portal codegen plugin and choose a dedicated worker source set. It
 generates host stubs, worker dispatchers, immutable service manifests, and a
-`portalWorkerBundle` ZIP with its SHA-256 sidecar. The bundle contains only
-JARs under `lib/`.
+`portalWorkerBundle` ZIP with its SHA-256 sidecar. Configured stub, dispatcher,
+manifest, and worker-resource output directories must be pairwise disjoint
+non-overlapping trees (including relative/symlinked aliases); overlapping
+publication plans fail before modifying prior generated files. The bundle
+contains only JARs under `lib/`.
 
 For a generated Gradle build, `publishPortalWorkerArtifactMetadata` publishes
 opaque bundle bytes and digest-addressed resource metadata in the host artifact.
@@ -159,6 +163,10 @@ exception type and message. The protocol never serializes arbitrary exception
 objects or their cause graphs. Generated stubs recreate only explicitly
 declared exception types from a fixed host-side allow-list, using public
 message/no-argument constructors; undeclared types remain remote-call failures.
+Noncanonical wire encodings (boolean bytes other than `0`/`1`, malformed UTF-8,
+duplicate map keys), unexpected capability counts, or trailing/unconsumed bytes
+fail before service entry and before host result delivery with
+`PortalMalformedPayloadException` (`UNKNOWN_COMPLETION`).
 
 ## Inspection
 
@@ -171,3 +179,21 @@ worker-artifact key without running guest code.
 This initial release deliberately excludes Spring integration, remote workers,
 sidecars, service discovery, host callbacks, bidirectional capabilities,
 automatic retries, and transparent state replication.
+
+## DTO shape rules
+
+Boundary types are validated before any source is emitted. The table below summarises which DTO
+shapes are accepted and which are rejected at resolution time (before any output is published).
+
+| Shape | Accepted | Rejection message |
+|---|---|---|
+| `public record Foo(String x)` or a POJO with a public constructor and compatible public reader | ✅ | — |
+| `record Names(List<String> values)` | ✅ Generic preserved | — |
+| `abstract class Foo` | ❌ | `abstract DTO … is not constructible` |
+| `String? name` / `@Nullable String name` | ❌ | `nullable DTO components are not supported` |
+| Kotlin `inner class Dto` (non-static member) | ❌ | `member type … must be static` |
+| Non-public outer class containing a DTO | ❌ | `enclosing class … must be public` |
+| POJO with no public all-args constructor | ❌ | `need a java record or a single public all-args constructor` |
+
+Errors include the full field path, for example:
+`Service.parse parameter request field customer.name`

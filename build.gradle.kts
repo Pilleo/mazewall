@@ -81,7 +81,7 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
-        if (project.path in setOf(":enforcer", ":platform", ":profiler")) {
+        if (project.path in setOf(":enforcer", ":platform", ":profiler", ":lockdown")) {
             useJUnitPlatform()
             jvmArgs(
                 "--enable-native-access=ALL-UNNAMED",
@@ -206,7 +206,7 @@ tasks.register("format") {
     description = "Formats Kotlin sources in projects that opt into KtLint."
     dependsOn("ktlintFormat")
     dependsOn(
-        listOf(":platform", ":enforcer", ":profiler", ":portals:runtime", ":portals:codegen", ":portals:worker")
+        listOf(":platform", ":enforcer", ":lockdown", ":profiler", ":portals:runtime", ":portals:codegen", ":portals:worker")
             .map { "$it:ktlintFormat" },
     )
 }
@@ -308,7 +308,7 @@ tasks.register<Test>("consumerHarnessTest") {
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration", "build-logic") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration", "lockdown-consumer", "build-logic") }
     inputs
         .files(
             layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
@@ -415,6 +415,22 @@ tasks.register<Test>("optionalIntegrationCheck") {
     outputs.cacheIf { false }
 }
 
+tasks.register<Test>("lockdownConsumerCheck") {
+    group = "verification"
+    description = "Stages only :lockdown and verifies JDK 22/25 external classpath, JPMS, and Kotlin packaged consumers."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("lockdown-consumer") }
+    maxParallelForks = 1
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    for (name in listOf("consumerKotlinVersion", "consumerJdks")) {
+        providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
+    }
+    testLogging.showStandardStreams = true
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
 fun securityMode(name: String): Boolean =
     when (providers.gradleProperty(name).orNull) {
         null, "false" -> false
@@ -487,7 +503,7 @@ val verifySecuritySnapshot =
     }
 
 if (securitySnapshotScan) {
-    val ownerPaths = listOf(":", ":platform", ":enforcer", ":profiler", ":portals:runtime", ":portals:worker", ":portals:codegen")
+    val ownerPaths = listOf(":", ":platform", ":enforcer", ":lockdown", ":profiler", ":portals:runtime", ":portals:worker", ":portals:codegen")
     val excludedRoots = setOf(":demos", ":integrations", ":tools")
     val actualSdk =
         allprojects
@@ -759,7 +775,14 @@ subprojects {
         val coveredClasses =
             mainSourceSet.map { main ->
                 main.output.classesDirs.asFileTree
-                    .matching { exclude(jacocoExcludes) }
+                    .matching {
+                        exclude(jacocoExcludes)
+                        if (project.name == "lockdown") {
+                            exclude(
+                                "io/mazewall/lockdown/internal/**",
+                            )
+                        }
+                    }
             }
 
         fun org.gradle.testing.jacoco.tasks.JacocoReport.configureClasses() {
@@ -855,6 +878,15 @@ subprojects {
                             counter = "INSTRUCTION"
                             value = "COVEREDRATIO"
                             minimum = "0.78".toBigDecimal()
+                        }
+                    }
+                } else if (project.name == "lockdown") {
+                    rule {
+                        element = "BUNDLE"
+                        limit {
+                            counter = "INSTRUCTION"
+                            value = "COVEREDRATIO"
+                            minimum = "0.85".toBigDecimal()
                         }
                     }
                 }
@@ -965,7 +997,19 @@ tasks.register("unitCheck") {
         provider {
             tasks.names
                 .filter {
-                    it in setOf("test", "ktlintCheck", "detektMain", "spotbugsMain", "detektWarningRatchet", "checkGradleLazyResolution", "checkCiCachePolicy", "validateBacklogIndex")
+                    it in
+                        setOf(
+                            "test",
+                            "ktlintCheck",
+                            "detektMain",
+                            "spotbugsMain",
+                            "detektWarningRatchet",
+                            "checkGradleLazyResolution",
+                            "checkCiCachePolicy",
+                            "validateBacklogIndex",
+                            "verifySupportedApiSurface",
+                            "verifyPackageTopology",
+                        )
                 }.map { tasks.named(it) }
         },
     )
@@ -973,7 +1017,7 @@ tasks.register("unitCheck") {
         provider {
             subprojects.filterNot { it.path.startsWith(":demos") }.flatMap { child ->
                 child.tasks.names
-                    .filter { it in setOf("unitCheck", "ktlintCheck", "detektMain", "spotbugsMain") }
+                    .filter { it in setOf("unitCheck", "ktlintCheck", "detektMain", "spotbugsMain", "checkKotlinAbi") }
                     .map { child.tasks.named(it) }
             }
         },
@@ -1033,6 +1077,7 @@ tasks.register<VerifyDependencyState>("verifyGradleReproducibility") {
             "buildSrc/gradle.lockfile",
             "platform/gradle.lockfile",
             "enforcer/gradle.lockfile",
+            "lockdown/gradle.lockfile",
             "profiler/gradle.lockfile",
             "portals/runtime/gradle.lockfile",
             "portals/codegen/gradle.lockfile",
@@ -1148,6 +1193,7 @@ tasks.register("updateClassDiagrams") {
 val detektWarningModules =
     mapOf(
         "enforcer" to ":enforcer",
+        "lockdown" to ":lockdown",
         "platform" to ":platform",
         "portals-codegen" to ":portals:codegen",
         "portals-worker" to ":portals:worker",
@@ -1185,7 +1231,8 @@ val verifySupportedApiSurface =
     tasks.register("verifySupportedApiSurface") {
         group = "verification"
         description = "Rejects implementation packages and types from published Kotlin ABI snapshots"
-        dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
+        dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":lockdown:checkKotlinAbi", ":profiler:checkKotlinAbi")
+        val lockdownSnapshot = file("lockdown/api/lockdown.api")
         val snapshots =
             mapOf(
                 file("enforcer/api/enforcer.api") to
@@ -1195,6 +1242,15 @@ val verifySupportedApiSurface =
                         "io/mazewall/landlock/",
                         "io/mazewall/seccomp/",
                         "io/mazewall/enforcer/engine/",
+                    ),
+                lockdownSnapshot to
+                    listOf(
+                        "io/mazewall/lockdown/internal/",
+                        "io/mazewall/platform/",
+                        "io/mazewall/enforcer/",
+                        "io/mazewall/ffi/",
+                        "io/mazewall/seccomp/",
+                        "io/mazewall/landlock/",
                     ),
                 file("profiler/api/profiler.api") to
                     listOf(
@@ -1216,10 +1272,18 @@ val verifySupportedApiSurface =
         inputs.files(snapshots.keys)
         doLast {
             val violations =
-                snapshots.flatMap { (snapshot, forbiddenSymbols) ->
-                    val content = snapshot.readText().replace(internalLauncher, "")
-                    forbiddenSymbols.filter(content::contains).map { "$snapshot exposes $it" }
+                snapshots
+                    .flatMap { (snapshot, forbiddenSymbols) ->
+                        val content = snapshot.readText().replace(internalLauncher, "")
+                        forbiddenSymbols.filter(content::contains).map { "$snapshot exposes $it" }
+                    }.toMutableList()
+            val classDeclPattern = Regex("""^public\s+(?:final\s+|abstract\s+|open\s+)?(?:class|interface)\s+(\S+)""")
+            lockdownSnapshot.readLines().forEach { line ->
+                val className = classDeclPattern.find(line)?.groupValues?.get(1)
+                if (className != null && !className.startsWith("io/mazewall/lockdown/")) {
+                    violations.add("$lockdownSnapshot exposes non-lockdown API type $className")
                 }
+            }
             check(violations.isEmpty()) {
                 "Published API contains implementation declarations:\n${violations.joinToString("\n")}"
             }
@@ -1228,7 +1292,7 @@ val verifySupportedApiSurface =
 
 tasks.named("check") {
     dependsOn(verifySupportedApiSurface)
-    dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
+    dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":lockdown:checkKotlinAbi", ":profiler:checkKotlinAbi")
 }
 
 /**
@@ -1244,6 +1308,7 @@ val verifyPackageTopology =
             listOf(
                 "platform/src/main/kotlin",
                 "enforcer/src/main/kotlin",
+                "lockdown/src/main/kotlin",
                 "profiler/src/main/kotlin",
                 "portals/runtime/src/main/kotlin",
                 "portals/codegen/src/main/kotlin",
@@ -1297,6 +1362,7 @@ val refactorFirstSourceRoots =
     listOf(
         "platform/src/main",
         "enforcer/src/main",
+        "lockdown/src/main",
         "profiler/src/main",
         "portals/runtime/src/main",
         "portals/codegen/src/main",

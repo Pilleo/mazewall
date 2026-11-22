@@ -10,11 +10,11 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.NativeCloseFailure
 import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.lifecycle.OpenFlags
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.getFdOrThrow
-import io.mazewall.platform.socket.NativeCloseFailure
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
 import java.nio.file.Files
@@ -221,7 +221,10 @@ internal fun openGrantedRead(
                 .getFdOrThrow("open grant root")
         try {
             val how = arena.allocate(Layouts.OPEN_HOW_SIZE)
-            how.writeLong(Layouts.OPEN_HOW_FLAGS_OFFSET, (NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC).toLong())
+            how.writeLong(
+                Layouts.OPEN_HOW_FLAGS_OFFSET,
+                (NativeConstants.O_RDONLY or NativeConstants.O_CLOEXEC).toLong() or NativeConstants.O_NONBLOCK,
+            )
             how.writeLong(Layouts.OPEN_HOW_MODE_OFFSET, 0L)
             how.writeLong(Layouts.OPEN_HOW_RESOLVE_OFFSET, NativeConstants.RESOLVE_BENEATH)
             when (
@@ -258,7 +261,17 @@ internal fun openGrantedRead(
 @Suppress("TooGenericExceptionCaught") // Validation must close the exact acquired owner for every failure kind.
 private fun Capability.ReadFd.requireRegularFile(relative: String): Capability.ReadFd =
     try {
-        val isRegular = borrow { fd -> Files.isRegularFile(Path.of("/proc/self/fd/${fd.value}")) }
+        val isRegular =
+            borrow { fd ->
+                Files.isRegularFile(Path.of("/proc/self/fd/${fd.value}")).also { regular ->
+                    if (regular) {
+                        val currentFlags = LinuxNative.raw.fcntl(fd, NativeConstants.F_GETFL, 0L).getOrThrow("fcntl(F_GETFL) $relative")
+                        LinuxNative.raw
+                            .fcntl(fd, NativeConstants.F_SETFL, currentFlags and NativeConstants.O_NONBLOCK.inv())
+                            .getOrThrow("fcntl(F_SETFL) $relative")
+                    }
+                }
+            }
         require(isRegular) { "granted path is not a regular file: $relative" }
         this
     } catch (failure: Throwable) {

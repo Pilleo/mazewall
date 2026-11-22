@@ -45,10 +45,10 @@ internal sealed interface SeccompInstallationState {
 
         fun lockPrivileges(
             native: NativeEngine = LinuxNative.snapshot(),
-            platform: CapturedPlatform = Platform.capture(native),
+            isLinux: Boolean = SeccompPlatformProbe.isLinux(),
         ): PrivilegesLocked {
             requirePlatformThread()
-            if (!platform.isLinux) throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
+            if (!isLinux) throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
             PureJavaBpfEngine.lockNoNewPrivileges(native)
             return PrivilegesLocked(program)
         }

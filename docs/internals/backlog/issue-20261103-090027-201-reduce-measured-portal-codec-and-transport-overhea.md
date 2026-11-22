@@ -43,7 +43,7 @@ Portal developer-experience plan P10: optimize only hot paths established by the
 **Plan and dependencies:**
 - [Implementation plan P10](../../superpowers/plans/2026-11-03-portal-developer-experience.md) and [measurement/optimization contract](../designs/portal/portal-developer-experience.md#9-evidence-and-optimization-policy).
 - Requires P01, P03 and P06. The existing worker-packaging issue stays independent; identify the exact package version in measurements.
-- [CG06](issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) owns corrective encoding bounds before P03; this issue measures and optimizes that implementation while retaining the hardening review's wire/ownership guarantees.
+- [CG06](resolved/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) owns corrective encoding bounds before P03; this issue measures and optimizes that implementation while retaining the hardening review's wire/ownership guarantees.
 
 **Acceptance:**
 - Codec round trips retain identical frame bytes, method IDs, nullability and supported nested values. Malformed lengths/counts reject before unbounded allocation.

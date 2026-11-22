@@ -40,7 +40,7 @@ CG03: a reproduced same-binary-name DTO int-to-long field change changes generat
 4. Document fingerprint migration and require regenerated host/worker artifacts to agree. Verify that existing generation-bound metadata/readiness rejects mismatches, without weakening artifact-digest or launch-policy checks.
 
 **Scope and dependencies:**
-- Follows [CG02](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md). Method IDs and valid wire bytes remain stable; correcting identity intentionally changes affected schema IDs.
+- Follows [CG02](resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md). Method IDs and valid wire bytes remain stable; correcting identity intentionally changes affected schema IDs.
 - [Review CG03](../reviews/2026-11-03-portal-codegen-hardening.md#cg03--hash-the-actual-schema-with-a-defined-encoding-version) contains the reproduced identical hash. It does not claim that artifact measurement is bypassed.
 - Reuse current manifest and readiness mechanisms. Any public manifest-format change beyond the existing schema-ID field needs a separately reviewed compatibility decision.
 

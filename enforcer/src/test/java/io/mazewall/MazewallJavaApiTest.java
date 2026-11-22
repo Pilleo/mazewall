@@ -180,6 +180,113 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    void testJavaInstallationReceiptRejectsContradictionAndPreservesFailure() {
+        IllegalStateException sentinel = new IllegalStateException("sentinel failure");
+        assertThrows(IllegalArgumentException.class, () -> new InstallationReceipt(
+                false,
+                io.mazewall.enforcer.api.PolicyPresets.INSTANCE.NO_EXEC,
+                12345L,
+                true,
+                Platform.FallbackBehavior.FAIL,
+                false,
+                null,
+                sentinel,
+                CetOutcome.NOT_REQUESTED
+        ));
+
+        InstallationProgress progress = new InstallationProgress(false, true, false, false);
+        InstallationReceipt partial = new InstallationReceipt(
+                false,
+                io.mazewall.enforcer.api.PolicyPresets.INSTANCE.NO_EXEC,
+                12345L,
+                false,
+                Platform.FallbackBehavior.FAIL,
+                true,
+                progress,
+                sentinel,
+                CetOutcome.NOT_REQUESTED
+        );
+
+        assertFalse(partial.getInstalled());
+        assertTrue(partial.getLandlockApplied());
+        assertEquals(progress, partial.getProgress());
+        assertSame(sentinel, partial.getFailure());
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, partial::requireInstalled);
+        assertSame(sentinel, thrown);
+    }
+
+    @Test
+    void testJavaPolicyDefinitionSnapshotsMutableCollectionsAndExposesImmutableViews() {
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> seeded = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead("/tmp")
+                .allowFsWrite("/var/tmp")
+                .build();
+        SandboxedPath readPath = seeded.getAllowedFsReadPaths().iterator().next();
+        SandboxedPath writePath = seeded.getAllowedFsWritePaths().iterator().next();
+
+        var actions = new java.util.HashMap<Syscall, SeccompAction>();
+        actions.put(Syscall.GETPID, new SeccompAction.ACT_ERRNO(1));
+        var reads = new java.util.HashSet<SandboxedPath>();
+        reads.add(readPath);
+        var writes = new java.util.HashSet<SandboxedPath>();
+        writes.add(writePath);
+        var phrases = new java.util.ArrayList<String>();
+        phrases.add("java_phrase");
+        var regexes = new java.util.ArrayList<kotlin.text.Regex>();
+        regexes.add(new kotlin.text.Regex("java_.*"));
+
+        PolicyDefinition<PolicyScope.ThreadLocalOnly> raw = new PolicyDefinition<>(
+                SeccompAction.ACT_ALLOW.INSTANCE,
+                actions,
+                false,
+                false,
+                false,
+                false,
+                reads,
+                writes,
+                false,
+                phrases,
+                regexes
+        );
+
+        actions.put(Syscall.GETPID, SeccompAction.ACT_ALLOW.INSTANCE);
+        reads.clear();
+        writes.clear();
+        phrases.clear();
+        regexes.clear();
+
+        assertFalse(raw.isSyscallAllowed(Syscall.GETPID));
+        assertEquals(1, raw.getAllowedFsReadPaths().size());
+        assertEquals(1, raw.getAllowedFsWritePaths().size());
+        assertEquals(java.util.List.of("java_phrase"), raw.getCustomViolationPhrases());
+        assertEquals(1, raw.getCustomViolationRegexes().size());
+
+        var copyActions = new java.util.HashMap<Syscall, SeccompAction>();
+        copyActions.put(Syscall.EXECVE, new SeccompAction.ACT_ERRNO(1));
+        PolicyDefinition<PolicyScope.ThreadLocalOnly> copied = raw.copy(
+                raw.getDefaultAction(),
+                copyActions,
+                raw.getAllowMmapExec(),
+                raw.getAllowNonThreadClone(),
+                raw.getAllowUnsafePrctl(),
+                raw.getLockIntelCet(),
+                raw.getAllowedFsReadPaths(),
+                raw.getAllowedFsWritePaths(),
+                true,
+                raw.getCustomViolationPhrases(),
+                raw.getCustomViolationRegexes()
+        );
+        copyActions.clear();
+
+        assertFalse(copied.isSyscallAllowed(Syscall.EXECVE));
+        assertThrows(UnsupportedOperationException.class, () -> copied.getSyscallActions().put(Syscall.READ, SeccompAction.ACT_ALLOW.INSTANCE));
+        assertThrows(UnsupportedOperationException.class, () -> copied.getAllowedFsReadPaths().add(readPath));
+        assertThrows(UnsupportedOperationException.class, () -> copied.getAllowedFsWritePaths().add(writePath));
+        assertThrows(UnsupportedOperationException.class, () -> copied.getCustomViolationPhrases().add("mutated"));
+        assertThrows(UnsupportedOperationException.class, () -> copied.getCustomViolationRegexes().add(new kotlin.text.Regex("mutated")));
+    }
+
+    @Test
     void testJavaInstallationApiReturnsReceiptOnly() {
         assertTrue(
                 java.util.Arrays.stream(ContainedExecutors.class.getDeclaredMethods())

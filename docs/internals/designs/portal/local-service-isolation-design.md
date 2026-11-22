@@ -12,8 +12,13 @@ adapters consume its owned execution contract without adding Spring/Koog
 dependencies to `:portals:runtime` or altering the boundary defined here.
 
 The generated boundary currently supports copied primitive values, strings,
-byte arrays, `UUID`, `Instant`, `BigDecimal`, enums by constant name, and
+byte arrays (`byte[]`/`ByteArray`), `UUID`, `Instant`, `BigDecimal`, enums by
+constant name, copied `List`/`MutableList` and `Map`/`MutableMap` contracts
+(including inherited generic contracts and supported nested collections), and
 validated records/constructor-backed value objects composed from those types.
+Codegen publication validates that all configured destination and staging
+directories (after canonicalizing symlinks and relative segments) are pairwise
+disjoint before creating, moving, or deleting output trees.
 It rejects streams unless an explicit snapshot adapter is configured. An
 inbound `InputStream` opts in only with
 `@PortalInputSnapshotAdapter(maximumBytes = ...)`: the generated host adapter
@@ -194,6 +199,22 @@ preserved. Broker process/native retirement continues to use its own lifecycle.
   unchanged.
 - Missing metadata, worker artifacts, generated stubs, or containment cause a
   clear fail-closed error. There is no in-process implementation fallback.
+- Generated request dispatchers and host stubs require canonical wire encodings
+  (`0`/`1` booleans, strict UTF-8, duplicate-key-free maps, valid
+  UUID/Instant/BigDecimal/enum values), exact expected capability counts, and
+  complete payload consumption (`requireExhausted()`) before service entry and
+  before worker-slot release/result delivery, raising `PortalMalformedPayloadException` distinctly
+  from completed business exceptions and trusted DTO constructor validation. Host stubs run
+  wire validation under `ProcessBroker.invokeValidated` while the worker checkout remains
+  exclusively owned, deferring trusted host DTO constructors until after wire exhaustion so corrupt
+  responses always retire the exact offending worker and terminally lose `STATEFUL_SINGLETON` groups.
+- Generated host stubs (`ProcessBroker.newRequestWriter()`) and worker dispatchers
+  (`PortalRequestWriter.forReply()`) stream into the shared bounded `PortalRequestWriter`,
+  enforcing configured request/reply byte limits (`PortalFrame.MAX_PAYLOAD` or broker/scoped limits
+  via `PortalRequestWriter.withReplyLimit(...)`), per-collection cardinality
+  (`PortalCodec.MAX_COLLECTION_ELEMENTS = 16_384`), and aggregate element-traversal budgets with
+  checked `Long` arithmetic before buffer allocation, growth, or further element traversal (and
+  counting resize, trim, and snapshot scratch buffers in the writer's peak allocation budget).
 
 ## Initial service modes
 
@@ -204,6 +225,43 @@ later completion cannot reopen it. After that worker dies, the group reports sta
 requires explicit recreation. `STATELESS` permits independently managed,
 explicit capacity replacement, but never replays a call whose completion is
 unknown.
+
+## Boundary type hierarchy and DTO validation (CG02)
+
+`BoundaryTypes.kt` enforces a position-safe sealed hierarchy before any source is emitted:
+
+- `Kind.Value` — copied value types (records, POJOs, scalars, `ByteArray`, `List<T>`, and `Map<K, V>`).
+  Valid in any position.
+- `Kind.Parameter` includes values and direct inbound capabilities (`ReadFd`, `InputSnapshot`).
+  Capabilities are valid only as method parameters, never as return types or DTO members.
+- `Kind.Result` includes values and `UnitT`. Unit is valid only as a method return kind.
+
+Violations are rejected at resolution time with a path string such as:
+`Service.call parameter request field customer.name`
+
+No generator or emitter is ever called with an invalid DTO shape. This ensures that failed
+resolution preserves the previous complete generated output and does not initialize any guest
+implementation.
+
+### Concrete DTO requirements
+
+DTOs must meet these requirements, in addition to using supported component types:
+
+- It is a concrete (non-abstract) class or Java record.
+- If it is a member class: it must be `static` (never a Kotlin `inner class`).
+- Its enclosing class (if any) must be `public`.
+- It has either: a Java record canonical constructor, or exactly one `public` all-args constructor.
+- Each component has a public, type-compatible reader and a usable constructor parameter name.
+- None of its serialisable components are nullable (Kotlin `?` or `@Nullable`).
+- Generic type arguments are fully resolved (e.g. `List<String>` is accepted; raw `List` is not).
+
+### Generic DTO components
+
+Generic member types (e.g. `record Names(List<String> values)`) are resolved through
+`java.lang.reflect.ParameterizedType` before emission. The element type is preserved in the
+validated model and drives the generated codec — a `List<String>` member produces a list reader/writer
+bound to `String`, not an erased `List`. Type variables that cannot be resolved at resolution time
+are rejected.
 
 ## Non-goals
 

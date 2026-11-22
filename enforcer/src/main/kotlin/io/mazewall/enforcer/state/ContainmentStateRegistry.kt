@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.state
 
 import io.mazewall.platform.lifecycle.threadLocal
+import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 import java.util.concurrent.atomic.AtomicReference
@@ -97,31 +98,24 @@ internal object ContainmentStateRegistry {
         ts: ContainerState,
         ps: ContainerState,
     ): ContainerState {
-        val mergedActions = ts.syscallActions.toMutableMap()
-        for ((sys, action) in ps.syscallActions) {
-            val current = mergedActions[sys]
-            if (current == null || action.priority > current.priority) {
-                mergedActions[sys] = action
+        val mergedActions = LinkedHashMap<Syscall, SeccompAction>()
+        for (sys in ts.syscallActions.keys + ps.syscallActions.keys) {
+            mergedActions[sys] = ts.effectiveAction(sys).stricter(ps.effectiveAction(sys))
+        }
+
+        val mergedDefault =
+            if (ts.defaultAction.restrictivenessRank() > ps.defaultAction.restrictivenessRank()) {
+                ts.defaultAction
+            } else {
+                ps.defaultAction
             }
-        }
-
-        val mergedDefault = if (ts.defaultAction.priority > ps.defaultAction.priority) ts.defaultAction else ps.defaultAction
-
-        val mergedAllowed = if (ts.allowedSyscalls == null) {
-            ps.allowedSyscalls
-        } else if (ps.allowedSyscalls == null) {
-            ts.allowedSyscalls
-        } else {
-            ts.allowedSyscalls.intersect(ps.allowedSyscalls)
-        }
 
         val mergedEngineState = mergeEngineStates(ts.engineState, ps.engineState)
 
         return ContainerState(
             filterDepth = ts.filterDepth + ps.filterDepth,
-            syscallActions = mergedActions,
+            syscallActions = mergedActions.toMap(),
             defaultAction = mergedDefault,
-            allowedSyscalls = mergedAllowed,
             allowsMmapExec = ts.allowsMmapExec && ps.allowsMmapExec,
             allowsNonThreadClone = ts.allowsNonThreadClone && ps.allowsNonThreadClone,
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,

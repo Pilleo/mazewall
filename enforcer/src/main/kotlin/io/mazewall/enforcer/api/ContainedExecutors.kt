@@ -301,15 +301,7 @@ public object ContainedExecutors {
             expectedInstallFailure
         }
         ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, failure))
-        val landlockInForce =
-            attempt.landlockApplied ||
-                (
-                    if (processWide) {
-                    ContainmentStateRegistry.processState
-                } else {
-                    ContainmentStateRegistry.threadState
-                }
-                ).landlockPolicy != null
+        val landlockInForce = attempt.landlockApplied || scopeLandlockApplied(processWide)
         if (fallback != Platform.FallbackBehavior.FAIL) {
             if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                 if (progress.seccompApplied) {
@@ -326,14 +318,13 @@ public object ContainedExecutors {
                     logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. The receipt reports bypass; required execution will reject it.")
                 }
             }
-            return io.mazewall.enforcer.api.InstallationReceipt(
+            return io.mazewall.enforcer.api.InstallationReceipt.failed(
                 processWide = processWide,
                 requestedPolicy = policy,
-                installed = false,
-                landlockApplied = landlockInForce,
+                cause = failure,
                 fallback = fallback,
+                landlockApplied = landlockInForce,
                 progress = progress,
-                failure = failure,
                 cetOutcome = attempt.cetOutcome,
             )
         }
@@ -429,16 +420,14 @@ public object ContainedExecutors {
     ): io.mazewall.enforcer.api.InstallationReceipt? {
         if (attempt.platform.isSupported()) return null
         handleUnsupportedPlatform(attempt.fallback)
-        return io.mazewall.enforcer.api
-            .InstallationReceipt(
-                processWide = processWide,
-                requestedPolicy = policy,
-                installed = false,
-                fallback = attempt.fallback,
-                progress = attempt.snapshot(),
-                failure = UnsupportedOperationException("Platform does not support seccomp"),
-                cetOutcome = attempt.cetOutcome,
-            )
+        return io.mazewall.enforcer.api.InstallationReceipt.bypassed(
+            processWide = processWide,
+            requestedPolicy = policy,
+            reason = UnsupportedOperationException("Platform does not support seccomp"),
+            fallback = attempt.fallback,
+            progress = attempt.snapshot(),
+            cetOutcome = attempt.cetOutcome,
+        )
     }
 
     private fun preparePreSeccompEffects(
@@ -446,6 +435,8 @@ public object ContainedExecutors {
         attempt: InstallationAttempt,
         spawnLegacyDaemon: Boolean,
     ) {
+        io.mazewall.enforcer.api.InstallationReceipt
+            .preloadForSeccompInstall()
         if (policy.lockIntelCet) armIntelCet(attempt)
         if (policy.hasSupervisedSyscalls && spawnLegacyDaemon) {
             io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
@@ -461,20 +452,21 @@ public object ContainedExecutors {
         scopingPolicy: InstallationScoping,
         attempt: InstallationAttempt,
     ): io.mazewall.enforcer.api.InstallationReceipt {
-        val landlockApplied = when (applyLandlockIfNecessary(processWide, policy, attempt)) {
-            LandlockStep.APPLIED -> true
-            LandlockStep.BYPASSED ->
-                return io.mazewall.enforcer.api.InstallationReceipt(
-                    processWide = processWide,
-                    requestedPolicy = requestedPolicy,
-                    installed = false,
-                    fallback = attempt.fallback,
-                    progress = attempt.snapshot(),
-                    failure = attempt.failure,
-                    cetOutcome = attempt.cetOutcome,
-                )
-            LandlockStep.UNCHANGED -> (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
-        }
+        val landlockApplied =
+            when (val landlockStep = applyLandlockIfNecessary(processWide, policy, attempt)) {
+                LandlockStep.Applied -> true
+                is LandlockStep.Bypassed ->
+                    return io.mazewall.enforcer.api.InstallationReceipt.bypassed(
+                        processWide = processWide,
+                        requestedPolicy = requestedPolicy,
+                        reason = landlockStep.reason,
+                        fallback = attempt.fallback,
+                        landlockApplied = scopeLandlockApplied(processWide),
+                        progress = attempt.snapshot(),
+                        cetOutcome = attempt.cetOutcome,
+                    )
+                LandlockStep.Unchanged -> scopeLandlockApplied(processWide)
+            }
         return installSeccompFilter(processWide, policy, scopingPolicy, landlockApplied, attempt)
     }
 
@@ -487,10 +479,12 @@ public object ContainedExecutors {
     ): io.mazewall.enforcer.api.InstallationReceipt {
         // FAST PATH: Check if the current thread state already satisfies the policy without locking
         val fastState = installationState(processWide)
-        val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
-        if (!fastPlan.needsNewFilter && scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
-        if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
-            return io.mazewall.enforcer.api.InstallationReceipt(
+        val fastDecision = FilterInstallationPlanner.plan(combinedPolicy, fastState)
+        if (fastDecision is FilterInstallationPlanner.PlanDecision.AlreadySatisfied && scopingPolicy is InstallationScoping.Live) {
+            error("Live supervision requires a new listener")
+        }
+        if (fastDecision is FilterInstallationPlanner.PlanDecision.AlreadySatisfied && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
+            return io.mazewall.enforcer.api.InstallationReceipt.installed(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
                 landlockApplied = landlockApplied,
@@ -502,47 +496,49 @@ public object ContainedExecutors {
 
         synchronized(processLock) {
             val state = installationState(processWide)
-            val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
-
-            if (!plan.needsNewFilter && scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
-            val session = if (plan.needsNewFilter) {
-                // Kernel depth belongs to this thread's complete filter tree, even
-                // though process policy coverage is planned from processState only.
-                FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
-                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy, attempt)
-            } else {
-                null
-            }
+            val session =
+                when (val decision = FilterInstallationPlanner.plan(combinedPolicy, state)) {
+                    is FilterInstallationPlanner.PlanDecision.AlreadySatisfied -> {
+                        if (scopingPolicy is InstallationScoping.Live) error("Live supervision requires a new listener")
+                        null
+                    }
+                    is FilterInstallationPlanner.PlanDecision.Install -> {
+                        // Kernel depth belongs to this thread's complete filter tree, even
+                        // though process policy coverage is planned from processState only.
+                        FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
+                        applyBpfFilter(
+                            processWide,
+                            decision.fragment,
+                            scopingPolicy,
+                            attempt,
+                            warnOnUnsafePrctl = combinedPolicy.allowUnsafePrctl,
+                        )
+                    }
+                }
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
-                if (session is io.mazewall.enforcer.internal.supervisor.SupervisorSession) {
-                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
-                        processWide = processWide,
-                        requestedPolicy = combinedPolicy,
-                        supervisorRegistration = session,
-                        landlockApplied = landlockApplied,
-                        fallback = attempt.fallback,
-                        progress = attempt.snapshot(),
-                        cetOutcome = attempt.cetOutcome,
-                    )
-                } else {
-                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
-                        processWide = processWide,
-                        requestedPolicy = combinedPolicy,
-                        supervisorRegistration = when (scopingPolicy) {
+                val supervisorRegistration =
+                    if (session is io.mazewall.enforcer.internal.supervisor.SupervisorSession) {
+                        session
+                    } else {
+                        when (scopingPolicy) {
                             is InstallationScoping.Legacy ->
                                 io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
                                 .acquireCapturedTaskSession(scopingPolicy.captured, attempt.native)
                             is InstallationScoping.Live -> error("Live supervision requires its original listener")
-                        },
-                        landlockApplied = landlockApplied,
-                        fallback = attempt.fallback,
-                        progress = attempt.snapshot(),
-                        cetOutcome = attempt.cetOutcome,
-                    )
-                }
+                        }
+                    }
+                return io.mazewall.enforcer.api.InstallationReceipt.installed(
+                    processWide = processWide,
+                    requestedPolicy = combinedPolicy,
+                    landlockApplied = landlockApplied,
+                    fallback = attempt.fallback,
+                    progress = attempt.snapshot(),
+                    cetOutcome = attempt.cetOutcome,
+                    supervisorRegistration = supervisorRegistration,
+                )
             }
-            return io.mazewall.enforcer.api.InstallationReceipt(
+            return io.mazewall.enforcer.api.InstallationReceipt.installed(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
                 landlockApplied = landlockApplied,
@@ -553,14 +549,22 @@ public object ContainedExecutors {
         }
     }
 
-    private enum class LandlockStep { UNCHANGED, APPLIED, BYPASSED }
+    private sealed interface LandlockStep {
+        data object Unchanged : LandlockStep
+
+        data object Applied : LandlockStep
+
+        data class Bypassed(
+            val reason: Throwable,
+        ) : LandlockStep
+    }
 
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
         attempt: InstallationAttempt,
     ): LandlockStep {
-        if (!policy.enforceLandlock) return LandlockStep.UNCHANGED
+        if (!policy.enforceLandlock) return LandlockStep.Unchanged
 
         synchronized(processLock) {
             val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
@@ -601,16 +605,15 @@ public object ContainedExecutors {
                                 abiVersion = capabilities.matrix.landlockAbiVersion,
                             ),
                         )
-                        return LandlockStep.APPLIED
+                        return LandlockStep.Applied
                     }
                     is io.mazewall.landlock.LandlockApplyResult.Bypassed -> {
-                        attempt.failure = applied.toFailure()
-                        return LandlockStep.BYPASSED
+                        return LandlockStep.Bypassed(applied.toFailure())
                     }
                     is io.mazewall.landlock.LandlockApplyResult.Rejected -> applied.orThrow()
                 }
             }
-            return LandlockStep.UNCHANGED
+            return LandlockStep.Unchanged
         }
     }
 
@@ -676,10 +679,9 @@ public object ContainedExecutors {
     private fun applyBpfFilter(
         processWide: Boolean,
         toInstall: PolicyDefinition<*>,
-        newBlocks: Map<Syscall, SeccompAction>,
-        newDefaultAction: SeccompAction,
         scopingPolicy: InstallationScoping,
         attempt: InstallationAttempt,
+        warnOnUnsafePrctl: Boolean = toInstall.allowUnsafePrctl,
     ): AutoCloseable? {
         val arch = io.mazewall.platform.syscall.Arch
             .current()
@@ -691,8 +693,6 @@ public object ContainedExecutors {
                     ContainmentRegistryEffect.SeccompInstalled(
                         processWide = false,
                         policy = toInstall,
-                        blocks = newBlocks,
-                        defaultAction = newDefaultAction,
                     ),
                 )
             val onApplied = {
@@ -718,22 +718,26 @@ public object ContainedExecutors {
             return session
         } else {
             val compiledSandbox = io.mazewall.enforcer.api.PolicyCompilationCache
-                .getOrCompile(toInstall, arch)
+                .getOrCompile(toInstall, arch, warnOnUnsafePrctl = warnOnUnsafePrctl)
             val currentState = ContainerState.resolveCurrentState()
             val priorFilterDepth = currentState.filterDepth
 
             // Compute merged state for union-aware self-verification (issue-20260824-011900)
-            val mergedState = currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
+            val mergedState = currentState.withAppliedFilter(toInstall)
 
             val publish = ContainmentRegistryEffectInterpreter.prepare(
                 ContainmentRegistryEffect.SeccompInstalled(
                     processWide,
                     toInstall,
-                    newBlocks,
-                    newDefaultAction,
                 ),
             )
-            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native, platform = attempt.platform) {
+            PureJavaBpfEngine.installWithPublication(
+                compiledSandbox,
+                processWide,
+                native = attempt.native,
+                isLinux = attempt.platform.isLinux,
+                tsyncSupported = if (processWide) attempt.platform.capabilities.matrix.seccompTsyncSupported else false,
+            ) {
                 attempt.seccompApplied = true
                 publish()
             }

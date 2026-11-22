@@ -145,6 +145,9 @@ tasks.register<JavaExec>("ciCachePolicyTest") {
     mainClass.set("io.mazewall.build.CiCacheKeyFunctionalTest")
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
+    jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
+    environment("LANG", "C.UTF-8")
+    environment("LC_ALL", "C.UTF-8")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
     inputs.files(
         layout.projectDirectory.file("../.github/workflows/ci.yml"),
@@ -169,6 +172,9 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
     val successMarker = verificationActionsMarker
     systemProperty("mazewall.test.outerOffline", gradle.startParameter.isOffline.toString())
     mainClass.set("io.mazewall.build.VerificationActionsTest")
+    jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8")
+    environment("LANG", "C.UTF-8")
+    environment("LC_ALL", "C.UTF-8")
     inputs.file(layout.projectDirectory.file("settings.gradle.kts"))
         .withPropertyName("verificationSettings")
         .withPathSensitivity(PathSensitivity.RELATIVE)
