@@ -5,18 +5,26 @@ import io.mazewall.ffi.NativeConstants
 /**
  * Standard Linux Seccomp-BPF return actions.
  *
- * [priority] is a coarse bucket. Intersection must use [stricter] /
- * [restrictivenessRank], not [nativeCode] (kernel return bits are not ordered
- * by restrictiveness) and not [priority] alone ([ACT_ERRNO] and [ACT_TRACE]
- * previously shared priority 4).
+ * Linux stacks seccomp filters using the signed minimum of the action-masked
+ * 32-bit return word (`ret & SECCOMP_RET_ACTION_FULL`): `ACT_KILL_PROCESS`
+ * (`0x80000000`) > `ACT_KILL_THREAD` (`0x00000000`) > `ACT_TRAP` (`0x00030000`)
+ * > `ACT_ERRNO` (`0x00050000`) > `ACT_NOTIFY` (`0x7fc00000`) > `ACT_TRACE`
+ * (`0x7ff00000`) > `ACT_LOG` (`0x7ffc0000`) > `ACT_ALLOW` (`0x7fff0000`).
+ *
+ * [priority] is a legacy coarse bucket (`ACT_ERRNO` and `ACT_TRACE` share bucket
+ * 4 while `ACT_NOTIFY` is 3). Policy intersection must use [stricter] /
+ * [restrictivenessRank], not [priority] alone, unsigned [nativeCode] comparisons
+ * (which invert `ACT_KILL_PROCESS`'s sign bit), or payload-bearing
+ * [toKernelReturnCode] comparisons.
  */
 public sealed interface SeccompAction {
     public val priority: Int
     public val nativeCode: Int
 
     /**
-     * Total order for policy intersection. [ACT_ERRNO] outranks [ACT_TRACE].
-     * [nativeCode] must not be used as a rank.
+     * Canonical total order for policy intersection matching Linux UAPI
+     * `SECCOMP_RET_*` precedence (where signed minimum action bits win).
+     * Neither [priority] nor payload-bearing return words define this order.
      */
     public fun restrictivenessRank(): Int =
         when (this) {
@@ -24,8 +32,8 @@ public sealed interface SeccompAction {
             is ACT_KILL_THREAD -> 60
             is ACT_TRAP -> 50
             is ACT_ERRNO -> 41
-            is ACT_TRACE -> 40
-            is ACT_NOTIFY -> 30
+            is ACT_NOTIFY -> 40
+            is ACT_TRACE -> 30
             is ACT_LOG -> 20
             is ACT_ALLOW -> 10
         }

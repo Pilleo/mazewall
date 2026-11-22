@@ -21,7 +21,6 @@ Read the nearest module instructions before changing code:
 - [enforcer/AGENTS.md](enforcer/AGENTS.md): containment, JVM floor, Loom, Landlock, and native safety.
 - [profiler/AGENTS.md](profiler/AGENTS.md): USER_NOTIF, ptrace/Yama, and profiler protocol.
 - [portals/runtime/AGENTS.md](portals/runtime/AGENTS.md), [portals/codegen/AGENTS.md](portals/codegen/AGENTS.md), and [portals/worker/AGENTS.md](portals/worker/AGENTS.md): broker/worker process isolation.
-- [tools/orchestrator/AGENTS.md](tools/orchestrator/AGENTS.md): orchestration and backlog tooling.
 
 Skills live in `.agents/skills/` and are loaded when their task applies; do not inline their procedures here. Follow [the code-quality standards](.agents/CODE_QUALITY.md) for design and implementation.
 
@@ -47,12 +46,11 @@ Skills live in `.agents/skills/` and are loaded when their task applies; do not 
 - Treat existing uncommitted work as user-owned. Stage only files belonging to the current change.
 - Before conflict resolution or branch updates, inspect `git status` and preserve unrelated work with a recoverable stash when needed.
 
-## Single control plane
+## Pull request workflow
 
-- Do not push directly to the default branch. Work enters through a scoped backlog item and the orchestrator-managed review path.
+- Do not push directly to the default branch. Use a scoped pull request and preserve unrelated work.
 - Preserve serial PR merge handling and reject a task diff that escapes its declared scope.
-- Do not let Paperclip or another agent mutate the same worktree as an active orchestrator worker; assignment is an explicit operator action.
-- Operators use the orchestrator CLI/Telegram approval flow for starts and merges. See `tools/orchestrator/README.md` for commands.
+- Coordinate concurrent agents so they do not mutate the same worktree without explicit assignment.
 
 ## Verification
 
@@ -68,12 +66,6 @@ Use focused host tests while iterating:
 
 ```bash
 ./gradlew build
-```
-
-For orchestrator changes, include its opt-in module:
-
-```bash
-./gradlew build -PincludeOrchestrator=true
 ```
 
 For kernel-specific iteration, select the owning module's `integrationTest` or `integrationTestFreshJvm` task, or use `./scripts/run_containerized_tests.sh kernelCheck` in the configured container environment. The full build already selects integration suites; equivalent commands are alternatives, not additional completion gates. See [the testing strategy](docs/internals/designs/core/testing-strategy.md) for prerequisites and current cache behavior.

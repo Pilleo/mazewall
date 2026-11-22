@@ -17,9 +17,11 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -44,7 +46,10 @@ class ProcessBrokerIntegrationTest {
         ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also(children::add)
     }
 
-    private class SocketReceipts : SocketManager by RealSocketManager {
+    private class SocketReceipts(
+        private val failNextClose: AtomicBoolean = AtomicBoolean(false),
+        private val injectedCloseFailure: Throwable? = null,
+    ) : SocketManager by RealSocketManager {
         val acquired = java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>()
         val retired = java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>()
 
@@ -55,6 +60,9 @@ class ProcessBrokerIntegrationTest {
             RealSocketManager.accept(serverFd).also(acquired::add)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+            if (failNextClose.compareAndSet(true, false)) {
+                injectedCloseFailure?.let { throw it }
+            }
             RealSocketManager.close(fd)
             retired.add(fd)
         }
@@ -971,5 +979,254 @@ class ProcessBrokerIntegrationTest {
             assertEquals("after-idle", b.echo("after-idle"))
             assertEquals(1, b.spawnedWorkers(), "idle ticks must not respawn workers")
         }
+    }
+
+    @Test
+    fun `malformed generated reply holds checkout during validation retires exact child and never replays`(
+        @TempDir directory: Path,
+    ) {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val fixture = validatedReplyBrokerFixture(directory, mode = PortalInstanceMode.STATELESS)
+        val receipts = ChildReceipts()
+        val socketReceipts = SocketReceipts()
+        val method = PortalMethod.Generated(4242)
+        ProcessBroker(
+            launcher = receipts,
+            sockets = socketReceipts,
+            workerClasspath = fixture.brokerClasspath,
+            workerLaunch = fixture.workerLaunch,
+            limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 2, callTimeoutMs = 10_000),
+        ).use { broker ->
+            broker.start()
+            val originalChild = receipts.children.single()
+            val originalPid = originalChild.pid()
+            val enteredValidation = CountDownLatch(1)
+            val releaseValidation = CountDownLatch(1)
+
+            val firstCall = CompletableFuture.supplyAsync {
+                broker.invokeValidated(method, PortalCodec.encodeString("malformed-trailing")) { bytes ->
+                    enteredValidation.countDown()
+                    check(releaseValidation.await(5, TimeUnit.SECONDS))
+                    val reader = PortalCodec.Reader(bytes, "validated.return")
+                    val text = reader.string()
+                    reader.requireExhausted()
+                    text
+                }
+            }
+            assertTrue(enteredValidation.await(5, TimeUnit.SECONDS))
+            assertEquals(0, broker.idleSize(), "checked-out worker must stay out of idle pool during reply validation")
+
+            val competingResult = AtomicReference<Result<String>?>()
+            val competingThread = Thread.ofPlatform().start {
+                competingResult.set(
+                    runCatching {
+                        broker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes ->
+                            val reader = PortalCodec.Reader(bytes, "validated.return")
+                            val text = reader.string()
+                            reader.requireExhausted()
+                            text
+                        }
+                    },
+                )
+            }
+            awaitCondition(java.time.Duration.ofSeconds(5), "competing caller blocked waiting for worker checkout") {
+                (competingThread.state == Thread.State.TIMED_WAITING || competingThread.state == Thread.State.WAITING) &&
+                    competingThread.stackTrace.any { it.className == "io.mazewall.portal.ProcessBroker" && it.methodName.startsWith("checkoutWorker") } &&
+                    competingResult.get() == null &&
+                    broker.idleSize() == 0
+            }
+
+            releaseValidation.countDown()
+            val firstFailure = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+                firstCall.get(10, TimeUnit.SECONDS)
+            }.cause as PortalMalformedPayloadException
+            assertEquals(PortalInvocationEvidence.UNKNOWN_COMPLETION, firstFailure.evidence)
+
+            awaitCondition(java.time.Duration.ofSeconds(10), "malformed-reply worker retired and replacement ready") {
+                !originalChild.isAlive && broker.spawnedWorkers() == 2
+            }
+            competingThread.join(10_000)
+            assertFalse(competingThread.isAlive)
+            val competingText = requireNotNull(competingResult.get()).getOrThrow()
+            val replacementChild = receipts.children.last()
+            assertTrue(replacementChild.pid() != originalPid)
+            assertEquals("pid=${replacementChild.pid()},calls=1,mode=valid", competingText)
+
+            val validSecond = broker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes ->
+                val reader = PortalCodec.Reader(bytes, "validated.return")
+                val text = reader.string()
+                reader.requireExhausted()
+                text
+            }
+            assertEquals("pid=${replacementChild.pid()},calls=2,mode=valid", validSecond)
+
+            val businessFailure = assertThrows(PortalRemoteCallException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("remote-business-error")) { bytes -> bytes.decodeToString() }
+            }
+            assertEquals(PortalInvocationEvidence.COMPLETED, businessFailure.evidence)
+            assertTrue(replacementChild.isAlive)
+
+            val dtoError = IllegalArgumentException("rejected by dto")
+            val actualDtoError = assertThrows(IllegalArgumentException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("host-dto-reject")) { bytes ->
+                    val reader = PortalCodec.Reader(bytes, "validated.return")
+                    val text = reader.string()
+                    reader.requireExhausted()
+                    assertEquals("invalid-dto", text)
+                    throw dtoError
+                }
+            }
+            assertSame(dtoError, actualDtoError)
+            assertTrue(replacementChild.isAlive)
+
+            val validAfterHostError = broker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes ->
+                val reader = PortalCodec.Reader(bytes, "validated.return")
+                val text = reader.string()
+                reader.requireExhausted()
+                text
+            }
+            assertEquals("pid=${replacementChild.pid()},calls=5,mode=valid", validAfterHostError)
+            assertEquals(2, broker.spawnedWorkers())
+        }
+        assertTrue(receipts.children.all { !it.isAlive })
+        socketReceipts.assertAllRetired()
+    }
+
+    @Test
+    fun `malformed generated reply terminally loses stateful singleton worker without replacement`(
+        @TempDir directory: Path,
+    ) {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val fixture = validatedReplyBrokerFixture(directory, mode = PortalInstanceMode.STATEFUL_SINGLETON)
+        val receipts = ChildReceipts()
+        val socketReceipts = SocketReceipts()
+        val method = PortalMethod.Generated(4242)
+        ProcessBroker(
+            launcher = receipts,
+            sockets = socketReceipts,
+            workerClasspath = fixture.brokerClasspath,
+            instanceMode = PortalInstanceMode.STATEFUL_SINGLETON,
+            workerLaunch = fixture.workerLaunch,
+            limits = PortalRuntimeLimits(workers = 1, callTimeoutMs = 10_000),
+        ).use { broker ->
+            broker.start()
+            val singletonChild = receipts.children.single()
+            val singletonPid = singletonChild.pid()
+
+            val firstValid = broker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes ->
+                PortalCodec.Reader(bytes, "validated.return").let { r -> r.string().also { r.requireExhausted() } }
+            }
+            assertEquals("pid=$singletonPid,calls=1,mode=valid", firstValid)
+
+            assertThrows(PortalRemoteCallException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("remote-business-error")) { bytes -> bytes.decodeToString() }
+            }
+            val dtoError = IllegalArgumentException("rejected by dto")
+            val actualDtoError = assertThrows(IllegalArgumentException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("host-dto-reject")) { bytes ->
+                    val reader = PortalCodec.Reader(bytes, "validated.return")
+                    val text = reader.string()
+                    reader.requireExhausted()
+                    assertEquals("invalid-dto", text)
+                    throw dtoError
+                }
+            }
+            assertSame(dtoError, actualDtoError)
+            assertTrue(singletonChild.isAlive)
+            assertEquals(1, broker.spawnedWorkers())
+
+            val malformed = assertThrows(PortalMalformedPayloadException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("malformed-bool")) { bytes ->
+                    val reader = PortalCodec.Reader(bytes, "validated.return")
+                    val flag = reader.boolean()
+                    reader.requireExhausted()
+                    flag.toString()
+                }
+            }
+            assertEquals(PortalInvocationEvidence.UNKNOWN_COMPLETION, malformed.evidence)
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            awaitCondition(java.time.Duration.ofSeconds(5), "stateful child retired on malformed reply") {
+                broker.trackedWorkers() == 0 && !singletonChild.isAlive
+            }
+            assertThrows(IllegalStateException::class.java) {
+                broker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes -> bytes.decodeToString() }
+            }
+            broker.close()
+            assertEquals(1, broker.spawnedWorkers())
+            assertEquals(0, broker.idleSize())
+        }
+        assertTrue(receipts.children.all { !it.isAlive })
+        socketReceipts.assertAllRetired()
+    }
+
+    @Test
+    fun `fatal error and concurrent close during held reply validation retire exact child without checkout leak`(
+        @TempDir directory: Path,
+    ) {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val fixture = validatedReplyBrokerFixture(directory, mode = PortalInstanceMode.STATELESS)
+        val method = PortalMethod.Generated(4242)
+
+        // Fatal Error during held reply validation destroys the child and preserves cleanup suppression.
+        val cleanupFailure = java.io.IOException("injected validation cleanup failure")
+        val failNextClose = AtomicBoolean(false)
+        val fatalSockets = SocketReceipts(failNextClose, cleanupFailure)
+        val fatalReceipts = ChildReceipts()
+        val fatalBroker = ProcessBroker(
+            launcher = fatalReceipts,
+            sockets = fatalSockets,
+            workerClasspath = fixture.brokerClasspath,
+            workerLaunch = fixture.workerLaunch,
+        )
+        fatalBroker.start()
+        val fatalChild = fatalReceipts.children.single()
+        val fatal = AssertionError("fatal validation failure")
+        try {
+            failNextClose.set(true)
+            val actual = assertThrows(AssertionError::class.java) {
+                fatalBroker.invokeValidated(method, PortalCodec.encodeString("valid")) { throw fatal }
+            }
+            assertSame(fatal, actual)
+            assertFalse(fatalChild.isAlive)
+            assertTrue(fatal.suppressed.contains(cleanupFailure))
+            assertEquals(0, fatalBroker.idleSize())
+        } finally {
+            failNextClose.set(false)
+            fatalBroker.close()
+        }
+        fatalSockets.assertAllRetired()
+
+        // Concurrent broker close while reply validation is held leaves no checked-out or pooled child alive.
+        val closeReceipts = ChildReceipts()
+        val closeSockets = SocketReceipts()
+        val closeBroker = ProcessBroker(
+            launcher = closeReceipts,
+            sockets = closeSockets,
+            workerClasspath = fixture.brokerClasspath,
+            workerLaunch = fixture.workerLaunch,
+        )
+        closeBroker.start()
+        val closeChild = closeReceipts.children.single()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val inValidation = CompletableFuture.supplyAsync {
+            closeBroker.invokeValidated(method, PortalCodec.encodeString("valid")) { bytes ->
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                PortalCodec.Reader(bytes, "validated.return").let { r -> r.string().also { r.requireExhausted() } }
+            }
+        }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            closeBroker.close()
+            assertFalse(closeChild.isAlive)
+        } finally {
+            release.countDown()
+            inValidation.handle { _, _ -> Unit }.get(10, TimeUnit.SECONDS)
+            closeBroker.close()
+        }
+        assertEquals(0, closeBroker.idleSize())
+        assertEquals(0, closeBroker.trackedWorkers())
+        closeSockets.assertAllRetired()
     }
 }

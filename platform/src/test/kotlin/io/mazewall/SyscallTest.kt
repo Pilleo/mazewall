@@ -153,6 +153,8 @@ class SyscallTest {
         Syscall.BPF to arch.bpf,
         Syscall.PROCESS_VM_WRITEV to arch.processVmWritev,
         Syscall.PROCESS_VM_READV to arch.processVmReadv,
+        Syscall.PIDFD_OPEN to arch.pidfdOpen,
+        Syscall.PIDFD_GETFD to arch.pidfdGetFd,
         Syscall.USERFAULTFD to arch.userfaultfd,
         Syscall.UNSHARE to arch.unshare,
         Syscall.SETNS to arch.setns,
@@ -210,5 +212,22 @@ class SyscallTest {
             duplicates,
             "Duplicate syscall numbers found on ${arch.name}: $duplicates",
         )
+    }
+
+    @Test
+    fun `rename family syscall numbers match Linux UAPI on AMD64 and AARCH64`() {
+        assertEquals(-1, Arch.AARCH64.rename)
+        assertEquals(-1, Syscall.RENAME.numberFor(Arch.AARCH64))
+        assertEquals(38, Arch.AARCH64.renameat)
+        assertEquals(38, Syscall.RENAMEAT.numberFor(Arch.AARCH64))
+        assertEquals(276, Arch.AARCH64.renameat2)
+        assertEquals(276, Syscall.RENAMEAT2.numberFor(Arch.AARCH64))
+
+        assertEquals(82, Arch.AMD64.rename)
+        assertEquals(82, Syscall.RENAME.numberFor(Arch.AMD64))
+        assertEquals(264, Arch.AMD64.renameat)
+        assertEquals(264, Syscall.RENAMEAT.numberFor(Arch.AMD64))
+        assertEquals(316, Arch.AMD64.renameat2)
+        assertEquals(316, Syscall.RENAMEAT2.numberFor(Arch.AMD64))
     }
 }

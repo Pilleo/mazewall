@@ -5,7 +5,8 @@ import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.enforcer.api.Policy
-import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
@@ -43,18 +44,18 @@ class BpfHardeningTest : BaseIntegrationTest() {
 
         val result = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
         runFixture {
-                    ContainedExecutors.installOnCurrentThread(policy)
-                    // PR_SET_NAME = 15
-                    val res =
-                    LinuxNative.process.prctl(
-                        PrctlCommand.SetName(NativeArg.MemoryArg(ManagedSegment.NULL)),
-                    )
-
-                    result.set(res)
+            NativeArena.ofConfined().use { arena ->
+                val command = PrctlCommand.SetName(NativeArg.MemoryArg(arena.allocateFrom("prctl-probe")))
+                assertTrue(LinuxNative.process.prctl(command) is LinuxNative.SyscallResult.Success)
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    result.set(LinuxNative.process.prctl(command))
+                }
+            }
         }
 
         val res = result.get()
-        assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == 1, "PRCTL should have been blocked with EPERM, got $res")
+        assertTrue(res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EPERM, "PRCTL should have been blocked with EPERM, got $res")
     }
 
     @Test

@@ -282,7 +282,7 @@ internal object OtherSyscallMapper {
     ): Int =
         when (syscall) {
             Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER, Syscall.BPF -> numberForAdvancedIO(syscall, arch)
-            Syscall.PROCESS_VM_WRITEV, Syscall.PROCESS_VM_READV, Syscall.USERFAULTFD -> numberForInterProcess(
+            Syscall.PROCESS_VM_WRITEV, Syscall.PROCESS_VM_READV, Syscall.PIDFD_OPEN, Syscall.PIDFD_GETFD, Syscall.USERFAULTFD -> numberForInterProcess(
                 syscall,
                 arch,
             )
@@ -308,6 +308,8 @@ internal object OtherSyscallMapper {
         when (syscall) {
             Syscall.PROCESS_VM_WRITEV -> arch.processVmWritev
             Syscall.PROCESS_VM_READV -> arch.processVmReadv
+            Syscall.PIDFD_OPEN -> arch.pidfdOpen
+            Syscall.PIDFD_GETFD -> arch.pidfdGetFd
             Syscall.USERFAULTFD -> arch.userfaultfd
             else -> -1
         }

@@ -1,8 +1,10 @@
 package io.mazewall.seccomp
 
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
 
 /**
  * Pure, bounded probe selection for post-install self-verification.
@@ -30,17 +32,18 @@ internal data class SelfVerificationPlan(
             mergedState: ContainerState? = null,
         ): SelfVerificationPlan {
             val livenessNr = arch.getpid
+            val jvmCriticalNrs = if (mergedState == null) emptySet() else BpfFilter.getJvmCriticalNrs(arch)
             return SelfVerificationPlan(
                 livenessNr = livenessNr,
                 probeLiveness = if (mergedState == null) {
                     BpfSimulator.simulate(instructions, livenessNr, arch) == NativeConstants.SECCOMP_RET_ALLOW
                 } else {
-                    mergedState.getEffectiveAction(livenessNr, arch).toKernelReturnCode() == NativeConstants.SECCOMP_RET_ALLOW
+                    effectiveUnionReturnCode(livenessNr, arch, mergedState, jvmCriticalNrs) == NativeConstants.SECCOMP_RET_ALLOW
                 },
                 deniedProbes = if (mergedState == null) {
                     deniedProbeNrs(instructions, arch, maxProbes)
                 } else {
-                    deniedProbeNrsWithUnion(instructions, arch, mergedState, maxProbes)
+                    deniedProbeNrsWithUnion(instructions, arch, mergedState, maxProbes, jvmCriticalNrs)
                 },
             )
         }
@@ -81,16 +84,51 @@ internal data class SelfVerificationPlan(
             arch: Arch,
             mergedState: ContainerState,
             maxProbes: Int = MAX_PROBES,
+            jvmCriticalNrs: Set<Int> = BpfFilter.getJvmCriticalNrs(arch),
         ): List<Pair<Int, Int>> =
             candidateSyscallNrs(instructions, arch)
-                .apply { mergedState.syscallActions.keys.forEach { add(it.numberFor(arch)) } }
-                .asSequence()
-                .filterNot { isArgInspected(instructions, it) }
-                .map { nr -> nr to mergedState.getEffectiveAction(nr, arch).toKernelReturnCode() }
+                .apply {
+                    mergedState.syscallActions.keys.forEach { syscall ->
+                        val nr = syscall.numberFor(arch)
+                        if (nr >= 0) add(nr)
+                    }
+                }.asSequence()
+                .filterNot { isArgInspectedInStack(instructions, it, arch, mergedState) }
+                .map { nr -> nr to effectiveUnionReturnCode(nr, arch, mergedState, jvmCriticalNrs) }
                 .filter { (_, action) -> (action and SECCOMP_ACTION_MASK) == NativeConstants.SECCOMP_RET_ERRNO }
                 .map { (nr, action) -> nr to (action and SECCOMP_DATA_MASK) }
                 .take(maxProbes)
                 .toList()
+
+        private fun isArgInspectedInStack(
+            instructions: List<BpfInstruction>,
+            nr: Int,
+            arch: Arch,
+            mergedState: ContainerState,
+        ): Boolean =
+            isArgInspected(instructions, nr) ||
+                (!mergedState.allowsUnsafePrctl && arch.prctl >= 0 && nr == arch.prctl) ||
+                (
+                    !mergedState.allowsMmapExec &&
+                        nr >= 0 &&
+                        (nr == arch.mmap || nr == arch.mprotect || nr == arch.pkeyMprotect)
+                )
+
+        private fun effectiveUnionReturnCode(
+            nr: Int,
+            arch: Arch,
+            mergedState: ContainerState,
+            jvmCriticalNrs: Set<Int>,
+        ): Int {
+            // Every compiled filter forces clone3 -> ENOSYS and allows the 0-arg JVM floor before linear scan.
+            if (arch.clone3 >= 0 && nr == arch.clone3) {
+                return SeccompAction.ACT_ERRNO(NativeConstants.ENOSYS).toKernelReturnCode()
+            }
+            if (nr in jvmCriticalNrs) {
+                return NativeConstants.SECCOMP_RET_ALLOW
+            }
+            return mergedState.getEffectiveAction(nr, arch).toKernelReturnCode()
+        }
 
         private fun candidateSyscallNrs(
             instructions: List<BpfInstruction>,

@@ -187,7 +187,7 @@ object CiCachePolicyTest {
                         - name: Require Core and Mutation Success
                           run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success
                 publish:
-                    needs: [optional-integrations, build-test-publish]
+                    needs: [core-quality, mutation-tests, security-check, build-logic-validation]
                     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
                     permissions:
                         contents: read
@@ -196,9 +196,16 @@ object CiCachePolicyTest {
                         - name: Restore Container Gradle Cache
                           uses: actions/cache/restore@v4
                           with:
-                              key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.build-test-publish.outputs.container_cache_hash }}-${'$'}{{ github.sha }}
+                              key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.core-quality.outputs.container_cache_hash }}-${'$'}{{ github.sha }}
+                        - name: Set up JDK 25
+                          uses: actions/setup-java@v5
+                          with:
+                              java-version: "25"
+                              distribution: "temurin"
+                        - name: Require packaged lockdown consumers
+                          run: ./gradlew :lockdownConsumerCheck --no-daemon
                         - name: Publish to GitHub Packages
-                          run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
+                          run: ./scripts/run_containerized_tests.sh :lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository
         """.trimIndent().let { legacy ->
             val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
             val actualWorkflow = repository.resolve(".github/workflows/ci.yml").readText()
@@ -248,21 +255,69 @@ object CiCachePolicyTest {
         mutations.forEachIndexed { index, mutation ->
             if (ciCachePolicyViolations(mutation).isEmpty()) failures += "Mutable/missing container cache identity mutation $index must fail"
         }
-        val graphMutations = listOf(
-            valid.replace("    core-quality:\n", "    core-quality:\n        needs: [optional-integrations]\n"),
-            valid.replace("    optional-integrations:\n", "    optional-integrations:\n        needs: [build-test-publish]\n"),
-            valid.replace("    optional-integrations:\n", "    optional-integrations:\n        if: false\n"),
-            valid.replace("name: Koog and Spring Integration Acceptance", "name: Renamed required check"),
-            valid.replace("needs: [optional-integrations, build-test-publish]", "needs: [build-test-publish]"),
-            valid.replace("needs: [optional-integrations, build-test-publish]", "needs: [optional-integrations]"),
-            valid.replace("if: github.event_name == 'push'", "if: always() && github.event_name == 'push'"),
-            valid.replace("if: github.event_name == 'push'", "if: github.event_name == 'pull_request'"),
-            valid.replace("container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}", "container_cache_hash: missing"),
-            valid.replace("needs.build-test-publish.outputs.container_cache_hash", "needs.build-test-publish.outputs.wrong"),
-            valid.replace("github.event.pull_request.number || github.run_id", "github.sha"),
-            valid.replace("cancel-in-progress: ${'$'}{{ github.event_name == 'pull_request' }}", "cancel-in-progress: true"),
-            valid + "\nrun: ./gradlew publishAllPublicationsToGitHubPackagesRepository\n",
-        )
+        val publishPrerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation")
+        val graphMutations =
+            listOf(
+                valid.replace("    core-quality:\n", "    core-quality:\n        needs: [optional-integrations]\n"),
+                valid.replace("    optional-integrations:\n", "    optional-integrations:\n        needs: [build-test-publish]\n"),
+                valid.replace("    optional-integrations:\n", "    optional-integrations:\n        if: false\n"),
+                valid.replace("name: Koog and Spring Integration Acceptance", "name: Renamed required check"),
+                valid.replace(
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                    "needs: [optional-integrations, core-quality, mutation-tests, security-check, build-logic-validation]",
+                ),
+                valid.replace(
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                    "needs: [build-test-publish]",
+                ),
+                valid.replace("    publish:\n", "    publish:\n        continue-on-error: true\n"),
+                valid.replace("if: github.event_name == 'push'", "if: always() && github.event_name == 'push'"),
+                valid.replace("if: github.event_name == 'push'", "if: github.event_name == 'pull_request'"),
+                valid.replace("container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}", "container_cache_hash: missing"),
+                valid.replace("needs.core-quality.outputs.container_cache_hash", "needs.core-quality.outputs.wrong"),
+                valid.replace(
+                    "key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.core-quality.outputs.container_cache_hash }}",
+                    "key: container-gradle-${'$'}{{ runner.os }}-wrong",
+                ),
+                valid.replace(
+                    ":lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    ":lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                ),
+                valid.replace(
+                    ":lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    ":lockdown:publishMavenJavaPublicationToGitHubPackagesRepository :lockdown:verifyLockdownPublication",
+                ),
+                valid.replace(
+                    ":lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    "publishAllPublicationsToGitHubPackagesRepository",
+                ),
+                valid.replace(
+                    ":lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    "-PincludeSpringIntegration=true :lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                ),
+                valid.replace(
+                    ":lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    "-PincludeKoogIntegration=true :lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                ),
+                valid.replace(
+                    ":lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                    "-PkoogBootstrap=true :lockdown:verifyLockdownPublication :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository",
+                ),
+                valid.replace(":lockdownConsumerCheck", "skippedConsumerCheck"),
+                valid.replace(
+                    "./scripts/run_containerized_tests.sh :lockdown:verifyLockdownPublication",
+                    "./scripts/run_containerized_tests.sh :lockdownConsumerCheck :lockdown:verifyLockdownPublication",
+                ),
+                valid.replace("github.event.pull_request.number || github.run_id", "github.sha"),
+                valid.replace("cancel-in-progress: ${'$'}{{ github.event_name == 'pull_request' }}", "cancel-in-progress: true"),
+                valid + "\nrun: ./gradlew :lockdown:publishMavenJavaPublicationToGitHubPackagesRepository\n",
+            ) +
+                publishPrerequisites.map { omitted ->
+                    valid.replace(
+                        "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                        "needs: [${publishPrerequisites.filter { it != omitted }.joinToString(", ")}]",
+                    )
+                }
         graphMutations.forEachIndexed { index, mutation ->
             if (ciCachePolicyViolations(mutation).isEmpty()) failures += "Unsafe/serialized CI graph mutation $index must fail"
         }
@@ -703,7 +758,8 @@ object CiCachePolicyTest {
         check("--no-parallel --max-workers=1" in step(security, "Run Security Check"))
         val reportGate = step(security, "Require SDK Security Reports")
         for (path in listOf("build/reports/dependency-check-report.json", "platform/build/reports/dependency-check-report.json",
-            "enforcer/build/reports/dependency-check-report.json", "profiler/build/reports/dependency-check-report.json",
+            "enforcer/build/reports/dependency-check-report.json", "lockdown/build/reports/dependency-check-report.json",
+            "profiler/build/reports/dependency-check-report.json",
             "portals/runtime/build/reports/dependency-check-report.json", "portals/worker/build/reports/dependency-check-report.json",
             "portals/codegen/build/reports/dependency-check-report.json")) {
             check(path in reportGate) { "Missing required SDK report: $path" }

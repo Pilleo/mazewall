@@ -49,6 +49,7 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.NativeCloseFailure
 import io.mazewall.platform.lifecycle.OpenFlags
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.InvocationId
@@ -74,7 +75,6 @@ import io.mazewall.platform.process.JvmChildProcess
 import io.mazewall.platform.seccomp.daemon.PreludeOutcome
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.platform.seccomp.daemon.SeccompSessionHandler
-import io.mazewall.platform.socket.NativeCloseFailure
 import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
@@ -5580,7 +5580,12 @@ class ConfinedHelperRuntimeDrainTest {
                     return originalPaths.iterator()
                 }
             }
-            val policy = Policy<PolicyScope.ThreadLocalOnly, Uncompiled>(worker.policy.definition.copy(allowedFsReadPaths = blocked))
+            val definition = worker.policy.definition.copy()
+            PolicyDefinition::class.java
+                .getDeclaredField("allowedFsReadPaths")
+                .apply { isAccessible = true }
+                .set(definition, blocked)
+            val policy = Policy<PolicyScope.ThreadLocalOnly, Uncompiled>(definition)
             val generation = runtimeState(fixture.runtime).javaClass.getDeclaredField("nextGeneration").apply { isAccessible = true }
             val before = generation.getLong(runtimeState(fixture.runtime))
             val result = CompletableFuture<Throwable>()

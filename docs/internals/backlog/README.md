@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 411 | *Total Resolved Issues:* 741
+*Total Active Issues:* 403 | *Total Resolved Issues:* 782
 
-Active status detail: 409 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -71,10 +71,10 @@ into two independently implementable changes; the reducer issue follows the
 authoritative-state issue.
 
 1. [Validate profile completeness against its evidence](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md).
-2. [Validate seccomp action payloads and unify their encoding](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
-3. [Own immutable policy collections at every construction boundary](issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md).
+2. [Validate seccomp action payloads and unify their encoding](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
+3. [Own immutable policy collections at every construction boundary](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md).
 4. [Bind policy scope to validated filesystem intent](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md).
-5. [Separate installation outcome from irreversible progress](issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md).
+5. [Separate installation outcome from irreversible progress](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md).
 6. [Bind measured coverage to its observed behavior](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md).
 7. [Make orchestrator task state authoritative for persistence](issue-20261103-083002-763-make-orchestrator-task-state-the-authoritative-per.md).
 8. [Make orchestrator reducers the single pure decision path](issue-20261103-083030-072-make-orchestrator-reducers-the-single-pure-decisio.md).
@@ -136,9 +136,42 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20261110-085945-106](issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier | high | core |
-| [issue-20261110-090012-628](issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy | high | core |
-| [issue-20261110-090012-980](issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation | high | core |
+| [issue-20261121-175747-959](issue-20261121-175747-959-add-oci-container-seccomp-profile-and-no-new-privs.md) | Add OCI container seccomp profile and no_new_privs matrix integration tests for mazewall-lockdown | high | core |
+| Archived [issue-20261121-175746-741](resolved/issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown (resolved 2026-11-21) | high | core |
+| [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
+| [issue-20261120-170411-782-graalvm-native-image-backend](issue-20261120-170411-782-graalvm-native-image-backend.md) | GraalVM Native Image backend | medium | portal-runtime |
+| [issue-20261120-170411-175-older-kernel-support](issue-20261120-170411-175-older-kernel-support.md) | Older-kernel support | medium | portal-runtime |
+| [issue-20261120-170410-619-stronger-identity-isolation](issue-20261120-170410-619-stronger-identity-isolation.md) | Stronger identity isolation | medium | portal-runtime |
+| [issue-20261120-170410-059-smaller-worker-authority](issue-20261120-170410-059-smaller-worker-authority.md) | Smaller worker authority | medium | portal-runtime |
+| [issue-20261120-170352-084-strict-failure-handling](issue-20261120-170352-084-strict-failure-handling.md) | Strict failure handling | high | portal-runtime |
+| [issue-20261120-170351-749-harden-worker-artifacts](issue-20261120-170351-749-harden-worker-artifacts.md) | Harden worker artifacts | high | portal-runtime |
+| [issue-20261120-170351-396-controlled-worker-spawning](issue-20261120-170351-396-controlled-worker-spawning.md) | Controlled worker spawning | high | portal-runtime |
+| [issue-20261120-170351-066-secure-crash-recovery](issue-20261120-170351-066-secure-crash-recovery.md) | Secure crash recovery | high | portal-runtime |
+| [issue-20261120-170350-698-resource-containment](issue-20261120-170350-698-resource-containment.md) | Resource containment | high | portal-runtime |
+| [issue-20261120-170350-203-restrict-inherited-file-descriptors](issue-20261120-170350-203-restrict-inherited-file-descriptors.md) | Restrict inherited file descriptors | high | portal-runtime |
+| [issue-20261120-170313-809-secure-portal-ipc](issue-20261120-170313-809-secure-portal-ipc.md) | Secure Portal IPC | high | portal-runtime |
+| [issue-20261120-170313-531-prevent-secret-inheritance](issue-20261120-170313-531-prevent-secret-inheritance.md) | Prevent secret inheritance | high | portal-runtime |
+| [issue-20261120-170313-197-portal-process-isolation](issue-20261120-170313-197-portal-process-isolation.md) | Portal process isolation | high | portal-runtime |
+| [issue-20261120-170312-895-reliable-no-exec-protection](issue-20261120-170312-895-reliable-no-exec-protection.md) | Reliable no-exec protection | high | enforcer |
+| [issue-20261120-165855-557-verified-process-wide-seccomp](issue-20261120-165855-557-verified-process-wide-seccomp.md) | Verified process-wide Seccomp | high | enforcer |
+| [issue-20261120-151800-504](issue-20261120-151800-504-investigate-threadcloneinspector-ignoring-inspecti.md) | Investigate ThreadCloneInspector ignoring InspectionContext.allowNonThreadClone on default-ALLOW policies | low | core |
+| Archived [issue-20261120-151800-231](resolved/issue-20261120-151800-231-add-jpms-module-info-sources-javadoc-jars-lockdown.md) | Add JPMS module-info, sources/javadoc JARs, lockdown virtual-thread error message, and complete 5-syscall plus NATIVE_IMAGE kernel tests (resolved 2026-11-21) | medium | core |
+| Archived [issue-20261120-151759-970](resolved/issue-20261120-151759-970-make-processfilterinstaller-active-denied-syscall-.md) | Make ProcessFilterInstaller active denied-syscall self-verification opt-in so production startup is safe under strict outer seccomp and IDS (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-151750-281](resolved/issue-20261120-151750-281-declare-linker-option-firstvariadicarg-1-on-variad.md) | Declare Linker.Option.firstVariadicArg(1) on variadic syscall and prctl FFM downcalls (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-151750-060](resolved/issue-20261120-151750-060-reject-irreversible-runtimeprofile-relaxation-cont.md) | Reject irreversible RuntimeProfile relaxation, contradictory vararg profiles, and re-check sticky installationFailure inside processLock (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-151749-841](resolved/issue-20261120-151749-841-mark-processinstallation-and-processpolicy-interna.md) | Mark ProcessInstallation and ProcessPolicy internal constructors and accessors JvmSynthetic and validate null varargs (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-151749-547](resolved/issue-20261120-151749-547-document-exact-prctl-allowlist-clone3-enosys-fallb.md) | Document exact prctl allowlist, clone3 ENOSYS fallback, and fork/vfork scope in Mazewall lockdown 0.1.0 (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-151731-760](resolved/issue-20261120-151731-760-defer-ffm-native-initialization-in-processfilterin.md) | Defer FFM native initialization in ProcessFilterInstaller and wrap Error failures into MazewallInstallationException (resolved 2026-11-21) | high | core |
+| [issue-20261120-122411-300](issue-20261120-122411-300-mazewall-0-1-0-process-wide-lockdown-release.md) | Mazewall 0.1.0 process-wide lockdown release | high | core |
+| [issue-20261120-122430-554](issue-20261120-122430-554-phase-0-1-finish-maven-central-namespace-verificat.md) | Phase 0-1: Finish Maven Central namespace verification and close Phase 1 review items | high | core |
+| Archived [issue-20261120-122431-839](resolved/issue-20261120-122431-839-phase-2-extract-lockdown-module-and-cut-four-coupl.md) | Phase 2: Extract :lockdown module and cut four coupling seams (resolved 2026-11-21) | high | core |
+| Archived [issue-20261120-122433-169](resolved/issue-20261120-122433-169-phase-3-implement-stable-io-mazewall-lockdown-api-.md) | Phase 3: Implement stable io.mazewall.lockdown API and ABI surface gates (resolved 2026-11-21) | high | core |
+| [issue-20261120-122441-870](issue-20261120-122441-870-phase-4-verify-kernel-matrix-packaged-consumers-an.md) | Phase 4: Verify kernel matrix, packaged consumers, and independent security review | high | core |
+| Archived [issue-20261120-122442-047](resolved/issue-20261120-122442-047-phase-5-write-0-1-0-release-documentation-and-clea.md) | Phase 5: Write 0.1.0 release documentation and clean repository hygiene (resolved 2026-11-21) | high | core |
+| [issue-20261120-122442-356](issue-20261120-122442-356-phase-6-tag-v0-1-0-publish-lockdown-and-verify-rem.md) | Phase 6: Tag v0.1.0, publish :lockdown, and verify remote artifact download | high | core |
+| Archived [issue-20261110-085945-106](resolved/issue-20261110-085945-106-fix-opcode-aware-control-flow-verification-in-bpfs.md) | Fix opcode-aware control-flow verification in BpfStaticVerifier (resolved 2026-11-21) | high | core |
+| Archived [issue-20261110-090012-628](resolved/issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy (resolved 2026-11-21) | high | core |
+| Archived [issue-20261110-090012-980](resolved/issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation (resolved 2026-11-21) | high | core |
 | [issue-20261107-045431-849](issue-20261107-045431-849-preserve-executable-info-ownership-across-partial-.md) | Preserve executable-info ownership across partial map-installation failures | high | core |
 | [issue-20261105-182827-544](issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends | high | profiler |
 | [issue-20261105-182737-637](issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts | medium | platform |
@@ -148,8 +181,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-234851-768](issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) | Correct AArch64 renameat metadata before policy compilation | high | core |
 | [issue-20261103-235243-934](issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic | medium | core |
 | [issue-20261103-235244-414](issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission | high | core |
-| [issue-20261103-235244-769](issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) | Preserve descriptor close errors and pre-dispatch cleanup ownership | medium | core |
-| [issue-20261103-235245-104](issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch | medium | core |
+| Archived [issue-20261103-235245-104](resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch (resolved 2026-11-21) | medium | core |
 | [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |
 | [issue-20261103-235246-003](issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) | Serialize eventfd completion signaling with native retirement | medium | core |
 | [issue-20261103-235246-361](issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) | Repoll canceled seccomp receives without retiring a live listener | medium | core |
@@ -170,14 +202,14 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235252-265](issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
 | [issue-20261103-235252-762](issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) | Isolate cross-process signals in the required Portal worker baseline | high | portal-runtime |
 | [issue-20261103-235253-262](issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) | Retain replacement worker ownership across broker close races | high | portal-runtime |
-| [issue-20261103-235253-722](issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation | medium | portal-runtime |
-| [issue-20261103-235254-202](issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) | Dispatch legal Object-name Portal service overloads to the guest | high | portal-runtime |
-| [issue-20261103-235254-619](issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) | Preserve fatal failures during Portal declared-exception reconstruction | medium | portal-runtime |
+| Archived [issue-20261103-235253-722](resolved/issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation (resolved 2026-11-21) | medium | portal-runtime |
+| Archived [issue-20261103-235254-202](resolved/issue-20261103-235254-202-dispatch-legal-object-name-portal-service-overload.md) | Dispatch legal Object-name Portal service overloads to the guest (resolved 2026-11-21) | high | portal-runtime |
+| Archived [issue-20261103-235254-619](resolved/issue-20261103-235254-619-preserve-fatal-failures-during-portal-declared-exc.md) | Preserve fatal failures during Portal declared-exception reconstruction (resolved 2026-11-21) | medium | portal-runtime |
 | [issue-20261103-235255-089](issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) | Tie Spring lifecycle completion to physical retirement and retained dependencies | medium | spring |
 | [issue-20261103-235255-561](issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) | Complete Kotlin upgrade locks and independent optional consumer approvals | high | build |
-| [issue-20261103-235256-009](issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) | Select existing API ABI and package topology checks in required CI | medium | build |
+| Archived [issue-20261103-235256-009](resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) | Select existing API ABI and package topology checks in required CI (resolved 2026-11-21) | medium | build |
 | [issue-20261103-235256-471](issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) | Restore intended enforcer and profiler mutation target inventories | medium | build |
-| [issue-20261103-235256-949](issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) | Make the KILL_THREAD kernel oracle reject survival and setup failures | medium | core |
+| Archived [issue-20261103-235256-949](resolved/issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) | Make the KILL_THREAD kernel oracle reject survival and setup failures (resolved 2026-11-21) | medium | core |
 | [issue-20261103-235257-446](issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) | Reject benchmark throughput inconsistent with its enclosed sample clocks | medium | benchmarks |
 | [issue-20261103-235257-865](issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) | Align packaged consumer matrix deadline with owned child budgets | medium | build |
 | [issue-20261103-235258-396](issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) | Invalidate the C ABI oracle when effective native build inputs change | medium | core |
@@ -198,30 +230,31 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235401-320](issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) | Report iterative profiling exhaustion separately from convergence | medium | profiler |
 | [issue-20261103-235401-641](issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) | Distinguish failed dmesg probes from successful empty triage evidence | medium | profiler |
 | [issue-20261103-235402-001](issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) | Roll back acquired demo processes when output pump startup fails | medium | demos |
-| [issue-20261103-235911-795](issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) | Preserve Linux USER_NOTIF precedence over TRACE in policy intersection | high | core |
-| [issue-20261103-235912-106](issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) | Install effective allow-list narrowing and restrictive default escalation | high | core |
-| [issue-20261103-235912-401](issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) | Use canonical action ordering throughout installed policy planning and state | high | core |
+| Archived [issue-20261103-235911-795](resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) | Preserve Linux USER_NOTIF precedence over TRACE in policy intersection (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-235912-106](resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) | Install effective allow-list narrowing and restrictive default escalation (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-235912-401](resolved/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) | Use canonical action ordering throughout installed policy planning and state (resolved 2026-11-21) | high | core |
 | [issue-20261103-235912-625](issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) | Preserve required manual Landlock file grants and acquisition failures | medium | core |
 | [issue-20261103-235912-820](issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) | Qualify bootstrap-directory loading before synchronous profiler stack capture | medium | profiler |
 | [issue-20261103-235434-538](issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) | Diagnose supervisor helper prewarm failure in the full native gate | high | core |
 | [issue-20261103-222740-448](issue-20261103-222740-448-reject-oversized-native-trace-custom-label-counts-.md) | Reject oversized native trace custom-label counts before allocation and indexing | high | profiler |
+| Archived [issue-20261103-235244-769](resolved/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) | Irreversible close claim; full baseline build and confined lane passed | medium | core |
 | Archived [issue-20261103-180145-173](resolved/issue-20261103-180145-173-select-provenance-compatible-native-bundle-before-.md) | Current-patch compatible bundle validated before fresh grant; current-host 5000ms observation passed with safe cleanup and partial coverage, not kernel/policy qualification | high | profiler |
 | Archived [issue-20261103-124359-339](resolved/issue-20261103-124359-339-expose-validated-readiness-from-the-standalone-hot.md) | Readiness notification complete;16 host tests, scoped review and full build passed | high | core |
-| [issue-20261103-123347-795](issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) | Validate BPF inspection fragment exits before accepting termination | medium | core |
-| [issue-20261103-123359-606](issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) | Fail differential seccomp checks when simulator has no verdict | medium | core |
-| [issue-20261103-113514-264](issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md) | Make BPF verification proof immutable and enforce kernel instruction semantics | high | core |
-| [issue-20261103-113654-623](issue-20261103-113654-623-reject-x32-syscall-numbers-before-native-seccomp-p.md) | Reject x32 syscall numbers before native seccomp policy dispatch | high | core |
-| [issue-20261103-115030-497](issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md) | Preserve safe prctl argument allowances under explicit syscall denial | high | core |
+| Archived [issue-20261103-123347-795](resolved/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) | Validate BPF inspection fragment exits before accepting termination (resolved 2026-11-21) | medium | core |
+| Archived [issue-20261103-123359-606](resolved/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) | Fail differential seccomp checks when simulator has no verdict (resolved 2026-11-21) | medium | core |
+| Archived [issue-20261103-113514-264](resolved/issue-20261103-113514-264-make-bpf-verification-proof-immutable-and-enforce-.md) | Make BPF verification proof immutable and enforce kernel instruction semantics (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-113654-623](resolved/issue-20261103-113654-623-reject-x32-syscall-numbers-before-native-seccomp-p.md) | Reject x32 syscall numbers before native seccomp policy dispatch (resolved 2026-11-21) | high | core |
+| Archived [issue-20261103-115030-497](resolved/issue-20261103-115030-497-preserve-safe-prctl-argument-allowances-under-expl.md) | Preserve safe prctl argument allowances under explicit syscall denial (resolved 2026-11-21) | high | core |
 | [issue-20261103-101536-305](issue-20261103-101536-305-expose-and-validate-aggregate-portal-capacity-befo.md) | Expose and validate aggregate Portal capacity before worker startup | high | portal-runtime |
 | [issue-20261103-101536-562](issue-20261103-101536-562-qualify-portal-process-boundary-usage-safeguards-w.md) | Qualify Portal process-boundary usage safeguards with real consumers | high | portal-runtime |
 | Archived [issue-20261103-101247-569](resolved/issue-20261103-101247-569-add-a-standalone-ordinary-jvm-hotspot-observation-.md) | Add a standalone ordinary-JVM HotSpot observation example | high | core |
-| [issue-20261103-095305-625](issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin | high | portal-codegen |
-| [issue-20261103-095306-294](issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission | high | portal-codegen |
+| Archived [issue-20261103-095305-625](resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md) | Make accepted Portal byte-array and list contracts generate compilable Kotlin (resolved 2026-11-21) | high | portal-codegen |
+| Archived [issue-20261103-095306-294](resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md) | Validate complete Portal DTO shapes before source emission (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-095306-992](issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) | Fingerprint the complete versioned Portal wire schema | high | portal-codegen |
-| [issue-20261103-095307-699](issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads | high | portal-codegen |
-| [issue-20261103-095308-453](issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation | high | portal-runtime |
-| [issue-20261103-095309-136](issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) | Bound generated Portal encoding before allocation and traversal | high | portal-runtime |
-| [issue-20261103-095309-827](issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication | high | portal-codegen |
+| Archived [issue-20261103-095307-699](resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md) | Reject noncanonical and incompletely consumed generated Portal payloads (resolved 2026-11-21) | high | portal-codegen |
+| Archived [issue-20261103-095308-453](resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) | Keep Portal worker checkout owned through generated reply validation (resolved 2026-11-21) | high | portal-runtime |
+| Archived [issue-20261103-095309-136](resolved/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md) | Bound generated Portal encoding before allocation and traversal (resolved 2026-11-21) | high | portal-runtime |
+| Archived [issue-20261103-095309-827](resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md) | Reject overlapping Portal generated-output destinations before publication (resolved 2026-11-21) | high | portal-codegen |
 | [issue-20261103-085927-123](issue-20261103-085927-123-compare-warm-portal-calls-with-executor-and-persis.md) | Compare warm Portal calls with executor and persistent HTTP baselines | high | benchmarks |
 | [issue-20261103-090025-581](issue-20261103-090025-581-simplify-portal-registration-and-single-project-wo.md) | Simplify Portal registration and single-project worker packaging | high | portal-codegen |
 | [issue-20261103-090025-757](issue-20261103-090025-757-generate-typed-portal-operations-with-bounded-subm.md) | Generate typed Portal operations with bounded submit-time snapshots | high | portal-runtime |
@@ -272,7 +305,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261114-192340-328](issue-20261114-192340-328-add-a-native-only-wrapper-for-private-argument-mat.md) | Add a native-only wrapper for private argument matching | high | profiler |
 | [issue-20261114-174301-368](issue-20261114-174301-368-bind-native-open-arguments-to-the-live-publication.md) | Bind native open arguments to the live publication | high | profiler |
 | [issue-20261114-023757-094](issue-20261114-023757-094-b6-bind-authenticated-listener-authorization-to-ex.md) | B6 bind authenticated listener authorization to exact Live worker task | high | core |
-| [issue-20261112-063058-038](issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md) | Preserve expected FFM handle shape when a libc symbol is missing | high | core |
+| Archived [issue-20261112-063058-038](resolved/issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md) | Preserve expected FFM handle shape when a libc symbol is missing (resolved 2026-11-21) | high | core |
 | [issue-20261112-051312-407](issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md) | Preserve supervisor startup failure when helper shutdown also fails | high | core |
 | [issue-20261111-230615-569](issue-20261111-230615-569-bind-checked-stack-association-to-canonical-runtim.md) | Bind checked stack association to canonical runtime owner | high | core |
 | [issue-20261111-224650-335](issue-20261111-224650-335-revalidate-checked-native-stack-association-at-pro.md) | Revalidate checked native stack association at producer use | high | core |
@@ -301,7 +334,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261106-081057-933](issue-20261106-081057-933-investigate-owned-worker-scoped-socket-denial-in-n.md) | Investigate owned-worker scoped socket denial in non-root checkpoint profile | high | core |
 | [issue-20261106-081044-009](issue-20261106-081044-009-qualify-reviewed-helper-runtime-closure-for-read-o.md) | Qualify reviewed helper runtime closure for read-only shared gconv mappings | high | core |
 | [issue-20261106-035256-415](issue-20261106-035256-415-investigate-timed-out-consumer-stderr-loss-before-.md) | Investigate timed-out consumer stderr loss before evidence drain | high | core |
-| [issue-20261106-021835-047](issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md) | Assert installed no-new-privileges state in confined ancestry characterization | high | core |
+| Archived [issue-20261106-021835-047](resolved/issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md) | Assert installed no-new-privileges state in confined ancestry characterization (resolved 2026-11-21) | high | core |
 | [issue-20261106-013649-338](issue-20261106-013649-338-retain-failed-prepared-acquisition-rollback-owners.md) | Retain failed prepared acquisition rollback owners for explicit retry | high | core |
 | [issue-20261105-223351-669](issue-20261105-223351-669-preserve-prepared-resource-ownership-on-predispatc.md) | Preserve prepared resource ownership on predispatch close exceptions | high | core |
 | [issue-20261105-213712-210](issue-20261105-213712-210-retain-unobserved-confined-drain-sweep-fatal-failu.md) | Retain unobserved confined drain sweep fatal failures before replacement | high | core |
@@ -380,7 +413,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261019-203415-734](issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md) | Reuse nested Gradle TestKit caches across disposable CI checkouts | high | ci |
 | [issue-20261019-182206-556](issue-20261019-182206-556-remove-serialized-ci-validation-delay-while-preser.md) | Remove serialized CI validation delay while preserving complete gates | high | ci |
 | [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
-| [issue-20261019-093313-349](issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries | high | codegen |
+| Archived [issue-20261019-093313-349](resolved/issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries (resolved 2026-11-21) | high | codegen |
 | [issue-20261019-075429-286](issue-20261019-075429-286-qualify-portable-fresh-cache-native-boundary-check.md) | Qualify portable fresh-cache native boundary checking with explicit artifact custody | low | benchmarks |
 | [issue-20261019-073259-804](issue-20261019-073259-804-run-integration-boundary-host-controls-from-the-st.md) | Run integration-boundary host controls from the standard check task | low | benchmarks |
 | [issue-20261019-070717-313](issue-20261019-070717-313-verify-spring-thread-dispatch-with-real-owned-runt.md) | Verify Spring thread dispatch with real owned-runtime host contracts | low | testing |
@@ -395,11 +428,11 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
 | [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
 | [issue-20261028-232809-819](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) | Reject contradictory completeness in imported profile documents | high | core |
-| [issue-20261028-232810-282](issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation | high | core |
+| Archived [issue-20261028-232810-282](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation (resolved 2026-11-21) | high | core |
 | [issue-20261028-232810-687](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) | Prevent raw policy definitions from asserting invalid process scope | high | core |
-| [issue-20261028-232811-132](issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) | Freeze policy definition collections at every construction boundary | high | core |
+| Archived [issue-20261028-232811-132](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) | Freeze policy definition collections at every construction boundary (resolved 2026-11-21) | high | core |
 | [issue-20261028-232811-578](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) | Bind measured profile coverage to its observed behavior | medium | core |
-| [issue-20261028-232811-964](issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) | Reject installation receipts containing both success and failure | medium | core |
+| Archived [issue-20261028-232811-964](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) | Reject installation receipts containing both success and failure (resolved 2026-11-21) | medium | core |
 | [issue-20261028-230623-718-organize-adoption-guidance-around-explicit-securit](issue-20261028-230623-718-organize-adoption-guidance-around-explicit-securit.md) | Architecture 1: Organize adoption guidance around explicit security boundaries | high | core |
 | [issue-20261028-230730-359-publish-qualified-platform-envelopes-for-each-cont](issue-20261028-230730-359-publish-qualified-platform-envelopes-for-each-cont.md) | Architecture 2: Publish qualified platform envelopes for each containment mode | high | core |
 | [issue-20261028-230730-555-define-the-supported-operation-contract-for-owned-](issue-20261028-230730-555-define-the-supported-operation-contract-for-owned-.md) | Architecture 3: Define the supported operation contract for owned runtime integrations | high | integrations |

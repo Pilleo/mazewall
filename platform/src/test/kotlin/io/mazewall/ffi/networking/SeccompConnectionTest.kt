@@ -28,6 +28,25 @@ import io.mazewall.platform.lifecycle.ForeignFdGuard as FdGuardImport
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 @org.junit.jupiter.api.parallel.Isolated
 class SeccompConnectionTest {
+    @Test
+    fun `uncertain post-claim failure is not offered for retry`() {
+        val socket = TestFileDescriptors.adopt(987649, FileDescriptorRole.UnixSocket)
+        var attempts = 0
+        val connection = SeccompConnection.Accepted(socket).apply {
+            socketManager = object : SocketManager by unusedSocketManager() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                    attempts++
+                    check(fd.claimForClose())
+                    error("uncertain dispatch")
+                }
+            }
+        }
+        assertTrue(connection.closeWithResult() is SeccompConnection.CloseResult.Failed)
+        assertTrue(connection.retryableOwnership().isEmpty())
+        assertEquals(SeccompConnection.CloseResult.Closed, connection.closeWithResult())
+        assertEquals(1, attempts)
+    }
+
     private val ownedDescriptors = mutableListOf<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>()
 
     private fun <R : FileDescriptorRole> owned(role: R): FileDescriptor<R, FdState.Open, FdOwnership.Owned> =

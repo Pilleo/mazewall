@@ -1,8 +1,6 @@
 package io.mazewall.enforcer.state
 
 import io.mazewall.enforcer.api.PolicyDefinition
-import io.mazewall.platform.syscall.SeccompAction
-import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**
@@ -18,8 +16,6 @@ internal sealed interface ContainmentRegistryEffect {
     data class SeccompInstalled(
         val processWide: Boolean,
         val policy: PolicyDefinition<*>,
-        val blocks: Map<Syscall, SeccompAction>,
-        val defaultAction: SeccompAction,
     ) : ContainmentRegistryEffect
 
     /** Records successful or failed seccomp-engine progress after the corresponding native step. */
@@ -54,12 +50,12 @@ internal object ContainmentRegistryEffectInterpreter {
     /** Precompute thread publication before irreversible native installation. */
     fun prepare(effect: ContainmentRegistryEffect.SeccompInstalled): () -> Unit =
         if (effect.processWide) {
-            val next = ContainmentStateRegistry.processState.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction)
+            val next = ContainmentStateRegistry.processState.withAppliedFilter(effect.policy)
             val publish: () -> Unit = { publishProcessSnapshot(next) }
             publish
         } else {
             ContainmentStateRegistry.captureThreadPublication(
-                ContainmentStateRegistry.threadState.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction),
+                ContainmentStateRegistry.threadState.withAppliedFilter(effect.policy),
             )
         }
 
@@ -76,15 +72,11 @@ internal object ContainmentRegistryEffectInterpreter {
             is ContainmentRegistryEffect.SeccompInstalled ->
                 if (effect.processWide) {
                     ContainmentStateRegistry.updateProcessState {
-                        it.withNewSeccompPolicy(effect.policy, effect.blocks, effect.defaultAction)
+                        it.withAppliedFilter(effect.policy)
                     }
                 } else {
                     ContainmentStateRegistry.threadState =
-                        ContainmentStateRegistry.threadState.withNewSeccompPolicy(
-                            effect.policy,
-                            effect.blocks,
-                            effect.defaultAction,
-                        )
+                        ContainmentStateRegistry.threadState.withAppliedFilter(effect.policy)
                 }
 
             is ContainmentRegistryEffect.EngineStateUpdated ->

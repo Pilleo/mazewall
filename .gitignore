@@ -127,3 +127,5 @@ target/
 ### Local Benchmark Bundles ###
 /docs/internals/evidence/**/*.tar.gz
 /docs/internals/evidence/**/*.tar.zst
+/.codanna/
+/W/

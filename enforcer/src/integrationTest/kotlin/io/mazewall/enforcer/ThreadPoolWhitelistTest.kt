@@ -44,7 +44,7 @@ class ThreadPoolWhitelistTest : BaseIntegrationTest() {
             )
         }
 
-        // ACT_LOG still allows omitted calls; this original policy adds no new restriction.
+        // Removing WRITE changes its action from ALLOW to LOG: writes remain allowed but are audited.
         val tighterPolicy = ProcessPolicyBuilder
             .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_LOG)
@@ -52,7 +52,7 @@ class ThreadPoolWhitelistTest : BaseIntegrationTest() {
             .build()
 
         assertEquals(
-            1,
+            2,
             executor
                 .submit<Int> {
             // The original nested wrappers installed the outer policy before the inner one.
@@ -64,6 +64,16 @@ class ThreadPoolWhitelistTest : BaseIntegrationTest() {
                 }
             }
         }.get(10, TimeUnit.SECONDS),
+        )
+        assertEquals(
+            2,
+            executor
+                .submit<Int> {
+                    ContainedExecutors.installOnCurrentThread(tighterPolicy).use { receipt ->
+                        receipt.requireInstalled()
+                        ContainmentStateRegistry.threadState.filterDepth
+                    }
+                }.get(10, TimeUnit.SECONDS),
         )
         } finally {
             executor.shutdown()

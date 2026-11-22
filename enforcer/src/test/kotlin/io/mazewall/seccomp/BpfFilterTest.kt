@@ -9,6 +9,7 @@ import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
+import io.mazewall.platform.seccomp.SupervisedKind
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.Arch
@@ -728,6 +729,120 @@ class BpfFilterTest {
                     BpfFilter.build(arch, explicit)
                 }
             }
+        }
+    }
+
+    @Test
+    fun `supervisable syscall check matches SupervisedKind for every arch and syscall`() {
+        val pipeline = BpfFilter.getSyscallInspectionPipeline()
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val candidateNumbers = Syscall.entries.map { it.numberFor(arch) }.toSet() + setOf(-1, 9999)
+            for (nr in candidateNumbers) {
+                val expectedSupervisable = SupervisedKind.classify(SyscallNumber(nr), arch) != SupervisedKind.Unknown
+                val actions = mapOf(nr to SeccompAction.ACT_NOTIFY)
+                if (expectedSupervisable) {
+                    BpfFilter.buildFromActions(arch, actions, SeccompAction.ACT_ALLOW, pipeline, profilingMode = false)
+                } else {
+                    val failure = assertFailsWith<IllegalArgumentException> {
+                        BpfFilter.buildFromActions(arch, actions, SeccompAction.ACT_ALLOW, pipeline, profilingMode = false)
+                    }
+                    assertTrue(failure.message.orEmpty().contains("has no supervisor handler"))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `compiled renameat verdicts enforce explicit deny and allow on AARCH64 and AMD64`() {
+        data class RenameatCase(
+            val arch: Arch,
+            val renameatNr: Int,
+            val renameat2Nr: Int,
+            val readNr: Int,
+        )
+
+        val cases =
+            listOf(
+                RenameatCase(Arch.AARCH64, renameatNr = 38, renameat2Nr = 276, readNr = 63),
+                RenameatCase(Arch.AMD64, renameatNr = 264, renameat2Nr = 316, readNr = 0),
+            )
+        for ((arch, renameatNr, renameat2Nr, readNr) in cases) {
+            for (errno in listOf(NativeConstants.EPERM, NativeConstants.EACCES)) {
+                val explicitDenyPolicy =
+                    PolicyDefinition<PolicyScope.ProcessWideSafe>(
+                        defaultAction = SeccompAction.ACT_ALLOW,
+                        syscallActions = mapOf(Syscall.RENAMEAT to SeccompAction.ACT_ERRNO(errno)),
+                    )
+                val denyProgram = BpfFilter.build(arch, explicitDenyPolicy).instructions
+                assertEquals(
+                    NativeConstants.SECCOMP_RET_ERRNO or errno,
+                    BpfSimulator.simulate(denyProgram, renameatNr, arch),
+                    "default-ALLOW explicit deny RENAMEAT ($renameatNr) on ${arch.name}",
+                )
+                assertEquals(
+                    NativeConstants.SECCOMP_RET_ALLOW,
+                    BpfSimulator.simulate(denyProgram, renameat2Nr, arch),
+                    "RENAMEAT2 ($renameat2Nr) should remain ALLOW on ${arch.name}",
+                )
+                assertEquals(
+                    NativeConstants.SECCOMP_RET_ALLOW,
+                    BpfSimulator.simulate(denyProgram, readNr, arch),
+                    "READ ($readNr) should remain ALLOW on ${arch.name}",
+                )
+            }
+
+            val explicitAllowPolicy =
+                PolicyDefinition<PolicyScope.ProcessWideSafe>(
+                    defaultAction = SeccompAction.ACT_ERRNO(NativeConstants.EPERM),
+                    syscallActions = mapOf(Syscall.RENAMEAT to SeccompAction.ACT_ALLOW),
+                )
+            val allowProgram = BpfFilter.build(arch, explicitAllowPolicy).instructions
+            assertEquals(
+                NativeConstants.SECCOMP_RET_ALLOW,
+                BpfSimulator.simulate(allowProgram, renameatNr, arch),
+                "default-DENY explicit allow RENAMEAT ($renameatNr) on ${arch.name}",
+            )
+            assertEquals(
+                NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM,
+                BpfSimulator.simulate(allowProgram, renameat2Nr, arch),
+                "default-DENY unlisted RENAMEAT2 ($renameat2Nr) on ${arch.name}",
+            )
+
+            val built =
+                ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
+                    .block(Syscall.RENAMEAT)
+                    .build()
+                    .definition
+                    .compile(arch)
+            assertEquals(
+                NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM,
+                BpfSimulator.simulate(built.program.instructions, renameatNr, arch),
+                "ProcessPolicyBuilder block(RENAMEAT) on ${arch.name}",
+            )
+            assertEquals(
+                NativeConstants.SECCOMP_RET_ALLOW,
+                BpfSimulator.simulate(built.program.instructions, readNr, arch),
+                "ProcessPolicyBuilder block(RENAMEAT) leaves READ allowed on ${arch.name}",
+            )
+        }
+    }
+
+    @Test
+    fun `compiled filesystem-blocking presets deny renameat on AARCH64 and AMD64`() {
+        val eperm = NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EPERM
+        val presets = listOf(PolicyPresets.PURE_COMPUTE_UNSAFE, PolicyPresets.NO_EXEC_NO_FS_WRITE, PolicyPresets.DEFAULT_SAFE)
+        for (preset in presets) {
+            val aarch64Program = BpfFilter.build(Arch.AARCH64, preset).instructions
+            assertEquals(eperm, BpfSimulator.simulate(aarch64Program, 38, Arch.AARCH64))
+            assertEquals(eperm, BpfSimulator.simulate(aarch64Program, 276, Arch.AARCH64))
+            assertEquals(NativeConstants.SECCOMP_RET_ALLOW, BpfSimulator.simulate(aarch64Program, 63, Arch.AARCH64))
+
+            val amd64Program = BpfFilter.build(Arch.AMD64, preset).instructions
+            assertEquals(eperm, BpfSimulator.simulate(amd64Program, 82, Arch.AMD64))
+            assertEquals(eperm, BpfSimulator.simulate(amd64Program, 264, Arch.AMD64))
+            assertEquals(eperm, BpfSimulator.simulate(amd64Program, 316, Arch.AMD64))
+            assertEquals(NativeConstants.SECCOMP_RET_ALLOW, BpfSimulator.simulate(amd64Program, 0, Arch.AMD64))
         }
     }
 }

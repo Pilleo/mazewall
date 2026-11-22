@@ -7,8 +7,6 @@ import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
-import io.mazewall.platform.lifecycle.SyscallNumber
-import io.mazewall.platform.seccomp.SupervisedKind
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
@@ -30,6 +28,12 @@ import java.util.logging.Logger
 internal object BpfFilter {
     private val logger = Logger.getLogger(BpfFilter::class.java.name)
 
+    // Eagerly initialized so seccomp filters blocking openat never trigger comparator classloads mid-compile.
+    private val bySyscallNr = Comparator<Pair<Int, SeccompAction>> { a, b -> a.first.compareTo(b.first) }
+    private val byKernelReturnCode = Comparator<SeccompAction> { a, b ->
+        a.toKernelReturnCode().compareTo(b.toKernelReturnCode())
+    }
+
     internal const val SECCOMP_DATA_NR_OFFSET = 0
     internal const val SECCOMP_DATA_ARCH_OFFSET = 4
     private val SECCOMP_DATA_ARGS_OFFSET = Layouts.SECCOMP_DATA_ARGS_OFFSET.toInt()
@@ -38,8 +42,9 @@ internal object BpfFilter {
         arch: Arch,
         policy: PolicyDefinition<*>,
         profilingMode: Boolean = false,
+        warnOnUnsafePrctl: Boolean = true,
     ): BpfProgram<BpfStatus.Verified> {
-        if (policy.allowUnsafePrctl) {
+        if (policy.allowUnsafePrctl && warnOnUnsafePrctl) {
             // Loud acknowledgment at compile time (issue-20260726_011928_05): allowUnsafePrctl
             // permits prctl options with pointer arguments, which are inherently TOCTOU-vulnerable
             // to concurrent mutation by sibling threads after the BPF check.
@@ -121,7 +126,7 @@ internal object BpfFilter {
                 "Default ACT_NOTIFY has no supervisor handler for unknown syscalls; supervise supported syscalls explicitly"
             }
             syscallActions.forEach { (nr, action) ->
-                require(action != SeccompAction.ACT_NOTIFY || SupervisedKind.classify(SyscallNumber(nr), arch) != SupervisedKind.Unknown) {
+                require(action != SeccompAction.ACT_NOTIFY || isSupervisableSyscall(nr, arch)) {
                     "ACT_NOTIFY syscall $nr on ${arch.name} has no supervisor handler"
                 }
             }
@@ -243,43 +248,49 @@ internal object BpfFilter {
                 val argOffsetHi = argOffsetLo + 4
 
                 when (val check = inspection.check) {
-                    is ArgCheck.EqualsAny -> {
-                        val allowLabel = nextLabel("${labelPrefix}_allow")
-                        check.allowedValues.forEachIndexed { valIdx, value ->
-                            val hi = (value ushr 32).toInt()
-                            val lo = value.toInt()
+                    is ArgCheck.EqualsAny ->
+                        if (check.allowedValues.isEmpty()) {
+                            ret(ifNotMatchedNative)
+                        } else {
+                            val allowLabel = nextLabel("${labelPrefix}_allow")
+                            check.allowedValues.forEachIndexed { valIdx, value ->
+                                val hi = (value ushr 32).toInt()
+                                val lo = value.toInt()
 
-                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
-                            val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
+                                val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                                val checkLoLabel = nextLabel("${labelPrefix}_check_lo_$valIdx")
 
-                            // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
-                            loadAbsolute(argOffsetHi)
-                            // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
-                            jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
-                            mark(checkLoLabel)
-                            // A = args[i][31:0]. A match selects the inspection's matched action.
-                            loadAbsolute(argOffsetLo)
-                            jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
-                            mark(nextValLabel)
+                                // A = args[i][63:32]: cBPF can load only one 32-bit word at a time.
+                                loadAbsolute(argOffsetHi)
+                                // If the high word matches, continue with args[i][31:0]; otherwise try the next value.
+                                jumpIfEqual(hi, jt = checkLoLabel, jf = nextValLabel)
+                                mark(checkLoLabel)
+                                // A = args[i][31:0]. A match selects the inspection's matched action.
+                                loadAbsolute(argOffsetLo)
+                                jumpIfEqual(lo, jt = allowLabel, jf = nextValLabel)
+                                mark(nextValLabel)
+                            }
+                            ret(ifNotMatchedNative)
+                            mark(allowLabel)
+                            ret(ifMatchedNative)
                         }
-                        ret(ifNotMatchedNative)
-                        mark(allowLabel)
-                        ret(ifMatchedNative)
-                    }
 
-                    is ArgCheck.EqualsAny32 -> {
-                        // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
-                        val allowLabel = nextLabel("${labelPrefix}_allow")
-                        check.allowedValues.forEachIndexed { valIdx, value ->
-                            val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
-                            loadAbsolute(argOffsetLo)
-                            jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
-                            mark(nextValLabel)
+                    is ArgCheck.EqualsAny32 ->
+                        if (check.allowedValues.isEmpty()) {
+                            ret(ifNotMatchedNative)
+                        } else {
+                            // Low 32 bits of seccomp_data.args[i] (BPF_LD|BPF_W|BPF_ABS).
+                            val allowLabel = nextLabel("${labelPrefix}_allow")
+                            check.allowedValues.forEachIndexed { valIdx, value ->
+                                val nextValLabel = nextLabel("${labelPrefix}_next_$valIdx")
+                                loadAbsolute(argOffsetLo)
+                                jumpIfEqual(value, jt = allowLabel, jf = nextValLabel)
+                                mark(nextValLabel)
+                            }
+                            ret(ifNotMatchedNative)
+                            mark(allowLabel)
+                            ret(ifMatchedNative)
                         }
-                        ret(ifNotMatchedNative)
-                        mark(allowLabel)
-                        ret(ifMatchedNative)
-                    }
 
                     is ArgCheck.MaskEquals -> {
                         val maskHi = (check.mask ushr 32).toInt()
@@ -365,7 +376,7 @@ internal object BpfFilter {
         builder: BpfBuilder.Active,
         actions: List<Pair<Int, SeccompAction>>,
     ) {
-        val sortedActions = actions.sortedBy { it.first }
+        val sortedActions = actions.sortedWith(bySyscallNr)
         val actionLabels = sortedActions.map { it.second }.distinct().associateWith { builder.nextLabel("action_ret") }
         emitBst(builder, sortedActions, 0, sortedActions.size - 1, actionLabels)
         val doneLabel = builder.nextLabel("bst_done")
@@ -384,7 +395,7 @@ internal object BpfFilter {
         val groups = actions
             .groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
-            .toSortedMap(compareBy { it.toKernelReturnCode() })
+            .toSortedMap(byKernelReturnCode)
 
         for ((nativeAction, nrs) in groups) {
             for (chunk in nrs.chunked(100)) {
@@ -458,4 +469,23 @@ internal object BpfFilter {
             builder.mark(nextLabel)
         }
     }
+
+    private fun isSupervisableSyscall(
+        nr: Int,
+        arch: Arch,
+    ): Boolean =
+        nr >= 0 &&
+            (
+                nr == arch.open ||
+                    nr == arch.openat ||
+                    nr == arch.openat2 ||
+                    nr == arch.connect ||
+                    nr == arch.accept ||
+                    nr == arch.accept4 ||
+                    nr == arch.execve ||
+                    nr == arch.execveat ||
+                    nr == arch.fork ||
+                    nr == arch.vfork ||
+                    nr == arch.clone
+                )
 }

@@ -1,0 +1,32 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+kotlin {
+    jvmToolchain(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger())
+}
+
+dependencies {
+    implementation "io.mazewall:mazewall-lockdown:${providers.gradleProperty('consumerVersion').get()}"
+}
+
+tasks.register('runKotlinLockdown', JavaExec) {
+    dependsOn tasks.named('classes')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'consumer.kotlin.KotlinLockdownConsumerKt'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    def out = new ByteArrayOutputStream()
+    standardOutput = out
+    errorOutput = out
+    doLast {
+        def text = out.toString('UTF-8')
+        logger.lifecycle(text)
+        if (!text.contains('KOTLIN_LOCKDOWN_OK')) {
+            throw new GradleException("Missing KOTLIN_LOCKDOWN_OK marker:\n${text}")
+        }
+        if (text.contains('WARNING: A restricted method')) {
+            throw new GradleException("Unexpected restricted method warning in Kotlin run:\n${text}")
+        }
+    }
+}

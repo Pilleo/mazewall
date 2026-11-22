@@ -1,5 +1,8 @@
 # Vibe and Antigravity Configuration Contract
 
+> Historical document. The orchestrator and its agent adapters were removed;
+> this contract no longer describes an available integration.
+
 ## Decision
 
 Vibe and Antigravity use a split contract:

@@ -29,7 +29,7 @@ internal enum class CiCacheViolation(val explanation: String) {
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
     GO_VALIDATION("Opt-in Go tests and pinned vulnerability scanning must stay flag-gated, bounded and fail closed for both modules"),
     REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic, optional-integration, confined-helper and enabled Go validation success"),
-    PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
+    PUBLISH_GRAPH("Publication must publish only verified :lockdown after core, mutation, security, and build-logic validations succeed on a default-branch push without coupling to optional integrations"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
 }
@@ -360,7 +360,8 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
         scan.lines().map(String::trim).firstOrNull { it.startsWith("if:") } == "if: steps.filter.outputs.code == 'true'" && "verifySecuritySnapshot dependencyCheckSdk" in scan &&
         reports.lines().map(String::trim).firstOrNull { it.startsWith("if:") } == "if: steps.filter.outputs.code == 'true'" &&
         listOf("build/reports/dependency-check-report.json", "platform/build/reports/dependency-check-report.json",
-            "enforcer/build/reports/dependency-check-report.json", "profiler/build/reports/dependency-check-report.json",
+            "enforcer/build/reports/dependency-check-report.json", "lockdown/build/reports/dependency-check-report.json",
+            "profiler/build/reports/dependency-check-report.json",
             "portals/runtime/build/reports/dependency-check-report.json", "portals/worker/build/reports/dependency-check-report.json",
             "portals/codegen/build/reports/dependency-check-report.json", "set -e", "test -s \"${'$'}report\"").all { it in reports } &&
         "-Pmazewall.securitySnapshotScan=true" in scan && "--no-configuration-cache" in scan &&
@@ -396,13 +397,30 @@ internal fun securityUpdaterPolicyViolations(workflow: String): List<String> {
 private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {
     val publish = workflowJob(workflow, "publish")
     val headers = publish.substringBefore("        steps:").lines().map(String::trim)
-    val command = "publishAllPublicationsToGitHubPackagesRepository"
+    val expectedNeeds = "needs: [core-quality, mutation-tests, security-check, build-logic-validation]"
+    val verifyCommand = ":lockdown:verifyLockdownPublication"
+    val publishCommand = ":lockdown:publishMavenJavaPublicationToGitHubPackagesRepository"
+    val consumerCommand = ":lockdownConsumerCheck"
+    val consumerIndex = publish.indexOf(consumerCommand)
+    val consumerLine = publish.lines().firstOrNull { consumerCommand in it }.orEmpty()
     val defaultPush = "if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')"
     val restore = publish.substringAfter("- name: Restore Container Gradle Cache\n", "").substringBefore("\n- name: ")
-    val key = "key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.build-test-publish.outputs.container_cache_hash }}-${'$'}{{ github.sha }}"
-    return "needs: [optional-integrations, build-test-publish]" in headers && defaultPush in headers &&
+    val key = "key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.core-quality.outputs.container_cache_hash }}-${'$'}{{ github.sha }}"
+    val verifyIndex = publish.indexOf(verifyCommand)
+    val publishIndex = publish.indexOf(publishCommand)
+    return expectedNeeds in headers && defaultPush in headers &&
         headers.count { it.startsWith("needs:") } == 1 && headers.count { it.startsWith("if:") } == 1 &&
-        command in publish && Regex(command).findAll(workflow).count() == 1 &&
+        headers.none { it.startsWith("continue-on-error:") } &&
+        verifyIndex >= 0 && publishIndex > verifyIndex &&
+        consumerIndex >= 0 &&
+            verifyIndex > consumerIndex &&
+            "run_containerized_tests.sh" !in consumerLine &&
+            Regex(Regex.escape(consumerCommand)).findAll(publish).count() == 1 &&
+        Regex(Regex.escape(publishCommand)).findAll(workflow).count() == 1 &&
+        "publishAllPublicationsToGitHubPackagesRepository" !in workflow &&
+        "-PincludeSpringIntegration" !in publish &&
+        "-PincludeKoogIntegration" !in publish &&
+        "-PkoogBootstrap" !in publish &&
         "container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}" in main &&
         "container_cache_hash: ${'$'}{{ needs.core-quality.outputs.container_cache_hash }}" in join &&
         restore.lines().map(String::trim).filter { it.startsWith("key: ") } == listOf(key)

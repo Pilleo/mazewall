@@ -22,6 +22,15 @@ internal fun installationState(processWide: Boolean): io.mazewall.enforcer.state
             .resolveCurrentState()
     }
 
+internal fun scopeLandlockApplied(processWide: Boolean): Boolean =
+    (
+        if (processWide) {
+            io.mazewall.enforcer.state.ContainmentStateRegistry.processState
+        } else {
+            io.mazewall.enforcer.state.ContainmentStateRegistry.threadState
+        }
+    ).landlockPolicy != null
+
 /** Fallback is selected once. Applied-stage marks are written only by successful native-stage publication. */
 internal class InstallationAttempt(
     private val processWide: Boolean,
@@ -34,7 +43,6 @@ internal class InstallationAttempt(
     val fallback get() = environment.fallback
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
-    var failure: Throwable? = null
     var cetLocked: Boolean = false
     var cetOutcome: CetOutcome = CetOutcome.NOT_REQUESTED
 

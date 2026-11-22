@@ -62,7 +62,7 @@ dynamic control-flow validation must still check the emitted fragment.
 Acceptance: the escaping-label example fails, valid multi-branch inspections pass,
 and existing foreign/stale-token, label-ownership and immutable-prefix regressions
 remain green. Track in the
-[fragment-exit issue](../backlog/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md).
+[fragment-exit issue](../backlog/resolved/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md).
 
 ### 2. Differential verification silently drops a missing verdict
 
@@ -74,7 +74,7 @@ the input and program attached; it cannot count as agreement.
 Acceptance: a no-RET input produces an assertion failure naming the probe; valid
 allow/deny cases still reach their kernel checks. Preserve the explicit benign
 probe restrictions. Track in the
-[missing-verdict issue](../backlog/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md).
+[missing-verdict issue](../backlog/resolved/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md).
 
 ## Validation improvements
 

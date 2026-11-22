@@ -226,7 +226,7 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                 assert !extension.autoUpdate.get() : 'Scan extension must not update'
                 assert !scanner.autoUpdate.get() : 'Actual scan task must not update'
                 assert scanner.taskDependencies.getDependencies(scanner).any { it.name == 'verifySecuritySnapshot' }
-                def selected = [':', ':platform', ':enforcer', ':profiler', ':portals:runtime', ':portals:worker', ':portals:codegen']
+                def selected = [':', ':platform', ':enforcer', ':lockdown', ':profiler', ':portals:runtime', ':portals:worker', ':portals:codegen']
                 def excludedRoots = [':demos', ':integrations', ':tools']
                 def actualSdk = root.allprojects.findAll { child ->
                     !excludedRoots.any { excluded -> child.path == excluded || child.path.startsWith(excluded + ':') }
@@ -275,7 +275,7 @@ public final class SecuritySnapshotVerificationFunctionalTest {
         var scheduled = sdkGraph.lines().map(String::trim).filter(line -> line.startsWith(":") && line.endsWith(" SKIPPED"))
             .map(line -> line.substring(0, line.indexOf(' '))).toList();
         var expectedOrder = java.util.List.of(":verifySecuritySnapshot", ":dependencyCheckAnalyze", ":platform:dependencyCheckAnalyze",
-            ":enforcer:dependencyCheckAnalyze", ":profiler:dependencyCheckAnalyze", ":portals:runtime:dependencyCheckAnalyze",
+            ":enforcer:dependencyCheckAnalyze", ":lockdown:dependencyCheckAnalyze", ":profiler:dependencyCheckAnalyze", ":portals:runtime:dependencyCheckAnalyze",
             ":portals:worker:dependencyCheckAnalyze", ":portals:codegen:dependencyCheckAnalyze", ":dependencyCheckSdk");
         int previous = -1;
         for (String expected : expectedOrder) {

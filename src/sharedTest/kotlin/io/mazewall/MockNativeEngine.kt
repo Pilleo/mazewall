@@ -168,8 +168,9 @@ internal open class MockNativeFileSystem : NativeFileSystem {
     ) = fd.ebadfUnlessMmapBacking() ?: mmapResult
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) =
-        fd.ebadfUnlessLive() ?: run {
-            fd.retireForClose()
+        if (!fd.claimForClose()) {
+            LinuxNative.SyscallResult.Error(io.mazewall.ffi.NativeConstants.EBADF, -1L)
+        } else {
             onClose(fd)
         }
 }

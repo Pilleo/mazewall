@@ -195,4 +195,121 @@ class BpfVerificationBoundaryTest {
             )
         }
     }
+
+    @Test
+    fun `syscall expectation rejects escaping outer labels and leaked inner labels`() {
+        // Exact BPF-08 escaping-label witness: matched path jumps out to ALLOW while unreachable RET terminates block.
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                val escape = createLabel("escape")
+                expect(123) {
+                    jmp(escape)
+                    deny(1)
+                }
+                mark(escape)
+                allow()
+            }
+        }
+
+        // Conditional jump from an expect fragment to an outer label is also rejected.
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                val escape = createLabel("cond_escape")
+                expect(123) {
+                    loadAbsolute(16)
+                    jumpIfEqual(0, jt = escape)
+                    deny(1)
+                }
+                mark(escape)
+                allow()
+            }
+        }
+
+        // Marking an outer label inside expect is rejected.
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                val outer = createLabel("outer")
+                expect(123) {
+                    mark(outer)
+                    deny(1)
+                }
+                allow()
+            }
+        }
+
+        // Leaking a fragment-local label outside expect is rejected for both mark and jump.
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                lateinit var leaked: BpfLabel
+                expect(123) {
+                    leaked = createLabel("inner")
+                    deny(1)
+                }
+                jmp(leaked)
+                allow()
+            }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                lateinit var leaked: BpfLabel
+                expect(123) {
+                    leaked = createLabel("inner")
+                    deny(1)
+                }
+                mark(leaked)
+                allow()
+            }
+        }
+
+        // Unreachable trailing RET inside expect cannot supply the termination token.
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                expect(123) {
+                    allow()
+                    deny(1)
+                }
+                allow()
+            }
+        }
+
+        assertFailsWith<IllegalArgumentException> {
+            BpfProgram.dsl(Arch.AMD64) {
+                expect(123) {
+                    val target = createLabel("local_skip")
+                    jmp(target)
+                    deny(1)
+                    mark(target)
+                    allow()
+                }
+                allow()
+            }
+        }
+    }
+
+    @Test
+    fun `syscall expectation accepts valid multi-branch local inspections`() {
+        val program =
+            BpfProgram.dsl(Arch.AMD64) {
+                expect(123) {
+                    val checkLo = createLabel("check_lo")
+                    val denyBranch = createLabel("deny")
+                    val allowBranch = createLabel("allow")
+                    loadAbsolute(20)
+                    jumpIfEqual(0, jt = checkLo, jf = denyBranch)
+                    mark(checkLo)
+                    loadAbsolute(16)
+                    jumpIfEqual(42, jt = allowBranch, jf = denyBranch)
+                    mark(denyBranch)
+                    deny(1)
+                    mark(allowBranch)
+                    allow()
+                }
+                allow()
+            }
+
+        BpfStaticVerifier.verify(program)
+        assertEquals(0x7fff0000, BpfSimulator.simulate(program.instructions, 123, Arch.AMD64.audit, longArrayOf(42L)))
+        assertEquals(0x00050001, BpfSimulator.simulate(program.instructions, 123, Arch.AMD64.audit, longArrayOf(7L)))
+        assertEquals(0x7fff0000, BpfSimulator.simulate(program.instructions, 124, Arch.AMD64.audit, longArrayOf(7L)))
+    }
 }

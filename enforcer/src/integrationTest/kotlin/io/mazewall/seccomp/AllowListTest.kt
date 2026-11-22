@@ -5,6 +5,9 @@ import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.NeedsFreshJvm
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.engine.FilterInstallationPlanner
+import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.enforcer.state.ContainmentRegistryEffect
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
@@ -134,6 +137,156 @@ LinuxNative.raw.syscall(
                         if (result !is LinuxNative.SyscallResult.Error || result.errno != 1) {
                             throw IllegalStateException("Expected EPERM (1) for mmap(PROT_EXEC), got $result")
                         }
+                    }
+                }.get()
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private fun preWarmNarrowing(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
+        preWarm()
+        FilterInstallationPlanner.PlanDecision.AlreadySatisfied.toString()
+        val sampleState = ContainerState()
+        for (policy in policies) {
+            FilterInstallationPlanner.plan(policy.definition, sampleState)
+            ContainmentRegistryEffect.SeccompInstalled(false, policy.definition)
+        }
+        val arch = Arch.current()
+        LinuxNative.raw.syscall(
+            arch.getppid.toLong(),
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+        )
+        LinuxNative.raw.syscall(
+            arch.getuid.toLong(),
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+            NativeArg.NullArg,
+        )
+    }
+
+    @Test
+    fun `ALLOW_LIST narrowing denies removed syscall in the kernel`() {
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            pool
+                .submit {
+                    val withGetppid =
+                        ProcessPolicyBuilder
+                            .allowList(RuntimeProfile.HOTSPOT_JIT)
+                            .allow(Syscall.GETPPID)
+                            .build()
+                    val withoutGetppid =
+                        ProcessPolicyBuilder
+                            .allowList(RuntimeProfile.HOTSPOT_JIT)
+                            .build()
+                    preWarmNarrowing(withGetppid, withoutGetppid)
+
+                    ContainedExecutors.installOnCurrentThread(withGetppid).requireInstalled()
+                    val arch = Arch.current()
+                    val allowedResult =
+                        LinuxNative.raw.syscall(
+                            arch.getppid.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
+                    if (allowedResult !is LinuxNative.SyscallResult.Success || allowedResult.value <= 0) {
+                        throw IllegalStateException("Expected GETPPID to succeed after first allowList install, got $allowedResult")
+                    }
+
+                    val controlDenied =
+                        LinuxNative.raw.syscall(
+                            arch.getuid.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
+                    if (controlDenied !is LinuxNative.SyscallResult.Error || controlDenied.errno != 1) {
+                        throw IllegalStateException("Expected GETUID control to fail with EPERM (1), got $controlDenied")
+                    }
+
+                    ContainedExecutors.installOnCurrentThread(withoutGetppid).requireInstalled()
+                    val narrowedDenied =
+                        LinuxNative.raw.syscall(
+                            arch.getppid.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
+                    if (narrowedDenied !is LinuxNative.SyscallResult.Error || narrowedDenied.errno != 1) {
+                        throw IllegalStateException("Expected removed GETPPID to fail with EPERM (1), got $narrowedDenied")
+                    }
+                }.get()
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `LOG default to ERRNO default escalation with identical ALLOW set denies in the kernel`() {
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            pool
+                .submit {
+                    val logDefault =
+                        ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.HOTSPOT_JIT)
+                            .defaultAction(SeccompAction.ACT_LOG)
+                            .allow(*jvmFloor())
+                            .build()
+                    val errnoDefault =
+                        ProcessPolicyBuilder
+                            .allowList(RuntimeProfile.HOTSPOT_JIT)
+                            .build()
+                    preWarmNarrowing(logDefault, errnoDefault)
+
+                    ContainedExecutors.installOnCurrentThread(logDefault).requireInstalled()
+                    val arch = Arch.current()
+                    val loggedSuccess =
+                        LinuxNative.raw.syscall(
+                            arch.getppid.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
+                    if (loggedSuccess !is LinuxNative.SyscallResult.Success || loggedSuccess.value <= 0) {
+                        throw IllegalStateException("Expected GETPPID to succeed under ACT_LOG default, got $loggedSuccess")
+                    }
+
+                    ContainedExecutors.installOnCurrentThread(errnoDefault).requireInstalled()
+                    val deniedAfterEscalation =
+                        LinuxNative.raw.syscall(
+                            arch.getppid.toLong(),
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                            NativeArg.NullArg,
+                        )
+                    if (deniedAfterEscalation !is LinuxNative.SyscallResult.Error || deniedAfterEscalation.errno != 1) {
+                        throw IllegalStateException("Expected GETPPID to fail with EPERM (1) after LOG->ERRNO escalation, got $deniedAfterEscalation")
                     }
                 }.get()
         } finally {

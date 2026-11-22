@@ -7,12 +7,15 @@ import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 
 class OpenGrantedReadTest {
     @Test
@@ -44,6 +47,32 @@ class OpenGrantedReadTest {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         assertThrows(IllegalStateException::class.java) {
             openGrantedRead(root, "../passwd")
+        }
+    }
+
+    @Test
+    fun `writerless FIFO is rejected without blocking while regular file clears O_NONBLOCK`(
+        @TempDir root: Path,
+    ) {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val fifo = root.resolve("input.fifo")
+        val mkfifo = ProcessBuilder("mkfifo", fifo.toString()).redirectErrorStream(true).start()
+        assertTrue(mkfifo.waitFor(5, TimeUnit.SECONDS))
+        assertEquals(0, mkfifo.exitValue())
+
+        val error =
+            assertThrows(IllegalArgumentException::class.java) {
+                openGrantedRead(root, "input.fifo")
+            }
+        assertEquals("granted path is not a regular file: input.fifo", error.message)
+
+        val regular = root.resolve("input.txt")
+        Files.writeString(regular, "ok")
+        openGrantedRead(root, "input.txt").use { capability ->
+            capability.borrow { fd ->
+                val flags = LinuxNative.raw.fcntl(fd, io.mazewall.ffi.NativeConstants.F_GETFL, 0L).getOrThrow("getfl")
+                assertEquals(0L, flags and io.mazewall.ffi.NativeConstants.O_NONBLOCK)
+            }
         }
     }
 }

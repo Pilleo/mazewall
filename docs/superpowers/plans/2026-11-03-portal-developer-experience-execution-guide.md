@@ -233,7 +233,7 @@ Use only changed modules while iterating; use `./gradlew build` at completion.
 
 **Read first:** `PortalStubGenerator.kt` type mapping and the existing generated-source
 round-trip case in `PortalCodegenFunctionalTest.kt`. Exact paths are in
-[CG01](../../internals/backlog/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md).
+[CG01](../../internals/backlog/resolved/issue-20261103-095305-625-make-accepted-portal-byte-array-and-list-contracts.md).
 
 - [ ] Add the following Java interface to a compiler-backed fixture and generate
   **both** host and worker sources without hand edits:
@@ -267,29 +267,32 @@ source string contains `ByteArray`. Wire bytes and existing IDs remain unchanged
 ## CG02 — Complete validated DTO shapes
 
 **Read first:** `BoundaryTypes.kt`, `PortalServiceSchema.kt`,
-`ResolvedPortalContract.kt` and [CG02](../../internals/backlog/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
+`ResolvedPortalContract.kt` and [CG02](../../internals/backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
 
-- [ ] Add three separate fixtures: an abstract DTO, a Kotlin nullable DTO member,
+- [x] Add three separate fixtures: an abstract DTO, a Kotlin nullable DTO member,
   and `record Names(java.util.List<String> values)`. Record whether each currently
   reaches emission, fails compilation, or loses its generic member information.
-- [ ] Resolve generic types and member nullability before emission. Walk records,
+- [x] Resolve generic types and member nullability before emission. Walk records,
   constructor parameters and readable fields/accessors using their actual generic
   metadata, not just erased `Class` values.
-- [ ] Validate both directions: host/worker must be able to read each component and
+- [x] Validate both directions: host/worker must be able to read each component and
   construct the resulting value legally. Cover inaccessible enclosing classes,
   abstract classes, recursive shapes and unresolved type variables.
-- [ ] Keep copied values, direct inbound capabilities/snapshots and result-only
+- [x] Keep copied values, direct inbound capabilities/snapshots and result-only
   Unit distinct in the validated model. Invalid combinations must not be a pair
   of contradictory flags that downstream code is expected to remember to reject.
-- [ ] For unsupported nullable/nested shapes, reject with a path such as
+- [x] For unsupported nullable/nested shapes, reject with a path such as
   `Service.parse parameter request field customer.name`; do not invent a new wire
   representation. Never execute a getter or constructor while validating its shape.
-- [ ] Compile/round-trip accepted fixtures; negative fixtures must fail resolution
+- [x] Compile/round-trip accepted fixtures; negative fixtures must fail resolution
   before output publication and leave the previous complete generation intact.
 
 ```bash
 ./gradlew :portals:codegen:test --tests '*ResolvedPortalContractTest' --tests '*PortalStubGeneratorTest' --tests '*PortalCodegenFunctionalTest'
 ```
+
+**Resolved:** 2026-11-21 — all fixtures implemented and passing. See
+[resolved issue](../../internals/backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md).
 
 **Done when:** Every fixture is explicitly supported and executable or rejected at
 resolution with the correct field path. No accepted shape becomes an erased guess.
@@ -329,7 +332,7 @@ is not authorized without the separate compatibility decision specified by CG03.
 ## CG04 — Strict decoding
 
 **Read first:** `PortalCodec.Reader`, generated host/dispatcher decoding and
-[CG04](../../internals/backlog/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md).
+[CG04](../../internals/backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md).
 
 Use one known-good payload for each shape, then change only the indicated property:
 
@@ -364,21 +367,21 @@ not this parser-only card, proves the offending worker cannot be reused.
 ## CG05 — Validation-owned checkout
 
 **Read first:** `ProcessBroker.kt`, `PortalBrokerCallMachine.kt`,
-`PortalStatefulInvocationGate.kt` and [CG05](../../internals/backlog/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md).
+`PortalStatefulInvocationGate.kt` and [CG05](../../internals/backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md).
 
-- [ ] Begin with a **real child** returning a matching success frame/header but a
+- [x] Begin with a **real child** returning a matching success frame/header but a
   generated body that CG04 rejects. A wrong sequence number or stale generation is
   insufficient: those already exercise a different broker check.
-- [ ] Record the exact worker identity. Pause generated reply validation, submit a
+- [x] Record the exact worker identity. Pause generated reply validation, submit a
   competing call, and prove the same checkout cannot become available while
   validation is incomplete. Use a test barrier, not a guessed sleep.
-- [ ] Move the release/failed-checkout decision into the existing broker call
+- [x] Move the release/failed-checkout decision into the existing broker call
   lifecycle around generated validation. Keep only the narrow bridge needed by
   generated classes in external artifacts. Do not change raw public invoke behavior.
-- [ ] On malformed reply, retire that exact worker. Singleton later calls reject
+- [x] On malformed reply, retire that exact worker. Singleton later calls reject
   without entry; stateless capacity may replace according to existing policy, but
   the failed invocation is never replayed.
-- [ ] Add controls for valid replies, completed business exceptions and trusted host
+- [x] Add controls for valid replies, completed business exceptions and trusted host
   constructor failures, plus cancellation/close while validation is held. Assert
   original failure identity and separate physical cleanup accounting.
 
@@ -393,20 +396,20 @@ observed. The earlier source review alone does not close this issue.
 ## CG06 — Bounded encoding before allocation
 
 **Read first:** Current encode concatenation in `PortalStubGenerator.kt`,
-`PortalCodec.kt` and [CG06](../../internals/backlog/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md).
+`PortalCodec.kt` and [CG06](../../internals/backlog/resolved/issue-20261103-095309-136-bound-generated-portal-encoding-before-allocation-.md).
 
-- [ ] Reproduce a 16,385-element collection and an over-limit reply. Then use a small
+- [x] Reproduce a 16,385-element collection and an over-limit reply. Then use a small
   configured byte limit to make routine tests fast; do not attempt to cause an OOM.
-- [ ] Add counting getters/iterators and allocation/growth observations at existing
+- [x] Add counting getters/iterators and allocation/growth observations at existing
   test seams. The rejection must occur before over-budget growth or unnecessary
   element traversal, not after an oversized array has already been created.
-- [ ] Implement one shared bounded writer (`PortalRequestWriter.kt` is the planned
+- [x] Implement one shared bounded writer (`PortalRequestWriter.kt` is the planned
   file). Before writing/growing, use checked length/count arithmetic. Bound the
   aggregate nested value, not just every individual field. Account for UTF-8 bytes,
   prefixes, scratch storage and ownership-transfer copies.
-- [ ] Use it in existing synchronous request **and worker-reply** encoding. P03 later
+- [x] Use it in existing synchronous request **and worker-reply** encoding. P03 later
   owns submission/admission integration; it must reuse this writer, not add another.
-- [ ] Compare valid old/new wire bytes at empty, exact-limit and nested boundaries.
+- [x] Compare valid old/new wire bytes at empty, exact-limit and nested boundaries.
   Test limit-plus-one, numeric overflow and a user getter that throws. A user getter
   can itself block/allocate; library bounds do not make arbitrary host code safe.
 
@@ -421,7 +424,7 @@ bytes stay compatible. A late frame-size assertion is not a memory bound.
 ## CG07 — Disjoint output publication
 
 **Read first:** `GeneratedOutputPublisher` in `PortalCodegenPlugin.kt` and
-[CG07](../../internals/backlog/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md).
+[CG07](../../internals/backlog/resolved/issue-20261103-095309-827-reject-overlapping-portal-generated-output-destina.md).
 
 - [ ] Create old-generation sentinel files in an owned temporary fixture. Publish
   `output/child` followed by `output`; reverse that order in a second test. The

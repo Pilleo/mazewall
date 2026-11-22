@@ -310,7 +310,7 @@ public data class Arch(
                 mkdirat = 34,
                 rmdir = -1,
                 rename = -1,
-                renameat = -1,
+                renameat = 38,
                 renameat2 = 276,
                 link = -1,
                 linkat = 37,

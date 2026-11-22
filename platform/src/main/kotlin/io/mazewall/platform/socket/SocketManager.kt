@@ -39,12 +39,6 @@ internal interface SocketManager {
     ): Boolean
 }
 
-/** A native close result failed; the integer may already be reused and must never be retried. */
-@io.mazewall.platform.lifecycle.MazewallInternal
-internal class NativeCloseFailure internal constructor(
-    message: String,
-) : IllegalStateException(message)
-
 /**
  * Real implementation of [SocketManager] using [LinuxNative].
  */

@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 HOOK="$SCRIPT_DIR/../hooks/pre-commit"
+CONFINED_BUILD_LANE="$SCRIPT_DIR/../confined_build_lane.sh"
 # The test itself may be invoked from a hook. Never let that context reach fixtures.
 GIT_LOCAL_NAMES=$(git rev-parse --local-env-vars)
 for name in $GIT_LOCAL_NAMES; do
@@ -50,6 +51,8 @@ run_case() {
   git -C "$case_dir/original" add baseline.txt
   git -C "$case_dir/original" commit -q -m baseline
   git -C "$case_dir/original" worktree add -q -b hook-task "$case_dir/worktree"
+  mkdir -p "$case_dir/worktree/scripts"
+  cp "$CONFINED_BUILD_LANE" "$case_dir/worktree/scripts/"
   git init -q --initial-branch=main "$case_dir/foreign"
   printf 'foreign baseline\n' > "$case_dir/foreign/baseline.txt"
   git -C "$case_dir/foreign" add baseline.txt
@@ -204,6 +207,7 @@ run_confined_case() {
   local label=$1 mode=$2 runner_status=$3
   local case_dir="$FIXTURE/$label" status
   mkdir -p "$case_dir/hooks" "$case_dir/repo/scripts" "$case_dir/repo/infra/dev" "$case_dir/repo/gradle/wrapper" "$case_dir/bin"
+  cp "$CONFINED_BUILD_LANE" "$case_dir/repo/scripts/"
   git init -q --initial-branch=main "$case_dir/repo"
   printf 'baseline\n' > "$case_dir/repo/baseline.txt"
   printf 'include(":enforcer")\ninclude(":portals:runtime")\n' > "$case_dir/repo/settings.gradle.kts"

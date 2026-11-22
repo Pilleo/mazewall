@@ -53,7 +53,7 @@ Evidence: [diagnosis](2026-10-05-hotspot-interpreter-performance-evidence.md),
 - Physical drain, selected-stream accounting, whole-session collection and policy eligibility remain separate. Policy coverage stays incomplete for selected openat evidence.
 - Never install seccomp from a virtual thread or change JVM coordination syscall floors; do not touch GITHUB_TOKEN.
 - Native builds remain optional, reproducible and operator-invoked; no startup compiler/download/sudo or registry fallback.
-- Preserve user work, scope commits to the relevant backlog item and use the orchestrator-managed review path; no default-branch push.
+- Preserve user work, scope commits to the relevant backlog item and use pull request review; no default-branch push.
 
 ## Decomposition and order
 

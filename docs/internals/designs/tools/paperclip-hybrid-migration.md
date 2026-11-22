@@ -1,5 +1,8 @@
 # Paperclip Hybrid Loop — Operator Guide & Migration Path
 
+> Historical document. The orchestrator and its Paperclip integration were removed;
+> the commands and operational guidance below no longer apply to this checkout.
+
 > Status (2026-08-24, evening): **All loop logic is Kotlin** (`HybridSupervisor` in
 > `:tools:orchestrator`). The Python bridge is retired; `run_paperclip_loop.sh` is a
 > thin serialized launcher over ingest + supervisor tick.
