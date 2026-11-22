@@ -36,7 +36,7 @@ with explicit pruning for `.git`, `.gradle`, generated `build` directories and
 globs must not force traversal of private/generated state. Checkout-local VCS
 ignore rules exclude untracked scratch; ripgrep config, `.ignore`, global and
 parent ignore rules cannot hide normal source. There are no integration, test or
-orchestrator source-folder exclusions.
+source-folder exclusions for removed modules.
 
 In a Git checkout root, its default read-only Git index augments discovery so
 tracked source is checked even when ignore rules match (including a tracked
@@ -532,8 +532,8 @@ credential bindings; it does not rerun host quality checks as another gate.
 
 Superseded PR runs cancel within their PR-specific concurrency group. Push events
 use unique run-ID groups and do not cancel or replace separate release runs.
-Serial merge handling remains with the existing operator/orchestrator control
-plane. Fresh native tests remain uncached; parallel scheduling and cached build
+Serial merge handling remains the operator's responsibility. Fresh native tests
+remain uncached; parallel scheduling and cached build
 inputs must not be described as reuse of old native pass results. Measure actual
 hosted job overlap and durations before claiming an end-to-end speed improvement.
 Hosted acceptance needs a cold and an unchanged-head warm run with independent
@@ -693,13 +693,16 @@ this is a cooperative test harness, not an arbitrary-process containment boundar
 `unitCheck` is the fast host-safe development gate. `./gradlew build` is the full
 completion gate for included modules: formatting, lint/static analysis, tests,
 and configured coverage thresholds. Its task graph already selects kernel and
-fresh-JVM integration suites. Select owning-module integration tasks for focused
-iteration, or use `./scripts/run_containerized_tests.sh kernelCheck` as the containerized test runner;
+fresh-JVM integration suites. On a Linux host without `CAP_CHECKPOINT_RESTORE`,
+run `./gradlew build` from the checkout root to run the baseline on the host and
+the confined tests through the project's rootful Docker runner. Both must pass.
+An explicit `-PmazewallKernelLane` selects just that Gradle lane. Select
+owning-module integration tasks for focused iteration, or use
+`./scripts/run_containerized_tests.sh kernelCheck` as the containerized test runner;
 equivalent test commands are alternatives, not additional gates after a successful
 full build. The container runner requires a usable configured Podman or Docker
 engine. A missing runner or failed kernel test is recorded as a failed/unavailable
-gate, never as passing coverage. Include `-PincludeOrchestrator=true` when verifying
-orchestrator changes. Documentation-only changes require reference/link checks,
+gate, never as passing coverage. Documentation-only changes require reference/link checks,
 `git diff --check`, and backlog validation; executable or build-wiring changes
 require their focused tests and final build.
 The runner requests an init/reaper

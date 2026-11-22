@@ -29,7 +29,7 @@ Go overlay documentation was retrieved for Go1.26.7; check the installed Go1.26.
 - Physical drain, selected-stream accounting, whole-session collection and policy eligibility remain separate. Policy coverage stays incomplete for selected openat evidence.
 - Never install seccomp from a virtual thread or change JVM coordination syscall floors; do not touch GITHUB_TOKEN.
 - Native builds remain optional, reproducible and operator-invoked; no startup compiler/download/sudo or registry fallback.
-- Preserve user work, scope commits to the relevant backlog item and use the orchestrator-managed review path; no default-branch push.
+- Preserve user work, scope commits to the relevant backlog item and use pull request review; no default-branch push.
 - Native enrichment workers4, pending events1024, pending payload16MiB, producer LRU256, frame cache16384, frame data3072words and perf data524288bytes/possible CPU remain fixed.
 
 ## A: Reuse the generation check that already exists

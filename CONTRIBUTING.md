@@ -61,7 +61,7 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 ./gradlew build
 ```
 
-The full build already selects kernel and fresh-JVM suites for included modules; equivalent iteration commands need not be repeated after that gate. For orchestrator work, use `./gradlew build -PincludeOrchestrator=true`. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
+The full build already selects kernel and fresh-JVM suites for included modules; equivalent iteration commands need not be repeated after that gate. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
 
 Complete root `check`, `mergeCheck` and `build` also require `buildLogicCheck`
 before other selected project work. BuildSrc compilation still occurs as needed,
