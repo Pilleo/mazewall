@@ -14,7 +14,7 @@ How do we contain things today? Mostly with containers. Could we improve contain
 
 It is an open specification in development for describing what your application is intended to do at runtime. For example, we could tighten our container policies with SBoB. Kubescape already uses eBPF to observe workload behavior and alert on deviations from the profile, while Tetragon and KubeArmor show that similar policies can be enforced inline.
 
-You may ask why it would be better with SBoB if all the tech under the hood stays the same. At this point containers give your apps a fence that is larger than your app needs to work. A standard container gives even a tiny service access to an entire Linux userland—the simpler your app, the more unnecessary OS surface you are leaving exposed. And with SBoB you could make a perfect list of all operations that your app requires. Anything outside of this list is not expected behavior and should be blocked and alerted on immediately and deterministically (given you can prove you have perfect profiling coverage of all executable code of your app—a hard problem by itself, but that is exactly what MazeWall is about). SBoB turns this fence into a straitjacket.
+You may ask why it would be better with SBoB if all the tech under the hood stays the same. A container’s fence can be much larger than the service needs. A thumbnail worker that reads and writes local files has no reason to open an outbound connection. If its policy allows one, compromised code can send the original photos elsewhere without escaping the container. And with SBoB you could make a perfect list of all operations that your app requires. Anything outside of this list is not expected behavior and should be blocked and alerted on immediately and deterministically (given you can prove you have perfect profiling coverage of all executable code of your app—a hard problem by itself, but that is exactly what MazeWall is about). SBoB turns this fence into a straitjacket.
 
 But it’s still early days for SBoB, and we cannot really enforce things with it yet. We already have mature tools that can isolate our apps, though. [Bubblewrap](https://github.com/containers/bubblewrap) and [nsjail](https://nsjail.dev/) wrap the command that starts your app and apply restrictions before it runs, so their seccomp policy must still allow the startup itself (`execve`, dynamic linker, JVM bootstrap). An important benefit is that they are language agnostic.
 
@@ -32,27 +32,25 @@ A process-wide seccomp baseline can be synchronized across existing threads, and
 
 We can give a logical module its own restricted process or thread, bringing security and logic scopes closer. But a restricted thread still shares memory with other threads in the process. If a vulnerability lets it corrupt that heap, other threads can be affected too. A separate process is therefore the stronger isolation boundary. Browsers use processes for isolation for the same reason. We could do something similar in the backend by moving processing of untrusted data into a separate process. To make that practical, we would need language-specific tools that make working with processes almost as easy as working with threads, as right now that is not straightforward at all. Namespaces and cgroups fit naturally into this separate-process model.
 
-## Replaying Java4Shell: Single Process vs. Isolated Worker
-
-Now, let's replay Java4Shell under two models—a hardened single-process JVM and an isolated-worker design—to see what actually survives.
+## What could a compromised parser reach?
 
 Let's first assume that we have our app in one process—the usual case today.
 
 Suppose an attacker has already gained code execution inside our JVM. If their payload depends on running a shell or another executable, we can block that step. Elasticsearch and OpenSearch have done this on Linux for years by installing seccomp filters during startup. The denied launch returns a permission error. We can alert on that failure if we monitor it. Bubblewrap or nsjail can give you similar results for any language, along with more features.
 
-But what if the attacker’s goal is to read a secret already in the JVM heap? Most likely we are out of luck in that case. Stripping unused code or restricting syscalls by process, thread, or even Java stack trace (allowing only specific methods to invoke sensitive syscalls) raises the bar—but against heap theft, that still relies on luck. The attacker may not need any new syscalls at all, and an exploit can often hop onto unrestricted platform threads, which also sidesteps the file and network restrictions.
+But what if the attacker’s goal is to read a secret already in the JVM heap? Most likely we are out of luck in that case. Stripping unused code or restricting syscalls by process, thread, or even Java stack trace (allowing only specific methods to invoke sensitive syscalls) raises the bar—but against heap theft, that still relies on luck. The attacker may not need any new syscalls at all. If they can make another platform thread act on their behalf, they may gain its broader file and network permissions, still subject to the process-wide baseline.
 
-Now, let's assume we have divided an app into several processes. All the parsing is done in one process, and business logic is in another. The parser can receive input and return results over a bounded channel, with no need for direct access to application secrets, arbitrary files, or the network. A process policy can also block it from launching other processes. If we manage to run all parsing only in a restricted parsing process, then the vulnerable decode with the heap overwrite occurs in the subprocess’s address space, which has no secrets. RCE in a restricted parser subprocess no longer hands over your main application's database credentials, signing keys, network access, or shell execution—blast radius shrinks drastically. Sadly that is easier said than done today, but that is a tooling/libraries issue, not some fundamental problem.
+Now, let's assume we have divided an app into several processes. All the parsing is done in one process, and business logic is in another. The parent passes undecoded bytes to the parser over a bounded channel and treats its reply as untrusted. The worker can see those bytes, but the application's signing key stays only in the parent's heap. The worker has no permission to inspect the parent or ask it to sign arbitrary data, and its policy blocks arbitrary file access, new network connections, and program launches. The vulnerable decode and heap overwrite now occur in the worker's address space. RCE there no longer hands over the application's signing key—blast radius shrinks drastically. Sadly that is easier said than done today, but that is a tooling/libraries issue, not some fundamental problem.
 
 One caveat: pooled workers that are reused across requests can still leak data between requests, so use one-off or per-tenant workers and validate their output.
 
-Side by side, here is what the attacker can still do:
+For this comparison, the plain container permits program launches. Both hardened policies block launches after startup, and the parser worker also blocks arbitrary file access and new network connections. Here is what the attacker can still do.
 
 | After gaining code execution, can the attacker… | Plain container | Hardened single process | Isolated parser worker |
 |---|---|---|---|
 | launch a shell or another executable? | Yes | No | No |
-| open files or new network connections? | Yes, within the container | Likely, via an unrestricted thread | No |
-| read secrets from the app's heap? | Yes | Yes | No, they are not there |
+| open arbitrary files or new network connections? | Within its policy | Within the process-wide baseline, possibly through another thread | No |
+| read a signing key held only in the main JVM's heap? | Yes | Yes | No |
 
 This isn't a turnkey recipe yet—it's a map of the gap between the OS primitives Linux already gives us and the developer ergonomics our languages still lack. Prevention will keep missing bugs; bulkheads determine whether the next Java4Shell floods one parser worker or sinks your whole service.
 
