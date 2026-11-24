@@ -1,6 +1,6 @@
 # Java4Shell will happen again. How can we prepare?
 
-It never happened before, yet here we are again... One out-of-bounds write and your app is working against you. In Java4Shell, malformed Base64 could corrupt the JVM heap when it reached a vulnerable HotSpot decoder on x86-64 CPUs with AVX-512 VBMI. Updating the affected JDK fixes this vulnerability. Have a closer look [here](https://java4shell.org/). Java4Shell is not the last one, as neither people nor agents are perfect. And one imperfection is all it takes to make a disaster.
+It happened before, and will happen again. One imperfection, single out-of-bounds write and your app is working against you. In Java4Shell, malformed Base64 could corrupt the JVM heap when it reached a vulnerable HotSpot decoder on x86-64 CPUs with AVX-512 VBMI. Updating the affected JDK fixes this vulnerability. Have a closer look [here](https://java4shell.org/). Java4Shell is not the last one, as neither people nor agents are perfect. And one imperfection is all it takes to make a disaster.
 
 While we must always try to prevent these bugs, we cannot really prevent them once and for all.
 
@@ -16,11 +16,11 @@ How do we contain things today? Mostly with containers.
 
 Could we improve containers themselves? Yes, we could. Meet Software Bill of Behavior (SBoB). [https://billofbehavior.com/bob/](https://billofbehavior.com/bob/)
 
-It is an open specification in development for describing what your application is intended to do at runtime. For example, we could tighten our container policies with SBoB. Kubescape and similar tools already use eBPF to observe workload behavior and detect deviations from the declared profile. At some point it will be able to enforce these policies as well, giving similar result to a container with an enforced SBoB. Tetragon, Falco, KubeArmor can also enforce things in a similar way.
+It is an open specification in development for describing what your application is intended to do at runtime. For example, we could tighten our container policies with SBoB. Kubescape and similar tools already use eBPF to observe workload behavior and detect deviations from the declared profile. Right now Kubescape uses eBPF to observe workload behavior and alert on deviations from that profile, while runtime security tools like Tetragon and KubeArmor already prove we can enforce similar policies inline.
 
-You may ask why would it be better with SBoB if all the tech under the hood stays the same. At this point containers give your apps a fence that is larger than your app's need to operate.  The smaller your app is, the bigger the attack surface that could be removed. And with SBoB you could make a perfect list of all operations that are needed to operate. Anything outside of this list - that is not your business logic, should be blocked and alerted immediately and deterministically(given you can prove you have a perfect profiling coverage of all executable code of your app). SBoB turns this fence into straitjacket.
+You may ask why would it be better with SBoB if all the tech under the hood stays the same. At this point containers give your apps a fence that is larger than your app needs to work.  A standard container gives even a tiny service access to an entire Linux userland—the simpler your app, the more unnecessary OS surface you are leaving exposed. And with SBoB you could make a perfect list of all operations that are needed to operate. Anything outside of this list - that is not your business logic, should be blocked and alerted immediately and deterministically (given you can prove you have a perfect profiling coverage of all executable code of your app). SBoB turns this fence into straitjacket.
 
-But it’s still early days for SBoB, and we cannot really enforce things with it yet. But we already have mature tools that can isolate our apps by wrapping our command in terminal. [Bubblewrap](https://github.com/containers/bubblewrap) and [nsjail](https://nsjail.dev/) apply the launcher’s restrictions before loading the target program, so the policy has to permit that initial launch.
+But it’s still early days for SBoB, and we cannot really enforce things with it yet. But we already have mature tools that can isolate our apps by wrapping our command in terminal. [Bubblewrap](https://github.com/containers/bubblewrap) and [nsjail](https://nsjail.dev/) apply the launcher’s restrictions before loading the target program, so the policy has to permit that initial launch. An important benefit is that they are language agnostic.
 
 ## Bringing Containment Into Code (`@Contained`)
 
@@ -36,16 +36,18 @@ We can give a logical module its own restricted process or thread, bringing secu
 
 ## Replaying Java4Shell: Single Process vs. Isolated Worker
 
-So, let's replay Java4Shell under two models—a hardened single-process JVM and an isolated-worker design—to see what actually survives.
+Now, let's replay Java4Shell under two models—a hardened single-process JVM and an isolated-worker design—to see what actually survives.
 
 Let's first assume that we have our app in one process - a regular case today.
 
 Suppose an attacker has already gained code execution inside our JVM. If their payload depends on running a shell or another executable, we can block that step. Elasticsearch and OpenSearch do this on Linux for many years by installing seccomp filters during startup. The denied launch returns a permission error. We can alert on that failure if we monitor it. BubbleWrap or nsjail can give you similar results for any language, along with more features. And Kubescape, Tetragon and alike will tell you about Linux side of your app.
 
-But what if the attacker’s goal is to read a secret already in the JVM heap? We are out of luck in that case. Dead code elimination, thread, process, stacktrace (to let only limited app methods execute particular syscalls) restrictions may increase our chances, but that is only luck at this point, as an attack might not even use syscalls. And even if it does, it can likely escape to unprotected platform threads.
+But what if the attacker’s goal is to read a secret already in the JVM heap? We are out of luck in that case. Stripping unused code or restricting syscalls by process, thread, or even Java stack trace (allowing only specific methods to invoke sensitive syscalls) raises the bar—but against heap theft, that still relies on luck. Attacker may not require any new syscalls at all, and an exploit can often hop onto unrestricted platform threads.
 
 Now, let's assume we have divided an app into several processes. All the parsing is done in one process, and business logic is in another. The parser can receive input and return results over a bounded channel, with no need for direct access to application secrets, arbitrary files, or the network. A process policy can also block it from launching other processes. If we manage to run all parsing only in a restricted parsing process, then the vulnerable decode with the heap overwrite occurs in the subprocess’s address space, which has no secrets. RCE in a restricted parser subprocess no longer hands over your main application's database credentials, signing keys, network access, or shell execution — blast radius shrinks drastically. Sadly that is easier to say than do today, but that is  a tooling/libraries issue, not some fundamental problem.
 
-If you would like to explore these concepts, my in-app sandboxing research project [MazeWall](https://github.com/Pilleo/mazewall/) experiments with syscall supervision based on Java stack traces, threads, processes and with process “portals” that make calling a separate worker easier.
+If you would like to explore these concepts, see how they look like in code, my in-app sandboxing research project [MazeWall](https://github.com/Pilleo/mazewall/) experiments with syscall supervision based on Java stack traces, threads, processes and with process “portals” that make calling a separate worker easier.
 
-This article is not a recipe, but a review of things we can do as industry only in scope of sandboxing. As developers, we ignore more security topics that can be practical and useful, so do look into it, we have a lot of work to do to make them practical.  Do you check out Kubescape and SBoB to understand your apps better; nsjail, bubblewrap to restrict your apps better than your current containers can today; and of course consider contributing to these projects.
+This isn't a turnkey recipe yet—it's a map of the gap between the OS primitives Linux already gives us and the developer ergonomics our languages still lack. Prevention will keep missing bugs; bulkheads determine whether the next Java4Shell floods one parser worker or sinks your whole service.
+
+If you want to start closing that gap today, explore Kubescape and SBoB to see what your workloads actually do at runtime, look into Bubblewrap or nsjail to tighten container boundaries, and consider contributing to the tooling that makes least-privilege practical.
