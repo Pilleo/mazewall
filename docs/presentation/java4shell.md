@@ -12,7 +12,7 @@ Containment. Think of a warship or submarine. Imperfection might damage it, but 
 
 ## Tightening the Container: From Fences to Straitjackets
 
-Let's see how can we contain things now. We have containers, obviously. You could say that microservices are also a way to contain an attack in a smaller scope. Microservices are hard enough already, making them milli may be possible technically, but would it be practical enough?
+How do we contain things today? Mostly with containers.
 
 Could we improve containers themselves? Yes, we could. Meet Software Bill of Behavior (SBoB). [https://billofbehavior.com/bob/](https://billofbehavior.com/bob/)
 
@@ -24,19 +24,19 @@ But it’s still early days for SBoB, and we cannot really enforce things with i
 
 ## Bringing Containment Into Code (`@Contained`)
 
-That would help enormously, but a container boundary still surrounds the whole app. Code that is compromised inside it may still reach data and resources the rest of the app can access. To reduce that exposure, we could cut our app into smaller security scopes. One way is to divide logic into more microservices. Ouch. Could we contain things right in our code, but make logical and security scopes match? Could we, for example, have a `@Contained` annotation that runs a method with fewer OS permissions than the rest of the app?
+That would help enormously, but a container boundary still surrounds the whole app. Code that is compromised inside it may still reach data and resources the rest of the app can access. To reduce that exposure, we could divide logic into more microservices. Milli-services? Ouch. Could we instead contain things right in our code and make logical and security scopes match? Could we, for example, have a `@Contained` annotation that runs a method with fewer OS permissions than the rest of the app?
 
 Yes, we can. Here is how.
 
-How do containers contain? They (mostly) ask the OS to do that. Linux gives us seccomp, Landlock, and namespaces for restricting what a workload can do, and cgroups for resource limits. How can we use them to implement a `@Contained` annotation?
+How do containers contain? They (mostly) ask the OS to do that. Linux gives us seccomp and Landlock to restrict system calls and filesystem access, namespaces to isolate process views of system resources, and cgroups to control resource use. How can we use them to implement a `@Contained` annotation?
 
-They all see your application not the way you do. They do not care about your methods and classes much, they see and operate on a process and a bunch of threads. Both are nothing new for most languages and are easily accessible. So, to make it work we should tell Linux what restrictions we need for a process or a thread. Let’s say our parser receives its input as a byte array. We can run it on a dedicated Java platform thread and deny it permission to open files or make new network connections while allowing the system calls the JVM needs for parsing. If the application never needs to launch another executable after startup, we should also install that restriction on a process (and all child threads) and apply tighter rules to the parser thread.
+These mechanisms do not see your application the way you do. They do not care much about methods and classes; they operate on processes and threads. Namespaces and cgroups are useful for process- or container-level isolation, not for assigning a method its own OS identity. Seccomp and Landlock can restrict an individual thread, but those restrictions are irreversible: you cannot lock down the caller for one method and restore its permissions when the method returns. A process-wide seccomp baseline can be synchronized across existing threads with `TSYNC`, and future threads inherit it; a parser thread can then receive tighter restrictions. Let’s say our parser receives its input as a byte array. We can dispatch it to a dedicated Java platform thread—not a virtual thread—and deny that thread permission to open files or make new network connections while allowing the system calls the JVM needs for parsing.
 
-We can give a logical module its own restricted process or thread. That way security and logic scopes can become closer. But a restricted thread still shares memory with other threads in a process. If a vulnerability lets it corrupt that heap, other threads can be affected too. For that reason only a process is a real, complete sandboxing unit in Linux. Also, cgroups, namespaces support only processes. Browsers only use processes for isolation because of that. We could do something similar in the backend by moving processing of untrusted data into a separate process. To make that practical, we would need language-specific tools that make working with processes almost as easy as working with threads, as right now that is not straightforward at all. Another peculiar detail is that you cannot undo seccomp and landlock enforcement. So if you restrict something, there is no going back.
+We can give a logical module its own restricted process or thread, bringing security and logic scopes closer. But a restricted thread still shares memory with other threads in the process. If a vulnerability lets it corrupt that heap, other threads can be affected too. A separate process is therefore the stronger isolation boundary. Browsers use processes for isolation for the same reason. We could do something similar in the backend by moving processing of untrusted data into a separate process. To make that practical, we would need language-specific tools that make working with processes almost as easy as working with threads, as right now that is not straightforward at all. Namespaces and cgroups fit naturally into this separate-process model.
 
 ## Replaying Java4Shell: Single Process vs. Isolated Worker
 
-So, let's get back to Java4Shell. How would this approach help us exactly? Imagine we live in a perfect future, all the tooling and new standards are mature and widely used, how exactly would it help with this particular attack?
+So, let's replay Java4Shell under two models—a hardened single-process JVM and an isolated-worker design—to see what actually survives.
 
 Let's first assume that we have our app in one process - a regular case today.
 
