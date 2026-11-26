@@ -85,7 +85,7 @@ class ProfilerTraceListenerTest {
             result.complete(listener.closeWithResult() to Thread.currentThread().isInterrupted)
         }
         try {
-            listener.start(CountDownLatch(1))
+            listener.start {}
             assertTrue(blocked.await(2, TimeUnit.SECONDS))
             closer.start()
             val (outcome, interrupted) = result.get(2, TimeUnit.SECONDS)
@@ -146,7 +146,7 @@ class ProfilerTraceListenerTest {
             },
         )
         ProfilerTraceListener(TestFileDescriptors.replace(312), logs, null, mutableMapOf(), { null }, native).use { listener ->
-            listener.start(CountDownLatch(1))
+            listener.start {}
             assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
             assertTrue(listener.collectorTerminatedLatch.await(3, TimeUnit.SECONDS))
             listener.close()
@@ -191,7 +191,7 @@ class ProfilerTraceListenerTest {
                 },
             )
             ProfilerTraceListener(TestFileDescriptors.replace(311), mutableListOf(), null, mutableMapOf(), { null }, native).use { listener ->
-                listener.start(CountDownLatch(1))
+                listener.start {}
                 assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
                 listener.close()
                 assertEquals(complete, listener.drainComplete, "terminal bytes=${bytes.toList()}")
@@ -235,7 +235,7 @@ class ProfilerTraceListenerTest {
             },
         )
         ProfilerTraceListener(TestFileDescriptors.replace(309), logs, null, mutableMapOf(), { null }, native).use { listener ->
-            listener.start(CountDownLatch(1))
+            listener.start {}
             assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
             assertEquals(0, writes.get())
             assertEquals(1, closes.get())
@@ -342,7 +342,7 @@ class ProfilerTraceListenerTest {
             },
         )
         ProfilerTraceListener(TestFileDescriptors.replace(308), mutableListOf(), null, mutableMapOf(), { null }, native).use { listener ->
-            listener.start(CountDownLatch(1))
+            listener.start {}
             assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
             assertEquals(1, ackAttempts.get(), "ACK failure must stop before the second buffered frame")
             assertEquals(1, closes.get())
@@ -452,7 +452,7 @@ class ProfilerTraceListenerTest {
             threadFor = { null },
             native = native,
         ).use { listener ->
-            listener.start(CountDownLatch(1))
+            listener.start {}
             org.junit.jupiter.api.Assertions
                 .assertTrue(eof.await(3, TimeUnit.SECONDS))
         }
@@ -560,7 +560,7 @@ class ProfilerTraceListenerTest {
             native,
         )
         val ready = CountDownLatch(1)
-        listener.start(ready)
+        listener.start { ready.countDown() }
         assertTrue(ready.await(2, TimeUnit.SECONDS))
         listener.close()
         val expectedTimeline = if (expectedAck) listOf("write:84", "write:172", "close") else listOf("write:84", "close")
@@ -638,7 +638,7 @@ class ProfilerTraceListenerTest {
             )
 
             val readyLatch = CountDownLatch(1)
-            listener.start(readyLatch)
+            listener.start { readyLatch.countDown() }
 
             // Close the listener, which unblocks the read latch and drains
             listener.close()
@@ -684,7 +684,7 @@ class ProfilerTraceListenerTest {
             )
 
             val readyLatch = CountDownLatch(1)
-            listener.start(readyLatch)
+            listener.start { readyLatch.countDown() }
 
             readyLatch.await(2, TimeUnit.SECONDS)
             val workerTerminated = listener.workerTerminatedLatch.await(2, TimeUnit.SECONDS)
@@ -785,7 +785,7 @@ class ProfilerTraceListenerTest {
             listener.onEventCollected = { eventCollectedLatch.countDown() }
 
             val readyLatch = CountDownLatch(1)
-            listener.start(readyLatch)
+            listener.start { readyLatch.countDown() }
             readyLatch.await(2, TimeUnit.SECONDS)
 
             val collected = eventCollectedLatch.await(5, TimeUnit.SECONDS)

@@ -3,11 +3,11 @@ layout: default
 ---
 # mazewall — Behavioral Sandboxing for JVM Applications
 
-**Per-thread syscall sandboxing using Linux Seccomp-BPF and Landlock LSM, from inside the JVM.**
+**`0.1.0`: process-wide Seccomp-BPF lockdown for Linux x86_64 JVMs.**
 
-mazewall lets you wrap any Java/Kotlin `ExecutorService` with a kernel-enforced behavioral contract. The contract restricts exactly which syscalls and filesystem paths that thread pool can access — enforced by the Linux kernel, not application code.
+The first release is `io.mazewall:mazewall-lockdown`, distributed through GitHub Packages. Start with the [installation guide](https://github.com/Pilleo/mazewall/blob/master/GETTING_STARTED.md#gradle-dependency) and [support policy](https://github.com/Pilleo/mazewall/blob/master/STABILITY.md).
 
-While the examples are JVM-specific, the underlying concepts (Seccomp-BPF, Landlock, SBoB) apply to all backend runtimes and are relevant to anyone working on cloud-native security.
+The articles below also cover experimental per-thread sandboxing, Landlock, and profiling. Those features are not part of the `0.1.0` artifact.
 
 ## Read the Article Series
 

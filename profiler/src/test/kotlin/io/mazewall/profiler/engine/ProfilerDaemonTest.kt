@@ -7,7 +7,10 @@ import io.mazewall.enforcer.api.MockNativeProcess
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.SegmentPool
+import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.memory.writeShort
@@ -22,6 +25,8 @@ import io.mazewall.platform.native.*
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
+import io.mazewall.platform.seccomp.daemon.SeccompSessionHandler
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
 import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.profiler.*
@@ -36,6 +41,7 @@ import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
 import io.mazewall.profiler.ffi.TransportNativeEngine
+import io.mazewall.profiler.internal.TraceStreamEndWire
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -55,6 +61,102 @@ import java.nio.channels.ClosedByInterruptException
 @Isolated
 @org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class ProfilerDaemonTest {
+    @Test
+    fun `pass-through requested before ACK drains the published event first`() = checkPendingPassThrough(expectAck = true)
+
+    @Test
+    fun `pass-through requested before ACK expires without a normal terminal frame`() = checkPendingPassThrough(expectAck = false)
+
+    private fun checkPendingPassThrough(expectAck: Boolean) {
+        val replies = mutableListOf<Int>()
+        val writes = mutableListOf<Int>()
+        val terminalFrame = TraceStreamEndWire.encode(SeccompStreamEnd.PASS_THROUGH)
+        var terminalFrames = 0
+        var socketCloses = 0
+        val transport = object : MockTransport() {
+            override fun write(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: MemorySegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                writes.add(replies.size + ioctlCalls.size)
+                if (count == terminalFrame.size.toLong() && buf.asSlice(0L, count).toArray(ValueLayout.JAVA_BYTE).contentEquals(terminalFrame)) {
+                    terminalFrames++
+                }
+                return LinuxNative.SyscallResult.Success(count)
+            }
+
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                socketCloses++
+            }
+        }.apply { ackByte = PASS_THROUGH_COMMAND_BYTE }
+        val socket = TestFileDescriptors.replace<FileDescriptorRole.UnixSocket>(10)
+        val listener = TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(20)
+        val reader = MockReader()
+        var now = System.nanoTime()
+        val native = MockNativeEngine().apply {
+            onIoctl = { _, command, buffer ->
+                when (command) {
+                    SECCOMP_IOCTL_NOTIF_RECV -> {
+                        buffer.writeLong(Layouts.SECCOMP_NOTIF_ID_OFFSET, 123)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
+                        buffer.writeInt(Layouts.SECCOMP_NOTIF_NR_OFFSET, 2)
+                        buffer.writeLong(Layouts.SECCOMP_NOTIF_ARGS_OFFSET, 0x1000)
+                    }
+                    SECCOMP_IOCTL_NOTIF_SEND -> replies.add(buffer.readInt(Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET))
+                    else -> error("Unexpected ioctl")
+                }
+                LinuxNative.SyscallResult.Success(0L)
+            }
+        }
+        ProfilerSessionHandler(socket, listener, transport, transport, transport, reader, mapOf(2 to "OPEN"), preparation = directProfilerPreparation(reader)) {}.use { handler ->
+            SeccompSessionHandler(socket, listener, handler, engine = native, socketManager = transport, nanoTime = { now }).use { reactor ->
+                NativeArena.ofConfined().use { arena ->
+                    with(arena) {
+                        val poll = allocate(Layouts.POLLFD, 2)
+                        val listenerPoll = PollFdSegment.of(poll.asSlice(0, Layouts.POLLFD_SIZE))
+                        listenerPoll.setRevents(NativeConstants.POLLIN)
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        listenerPoll.setRevents(0)
+                        assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                        assertTrue(handler.state is ProfilerState.WaitingForAck)
+                        assertTrue(transport.ioctlCalls.isEmpty())
+                        assertTrue(replies.isEmpty())
+                        assertEquals(listOf(0), writes)
+                        assertEquals(0, terminalFrames)
+                        assertEquals(0, socketCloses)
+                        assertTrue(handler.ledger.dump().none { it is SessionEvent.AckReceived })
+
+                        if (expectAck) {
+                            transport.ackByte = PROTOCOL_ACK_BYTE
+                            assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                            assertEquals(listOf(SECCOMP_IOCTL_NOTIF_SEND), transport.ioctlCalls)
+                            assertEquals(listOf(NativeConstants.SECCOMP_USER_NOTIF_FLAG_CONTINUE.toInt()), transport.replyFlags)
+                            assertEquals(listOf(0, 1), writes)
+                            assertEquals(1, terminalFrames)
+                            assertEquals(1, socketCloses)
+                            assertEquals(1, handler.ledger.dump().count { it is SessionEvent.AckReceived })
+                            listenerPoll.setRevents(NativeConstants.POLLIN)
+                            assertEquals(LoopAction.Continue, reactor.handleActiveListener(poll))
+                            assertEquals(listOf(0), replies)
+                            assertEquals(listOf(0, 1), writes)
+                        } else {
+                            now += 30_000_000_000L
+                            assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                            transport.ackByte = PROTOCOL_ACK_BYTE
+                            assertEquals(LoopAction.Break, reactor.handleActiveListener(poll))
+                            assertEquals(listOf(-NativeConstants.EPERM), replies)
+                            assertTrue(transport.ioctlCalls.isEmpty())
+                            assertEquals(listOf(0), writes)
+                            assertEquals(0, terminalFrames)
+                            assertTrue(handler.state is ProfilerState.Terminated)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun `stalled preparation expires in reactor and late evidence cannot publish or reply`() {
         val future = java.util.concurrent.CompletableFuture<SyscallEvent<SyscallEventState.Resolved>>()
@@ -319,6 +421,7 @@ class ProfilerDaemonTest {
         var continueSent = false
         var errorSent = false
         val ioctlCalls = mutableListOf<Long>()
+        val replyFlags = mutableListOf<Int>()
         var nextPollResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var nextReadResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(1L)
         var ackByte: Byte = PROTOCOL_ACK_BYTE
@@ -432,7 +535,10 @@ class ProfilerDaemonTest {
                 arg: ManagedSegment,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 ioctlCalls.add(request)
-                if (request == SECCOMP_IOCTL_NOTIF_SEND) return nextIoctlResult
+                if (request == SECCOMP_IOCTL_NOTIF_SEND) {
+                    replyFlags.add(arg.readInt(Layouts.SECCOMP_NOTIF_RESP_FLAGS_OFFSET))
+                    return nextIoctlResult
+                }
                 if (request == SECCOMP_IOCTL_NOTIF_RECV) {
                     val argSeg = MemorySegment.ofAddress(arg.address()).reinterpret(arg.byteSize())
                     argSeg.set(ValueLayout.JAVA_LONG, io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
@@ -693,9 +799,17 @@ class ProfilerDaemonTest {
     }
 
     @Test
-    fun `test handshake - pass-through continues current notification`() {
-        val transport = MockTransport().apply {
-            ackByte = PASS_THROUGH_COMMAND_BYTE
+    fun `test handshake - pass-through continues current notification after ACK`() {
+        var reads = 0
+        val transport = object : MockTransport() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: MemorySegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                ackByte = if (reads++ == 0) PASS_THROUGH_COMMAND_BYTE else PROTOCOL_ACK_BYTE
+                return super.read(fd, buf, count)
+            }
         }
         val socketFd = TestFileDescriptors
             .replace<FileDescriptorRole.UnixSocket>(10)
@@ -727,6 +841,7 @@ class ProfilerDaemonTest {
                     }
 
                     assertEquals(NotifResult.PASS_THROUGH, result)
+                    assertEquals(2, reads)
                     assertTrue(transport.continueSent, "Pass-through must continue the in-flight notification")
                     assertTrue(handler.ledger.dump().any { it is SessionEvent.ContinueReplied })
                 } finally {

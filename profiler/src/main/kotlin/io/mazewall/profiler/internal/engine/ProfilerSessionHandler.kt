@@ -111,7 +111,6 @@ internal class ProfilerSessionHandler(
         }
         return object : NotificationWork {
             private var control: ControlSocketExchange? = null
-            private var waiting: ProfilerState? = null
             private var sentRecorded = false
             private var preparing: ProfilerPreparationJob? = null
 
@@ -163,13 +162,13 @@ internal class ProfilerSessionHandler(
                     val frame = io.mazewall.profiler.internal.TraceEventEncoder
                         .encode(event)
                     control = ControlSocketExchange(ioOps.raw, ioOps.controlMemory(), socketFd, frame, ACK_BUF_SIZE.toInt(), deadline, minimumResponseSize = 1)
-                    waiting = transitionToAckWait(current, notification.id, event)
-                    state = checkNotNull(waiting)
+                    state = transitionToAckWait(current, notification.id, event)
                     // Completing preparation creates a locally runnable control exchange. Drive its
                     // first nonblocking write now; otherwise an eventfd wakeup would be consumed
                     // before the exchange is armed and the reactor would sleep until the deadline.
                     return advance()
                 }
+                val waiting = checkNotNull(state as? ProfilerState.WaitingForAck)
                 val bytes = try {
                     val received = exchange.poll()
                     if (exchange.requestSent && !sentRecorded) {
@@ -179,22 +178,25 @@ internal class ProfilerSessionHandler(
                     received ?: return NotificationProgress.Await
                 } catch (failure: ControlSocketFailure) {
                     logSessionFailure("ACK transport failed", failure)
-                    state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
+                    state = ProfilerSessionMachine.evaluate(waiting, ProfilerSessionEvent.HandshakeFailed).state
                     return reply(ECONNRESET, NotifResult.TERMINATE)
                 }
                 return when (val ack = ProfilerAckOutcome.decode(bytes)) {
-                    ProfilerAckOutcome.PassThrough -> {
-                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.PassedThrough).state
-                        reply(0, NotifResult.PASS_THROUGH)
+                    ProfilerAckOutcome.PassThroughRequested -> {
+                        state = ProfilerSessionMachine.evaluate(waiting, ProfilerSessionEvent.PassThroughRequested).state
+                        exchange.awaitNextResponse()
+                        NotificationProgress.Await
                     }
                     is ProfilerAckOutcome.Acknowledged -> {
                         ledger.record(SessionEvent.AckReceived(System.nanoTime(), notification.pid.toLong()))
-                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.AckSucceeded).state
-                        reply(0, NotifResult.HANDLED, ack.shutdown)
+                        val transition = ProfilerSessionMachine.evaluate(waiting, ProfilerSessionEvent.AckSucceeded(ack.action))
+                        state = transition.state
+                        val result = if (transition.passThrough) NotifResult.PASS_THROUGH else NotifResult.HANDLED
+                        reply(0, result, ack.action == ProfilerAckOutcome.Action.Shutdown)
                     }
                     is ProfilerAckOutcome.Rejected -> {
                         ledger.record(SessionEvent.ReplyFailed(System.nanoTime(), notification.pid.toLong(), ack.reason.name, null))
-                        state = ProfilerSessionMachine.evaluate(checkNotNull(waiting), ProfilerSessionEvent.HandshakeFailed).state
+                        state = ProfilerSessionMachine.evaluate(waiting, ProfilerSessionEvent.HandshakeFailed).state
                         reply(ECONNRESET, NotifResult.TERMINATE, ack.reason == ProfilerHandshakeFailure.Shutdown)
                     }
                 }
@@ -354,7 +356,7 @@ internal class ProfilerSessionHandler(
         reply: ReplyAttempt,
     ): NotifResult {
         ledger.record(SessionEvent.AckReceived(System.nanoTime(), pid.toLong()))
-        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.AckSucceeded).state
+        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.AckSucceeded()).state
         reply.attempted = true
         val sent = with(arena.unwrap) { responder.sendSeccompContinue(result, response.unwrap) }
         if (sent == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()
@@ -385,7 +387,10 @@ internal class ProfilerSessionHandler(
         pid: Int,
         reply: ReplyAttempt,
     ): NotifResult {
-        state = ProfilerSessionMachine.evaluate(waitingState, ProfilerSessionEvent.PassedThrough).state
+        ledger.record(SessionEvent.AckReceived(System.nanoTime(), pid.toLong()))
+        state = ProfilerSessionMachine
+            .evaluate(waitingState, ProfilerSessionEvent.AckSucceeded(ProfilerAckOutcome.Action.PassThrough))
+            .state
         reply.attempted = true
         val sent = with(arena.unwrap) { responder.sendSeccompContinue(result.acknowledged(), response.unwrap) }
         if (sent == SeccompReplyResult.NOTIFICATION_GONE) return terminateSession()

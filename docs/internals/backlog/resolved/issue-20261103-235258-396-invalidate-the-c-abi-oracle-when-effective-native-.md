@@ -1,22 +1,34 @@
 ---
 title: "Invalidate the C ABI oracle when effective native build inputs change"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
 target_modules: [":platform"]
 target_files:
   - "platform/build.gradle.kts"
+  - "scripts/tests/c_abi_oracle_cache_test.sh"
+  - ".github/workflows/ci.yml"
 target_symbols:
-  - "compileCAbiLayoutOracle"
+  - "compileCAbiOracle"
 open_questions: false
 ---
 
 # 🟡 [Severity: MEDIUM]: Invalidate the C ABI oracle when effective native build inputs change
 
+## Resolution — 2026-11-25
+
+The Platform compile task always rebuilds the probe with the current host compiler and headers. It publishes the executable only after successful compilation and keeps it out of the build cache. The Platform test task tracks the executable's contents before deciding whether to reuse its comparison. [Design](../../../designs/fresh-c-abi-verification.md)
+
+- Before the fix, changing only the fixture's `fcntl.h` left both compilation and the comparison `UP-TO-DATE` under Configuration Cache replay. After the fix, the same change compiled a different executable and the comparison failed on `flag.O_PATH`.
+- The permanent regression passed locally. It verified unchanged comparison reuse, the changed-header mismatch, failed compilation after a prior success, failed probe execution, standalone output, and both Kotlin ABI comparisons. Removing the test dependency caused a missing input error. Removing the executable input restored the stale pass, which the regression rejected. [Regression script](../../../../scripts/tests/c_abi_oracle_cache_test.sh) · [Core CI gate](../../../../.github/workflows/ci.yml)
+- `./gradlew :platform:unitCheck :unitCheck` and `./gradlew build` passed locally. The full build included the confined Docker kernel lane.
+
+## Original finding
+
 **Context:**
-Repository-wide review, 2026-11-04: [TEST-05](../reviews/2026-11-04-repository-review-findings.md#test-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TEST-05](../../reviews/2026-11-04-repository-review-findings.md#test-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category:** confirmed missing cache inputs; qualification gap, **not** a reproduced ABI mismatch. **Confidence:** high for missing dependencies, medium for deployment impact. **Release boundary:** platform/shared FFM ABI assurance. **Status:** NEW bounded cache-validity issue.
 

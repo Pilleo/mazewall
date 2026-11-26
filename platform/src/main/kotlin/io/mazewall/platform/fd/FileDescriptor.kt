@@ -102,8 +102,30 @@ internal object FdEpoch {
         generation: Long,
     ): Boolean {
         val slot = table[fd] ?: return false
-        return slot.generation == generation && table.remove(fd, slot)
+        return synchronized(slot) {
+            slot.generation == generation && table.remove(fd, slot)
+        }
     }
+
+    /** Pins both tracked generations against retirement for one native operation. */
+    fun <T : Any> withLivePair(
+        first: FileDescriptor<*, FdState.Open, FdOwnership>,
+        second: FileDescriptor<*, FdState.Open, FdOwnership>,
+        operation: () -> T,
+    ): T? {
+        val firstSlot = liveSlot(first) ?: return null
+        val secondSlot = liveSlot(second) ?: return null
+        // Reversed pairs must acquire the same locks in the same order.
+        val earlier = if (firstSlot.generation <= secondSlot.generation) firstSlot else secondSlot
+        val later = if (earlier === firstSlot) secondSlot else firstSlot
+        return synchronized(earlier) {
+            synchronized(later) {
+                if (first.isLiveForIo() && second.isLiveForIo()) operation() else null
+            }
+        }
+    }
+
+    private fun liveSlot(fd: FileDescriptor<*, FdState.Open, FdOwnership>): Slot? = table[fd.value]?.takeIf { it.generation == fd.generation }
 
     fun isLive(
         fd: Int,

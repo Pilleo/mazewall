@@ -4,6 +4,7 @@ import io.mazewall.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.MockNativeNetworking
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.MsghdrSegment
@@ -22,15 +23,21 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
+import io.mazewall.testing.getOrFail
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.lang.reflect.InvocationTargetException
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
 
 class SupervisorSocketUtilsTest {
     @AfterEach
@@ -80,6 +87,106 @@ class SupervisorSocketUtilsTest {
                 SupervisorSocketUtils.setupSockAddrUn(arena, path109)
             }
             assertEquals("Socket path too long: $path109 (length: 109, max: 107)", exception109.message)
+        }
+    }
+
+    @Test
+    fun `typed descriptor send passes the original socket token to native transport`() {
+        val socket = TestFileDescriptors.adopt(70_414, FileDescriptorRole.UnixSocket)
+        val payload = TestFileDescriptors.adopt(70_415, FileDescriptorRole.Generic)
+        val networking = object : MockNativeNetworking() {
+            override fun sendmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                assertSame(socket, sockfd)
+                val control = MsghdrSegment(msg.native).getMsgControl().reinterpret(SupervisorSocketUtils.MSG_CONTROL_BUF_SIZE)
+                assertEquals(payload.value, CmsghdrSegment(control).getDataFd())
+                return LinuxNative.SyscallResult.Success(1L)
+            }
+        }
+        val manager = RealSocketManager.capture(MockNativeEngine(networking = networking))
+        try {
+            assertTrue(manager.sendDescriptor(socket, payload))
+        } finally {
+            manager.close(payload)
+            manager.close(socket)
+        }
+    }
+
+    @Test
+    fun `typed descriptor send checks both tokens on every attempt`() {
+        for (retirePayload in listOf(false, true)) {
+            val socket = TestFileDescriptors.adopt(70_416, FileDescriptorRole.UnixSocket)
+            val payload = TestFileDescriptors.adopt(70_417, FileDescriptorRole.Generic)
+            val retired = if (retirePayload) payload else socket
+            var attempts = 0
+            val networking = object : MockNativeNetworking() {
+                override fun sendmsg(
+                    sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    msg: ManagedSegment,
+                    flags: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    attempts++
+                    return LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
+                }
+            }
+            val manager = RealSocketManager.capture(MockNativeEngine(networking = networking))
+            try {
+                var readinessChecks = 0
+                val sent = SupervisorSocketUtils.sendDescriptor(socket, payload, networking) {
+                    if (++readinessChecks == 2) manager.close(retired)
+                }
+                assertFalse(sent)
+                assertEquals(1, attempts)
+
+                assertFalse(manager.sendDescriptor(socket, payload))
+                assertEquals(1, attempts)
+            } finally {
+                if (payload.isLiveForIo()) manager.close(payload)
+                if (socket.isLiveForIo()) manager.close(socket)
+            }
+        }
+    }
+
+    @Test
+    fun `close waits for the typed descriptor send attempt`() {
+        val socket = TestFileDescriptors.adopt(70_418, FileDescriptorRole.UnixSocket)
+        val payload = TestFileDescriptors.adopt(70_419, FileDescriptorRole.Generic)
+        val enteredSend = CountDownLatch(1)
+        val releaseSend = CountDownLatch(1)
+        val networking = object : MockNativeNetworking() {
+            override fun sendmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                enteredSend.countDown()
+                releaseSend.awaitOrFail("send release")
+                assertTrue(payload.isLiveForIo())
+                return LinuxNative.SyscallResult.Success(1L)
+            }
+        }
+        val manager = RealSocketManager.capture(MockNativeEngine(networking = networking))
+        val sending = FutureTask { manager.sendDescriptor(socket, payload) }
+        val closing = FutureTask { manager.close(payload) }
+        Thread.ofPlatform().start(sending)
+        try {
+            enteredSend.awaitOrFail("native send entry")
+            val closer = Thread.ofPlatform().start(closing)
+            awaitCondition(description = "close blocked by the send attempt") {
+                closer.state == Thread.State.BLOCKED || closing.isDone
+            }
+            assertFalse(closing.isDone)
+            releaseSend.countDown()
+            assertTrue(sending.getOrFail("typed send result"))
+            closing.getOrFail("payload close")
+            assertFalse(payload.isLiveForIo())
+        } finally {
+            releaseSend.countDown()
+            manager.close(socket)
+            if (payload.isLiveForIo()) manager.close(payload)
         }
     }
 

@@ -1,3 +1,114 @@
+import java.nio.file.Files
+import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
+import java.util.zip.ZipFile
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.provider.SetProperty
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
+
+@DisableCachingByDefault(because = 'Checks the current compiled inventory before every PIT invocation')
+abstract class VerifyPitestTargetInventory extends DefaultTask {
+    @Input abstract SetProperty<String> getTargetClasses()
+    @Input abstract SetProperty<String> getTargetTests()
+    @Input abstract SetProperty<String> getExcludedClasses()
+    @Input abstract SetProperty<String> getExcludedTestClasses()
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract ConfigurableFileCollection getMainClasses()
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract ConfigurableFileCollection getTestClasses()
+
+    @TaskAction
+    void verifyInventory() {
+        verifySelectors('targetClasses', targetClasses.get(), excludedClasses.get(), mainClasses.files)
+        verifySelectors('targetTests', targetTests.get(), excludedTestClasses.get(), testClasses.files)
+    }
+
+    private void verifySelectors(String kind, Set<String> selectors, Set<String> exclusions, Set<File> roots) {
+        if (selectors.empty) {
+            throw new GradleException("${path}: PIT ${kind} must contain at least one selector")
+        }
+        def excluded = expandSelectors(exclusions)
+            .collect { VerifyPitestTargetInventory.selectorPattern(it, path) }
+        def inventory = classNames(roots).findAll { name ->
+            !excluded.any { pattern -> pattern.matcher(name).matches() }
+        }
+        expandSelectors(selectors).toSet().sort().each { selector ->
+            def pattern = VerifyPitestTargetInventory.selectorPattern(selector, path)
+            def matches = inventory.findAll { name -> pattern.matcher(name).matches() }
+            if (matches.empty) {
+                throw new GradleException("${path}: PIT ${kind} selector '${selector}' has no compiled match after exclusions ${exclusions.sort()}; checked ${roots.sort()}")
+            }
+            logger.lifecycle("PIT ${kind} '${selector}': ${matches.sort().join(', ')}")
+        }
+    }
+
+    private static List<String> expandSelectors(Set<String> selectors) {
+        if (selectors.empty) return []
+        String argument = selectors.join(',')
+        def tokens = new StringTokenizer(argument, ',').toList()
+        tokens ?: [argument]
+    }
+
+    private static Set<String> classNames(Set<File> roots) {
+        Set<String> names = new TreeSet<>()
+        roots.each { root ->
+            if (root.isDirectory()) {
+                Files.walk(root.toPath()).withCloseable { paths ->
+                    paths.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith('.class') }
+                        .forEach { names.add(VerifyPitestTargetInventory.binaryName(root.toPath().relativize(it).toString().replace(File.separatorChar, '/' as char))) }
+                }
+            } else if (root.isFile()) {
+                new ZipFile(root).withCloseable { archive ->
+                    archive.entries().each { entry ->
+                        if (!entry.directory && entry.name.endsWith('.class')) {
+                            names.add(VerifyPitestTargetInventory.binaryName(entry.name))
+                        }
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    private static String binaryName(String path) {
+        path.substring(0, path.length() - '.class'.length()).replace('/', '.')
+    }
+
+    // Keep the conversion aligned with org.pitest.util.Glob, including regex '+' escaping.
+    private static Pattern selectorPattern(String selector, String taskPath) {
+        String regex
+        if (selector.startsWith('~')) {
+            regex = selector.substring(1)
+        } else {
+            def converted = new StringBuilder('^')
+            selector.replace('**.', '#%#%#').each { character ->
+                switch (character) {
+                    case '*': converted.append('.*'); break
+                    case '?': converted.append('.'); break
+                    case ['$', '.', '\\', '(', ')', '[', ']']:
+                        converted.append('\\').append(character); break
+                    default: converted.append(character)
+                }
+            }
+            regex = converted.append('$').toString().replace('#%#%#', '(?:.*\\.)*')
+        }
+        try {
+            Pattern.compile(regex.replace('+', '\\+'))
+        } catch (PatternSyntaxException failure) {
+            throw new GradleException("${taskPath}: Invalid PIT selector '${selector}'", failure)
+        }
+    }
+}
+
 def pitestThreads = providers.gradleProperty('mazewall.pitest.threads')
     .orElse(providers.systemProperty('pitest.threads'))
     .orElse('2')
@@ -17,4 +128,24 @@ pitest {
     jvmArgs.set([
         '-Xms128m', '-Xmx256m', '-XX:MaxMetaspaceSize=256m', '--enable-native-access=ALL-UNNAMED'
     ])
+}
+
+def pitestSettings = extensions.getByName('pitest')
+def inventoryGate = tasks.register('verifyPitestTargetInventory', VerifyPitestTargetInventory) {
+    group = 'verification'
+    description = 'Rejects PIT selectors without effective compiled production or test matches.'
+    def mutationTask = tasks.named('pitest').get()
+    targetClasses.set(mutationTask.targetClasses)
+    targetTests.set(providers.provider {
+        mutationTask.overriddenTargetTests ?: mutationTask.targetTests.getOrElse([]) ?: mutationTask.targetClasses.get()
+    })
+    excludedClasses.set(mutationTask.excludedClasses.orElse([] as Set))
+    excludedTestClasses.set(mutationTask.excludedTestClasses.orElse([] as Set))
+    mainClasses.from(mutationTask.mutableCodePaths)
+    testClasses.from(pitestSettings.testSourceSets.map { sets -> sets.collect { it.output.classesDirs } })
+    dependsOn(pitestSettings.mainSourceSets.map { sets -> sets.collect { it.classesTaskName } })
+    dependsOn(pitestSettings.testSourceSets.map { sets -> sets.collect { it.classesTaskName } })
+}
+tasks.named('pitest') {
+    dependsOn(inventoryGate)
 }

@@ -2,6 +2,7 @@ package io.mazewall.profiler.api
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.ffi.networking.ListenerStartupReporter
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FileDescriptor
@@ -30,7 +31,6 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -166,7 +166,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) {
                 installCalled = true
@@ -216,7 +216,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) = Unit
         }
@@ -255,7 +255,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) {
                 installCount++

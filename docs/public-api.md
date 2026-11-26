@@ -5,7 +5,7 @@
 ## 0.1.0 Release Tiers
 
 - **Published Stable (`0.1.0`) — `:lockdown` (`io.mazewall:mazewall-lockdown`):**
-  - Public package: `io.mazewall.lockdown` (`Mazewall`, `MazewallAgent`, `ProcessPolicy`, `LockdownPreset`, `LockdownSyscall`, `RuntimeProfile`, `ProcessInstallation`, `MazewallInstallationException`).
+  - Public package: `io.mazewall.lockdown` (`Mazewall`, `ProcessPolicy`, `LockdownPreset`, `LockdownSyscall`, `RuntimeProfile`, `ProcessInstallation`, `MazewallInstallationException`).
   - Supports selectable presets (`ProcessPolicy.elasticsearch`, `ProcessPolicy.openSearch`, `ProcessPolicy.denyProcessCreation`, `ProcessPolicy.fromPreset(LockdownPreset.*)`) and immutable syscall additions/removals (`block`, `unblock`, `blockedSyscalls`) over `LockdownSyscall`.
   - Pre-install validation fails closed with `MazewallInstallationException` when `-XX:OnError` / `-XX:OnOutOfMemoryError` is active on a no-exec policy, and `PR_SET_NO_NEW_PRIVS` denials fall back to verifying `PR_GET_NO_NEW_PRIVS == 1` for pre-locked containers without relaxing security.
   - Has zero project dependencies beyond `kotlin-stdlib`, targets JDK 22 bytecode, and is guarded by `lockdown/api/lockdown.api`, `verifySupportedApiSurface`, and `verifyLockdownPublication`.

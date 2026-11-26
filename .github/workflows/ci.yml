@@ -185,6 +185,8 @@ jobs:
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
               run: ./gradlew :unitCheck :verifyGradleReproducibility --no-daemon
+            - name: Run C ABI oracle cache regression
+              run: bash scripts/tests/c_abi_oracle_cache_test.sh
             - name: Prove configuration-cache reuse
               run: |
                   set -o pipefail

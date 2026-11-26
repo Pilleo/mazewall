@@ -1218,6 +1218,10 @@ class ArchitectureTest {
                 "io.mazewall.ffi.networking.SeccompInstallEvent\$Advanced",
                 "io.mazewall.ffi.networking.SeccompInstallEvent\$Failed",
             ),
+            "io.mazewall.ffi.networking.SeccompListenerStartup" to setOf(
+                "io.mazewall.ffi.networking.SeccompListenerStartup\$Ready",
+                "io.mazewall.ffi.networking.SeccompListenerStartup\$Failed",
+            ),
             "io.mazewall.platform.seccomp.daemon.NotificationProgress" to setOf(
                 "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Await",
                 "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Ready",

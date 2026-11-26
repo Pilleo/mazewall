@@ -51,8 +51,15 @@ Rendering limits cap the number of rendered threads, frames per thread, and tota
 characters, with visible truncation markers and deterministic thread-ID order.
 They bound **output**, not the acquisition/allocation of `getAllStackTraces()`,
 its safepoint progress, or a hard collection deadline. Ordinary optional snapshot
-exceptions are recorded visibly; fatal JVM errors propagate. The external
-`dmesg` helper's bounded stdout capture is not a timeout for this self snapshot.
+exceptions are recorded visibly. Fatal JVM errors propagate. The external
+`dmesg` helper has timeouts for reading its output and waiting for exit. These
+timeouts apply to the helper only.
+
+In the triage JSON, `dmesg_seccomp_logs` contains matching stdout records from a
+successful probe. An empty string means the probe succeeded and found no matching
+records. On failure, the same field describes the error. A nonzero exit includes
+the exit status and up to 2,048 characters of stderr. Longer stderr is marked as
+truncated.
 
 ---
 
@@ -299,8 +306,9 @@ Normal stream termination has its own nine-byte record: reserved `Int.MIN_VALUE`
 header, terminal version 1, and one-byte reason (1: producer exit, 2: requested
 pass-through). A lone seccomp-listener `POLLHUP` proves that no filter users remain
 (`seccomp_notify_poll`); error or mixed flags do not certify producer retirement.
-Requested pass-through is confirmed only after any in-flight notification reply
-has settled, and is accepted only when locally requested. Terminal publication is
+Requested pass-through is confirmed only after any in-flight event has been
+acknowledged and its kernel CONTINUE succeeds. The reader accepts it only when
+locally requested. Terminal publication is
 a bounded nonblocking write. Missing, partial, malformed or failed publication
 leaves the profile incomplete. A complete record ends the logical stream;
 transport EOF/reset alone never certifies it. This avoids relying on a subsequent

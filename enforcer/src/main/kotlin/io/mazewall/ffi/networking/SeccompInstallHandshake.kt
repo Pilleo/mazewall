@@ -6,6 +6,16 @@ import java.util.concurrent.TimeUnit
 
 internal enum class SeccompInstallStage { Prepared, Applied, Transferred, Ready }
 
+internal sealed interface SeccompListenerStartup {
+    data object Ready : SeccompListenerStartup
+
+    data class Failed(
+        val cause: Throwable,
+    ) : SeccompListenerStartup
+}
+
+internal typealias ListenerStartupReporter = (SeccompListenerStartup) -> Unit
+
 internal sealed interface SeccompInstallState {
     val stage: SeccompInstallStage
 

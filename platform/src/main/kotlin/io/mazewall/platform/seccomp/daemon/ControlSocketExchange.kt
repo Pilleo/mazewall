@@ -42,6 +42,12 @@ internal class ControlSocketExchange(
 
     public val requestSent: Boolean get() = sent == request.size
 
+    /** Consumes an intermediate response without retransmitting or renewing the deadline. */
+    public fun awaitNextResponse() {
+        check(requestSent && received > 0 && received >= minimumResponseSize)
+        received = 0
+    }
+
     init {
         require(responseSize >= 0)
         require(minimumResponseSize in 0..responseSize)

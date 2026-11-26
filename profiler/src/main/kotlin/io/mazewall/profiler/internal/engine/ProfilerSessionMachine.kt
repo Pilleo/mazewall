@@ -14,11 +14,13 @@ internal sealed interface ProfilerSessionEvent {
 
     data object EventDelivered : ProfilerSessionEvent
 
-    data object AckSucceeded : ProfilerSessionEvent
+    data class AckSucceeded(
+        val action: ProfilerAckOutcome.Action = ProfilerAckOutcome.Action.Continue,
+    ) : ProfilerSessionEvent
 
     data object HandshakeFailed : ProfilerSessionEvent
 
-    data object PassedThrough : ProfilerSessionEvent
+    data object PassThroughRequested : ProfilerSessionEvent
 
     /** A notification was intentionally continued without publishing a trace event. */
     data object NoisePathBypassed : ProfilerSessionEvent
@@ -68,7 +70,7 @@ internal object ProfilerSessionMachine {
                 is ProfilerSessionEvent.EventDelivered,
                 is ProfilerSessionEvent.AckSucceeded,
                 is ProfilerSessionEvent.HandshakeFailed,
-                is ProfilerSessionEvent.PassedThrough,
+                is ProfilerSessionEvent.PassThroughRequested,
                 is ProfilerSessionEvent.TransportFailed,
                 is ProfilerSessionEvent.PostTerminalObserved,
                 -> violation(state)
@@ -85,7 +87,7 @@ internal object ProfilerSessionMachine {
                     ProfilerSessionTransition(state.terminate(), terminate = true)
                 is ProfilerSessionEvent.NotificationReceived,
                 is ProfilerSessionEvent.AckSucceeded,
-                is ProfilerSessionEvent.PassedThrough,
+                is ProfilerSessionEvent.PassThroughRequested,
                 is ProfilerSessionEvent.NoisePathBypassed,
                 is ProfilerSessionEvent.TransportFailed,
                 is ProfilerSessionEvent.PostTerminalObserved,
@@ -98,9 +100,13 @@ internal object ProfilerSessionMachine {
     ): ProfilerSessionTransition =
         when (event) {
                 is ProfilerSessionEvent.AckSucceeded ->
-                    ProfilerSessionTransition(state.acknowledged())
-                is ProfilerSessionEvent.PassedThrough ->
-                    ProfilerSessionTransition(state.acknowledged(), passThrough = true)
+                    if (event.action.withPendingPassThrough(state.passThroughRequested) == ProfilerAckOutcome.Action.PassThrough) {
+                        ProfilerSessionTransition(ProfilerState.PassThrough(state.socketFd, state.listenerFd), passThrough = true)
+                    } else {
+                        ProfilerSessionTransition(ProfilerState.ActiveSession(state.socketFd, state.listenerFd))
+                    }
+                is ProfilerSessionEvent.PassThroughRequested ->
+                    ProfilerSessionTransition(state.copy(passThroughRequested = true))
                 is ProfilerSessionEvent.HandshakeFailed ->
                     ProfilerSessionTransition(state.terminate(), terminate = true)
                 is ProfilerSessionEvent.NotificationReceived,

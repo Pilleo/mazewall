@@ -1,13 +1,17 @@
 ---
 title: "Align packaged consumer matrix deadline with owned child budgets"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "build"
 target_modules: []
 target_files:
   - "src/consumerVerification/kotlin/io/mazewall/verification/PackagedConsumerMatrixTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/PackagedConsumerMatrixHarnessTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/SharedVerificationLock.kt"
+  - "build.gradle.kts"
+  - "tests/consumers/README.md"
 target_symbols:
   - "PackagedConsumerMatrixTest"
 open_questions: false
@@ -15,8 +19,18 @@ open_questions: false
 
 # 🟡 [Severity: MEDIUM]: Align packaged consumer matrix deadline with owned child budgets
 
+## Resolution — 2026-11-26
+
+The approved scope is a single JDK 25 run for `consumerCheck`. The check has a 10-minute same-thread deadline, a one-minute shared lock wait, and a six-minute consumer command budget. The child uses the existing owned command runner for receipts and cleanup and runs with `--no-daemon` to prevent reuse of a Gradle daemon outside its process tree. [Implementation plan](../../../superpowers/plans/2026-11-25-packaged-consumer-matrix-deadline.md)
+
+- The deadline test failed before the fix and failed again when only the override was removed. All 14 focused tests passed with the fix, covering the selected JDK, nonzero exits, lock contention, timeout receipts, and cleanup of an owned launcher and descendant.
+- The clean-project and strict repeat runs against staged local `0.1.0-candidate.e60255ae` publications completed in 63 and 66 seconds. Both used JDK 25 for Java and Kotlin and stable Kotlin 2.4.20. Each recorded one successful JDK 25 child command. Dependency locks and artifact hashes matched across runs. Candidate locks were reviewed and kept in the disposable checkout.
+- Consumer source lint and `./gradlew build` passed. The full build included the confined Docker kernel lane.
+
+## Original finding
+
 **Context:**
-Repository-wide review, 2026-11-04: [TEST-04](../reviews/2026-11-04-repository-review-findings.md#test-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TEST-04](../../reviews/2026-11-04-repository-review-findings.md#test-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category:** confirmed source-level budget conflict; no slow matrix was run. **Confidence:** high. **Release boundary:** independent core Java/stable-Kotlin/JDK22+25 consumer qualification. **Status:** NEW sibling of the recent scoped cache-test deadline correction.
 

@@ -71,7 +71,7 @@ ownership and permanent-filter pass-through; no public ownership-API redesign.
 ## Ownership reconciliation
 
 Coordinate the existing [all-admission-path owner](issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md)
-and [pending-ACK owner](../issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md).
+and [pending-ACK owner](issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md).
 Neither fixes accepted work after collector retirement: this schedule uses an
 already-overridden Callable and no pending ACK. The [direct-worker interruption owner](../issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md)
 retains its separate scope. The [resolved application migration](issue-20261011-230257-867-migrate-remaining-application-callers-to-owned-run.md)

@@ -134,7 +134,7 @@ class ProfilerArchitectureTest {
             ),
             "io.mazewall.profiler.internal.engine.ProfilerAckOutcome" to setOf(
                 "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$Acknowledged",
-                "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$PassThrough",
+                "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$PassThroughRequested",
                 "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$Rejected",
             ),
             "io.mazewall.profiler.internal.TraceCommandWriteResult" to setOf(

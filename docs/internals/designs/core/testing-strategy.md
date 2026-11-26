@@ -190,7 +190,11 @@ reuse. The regression also runs in mandatory `verificationActionsTest`; both
 tasks declare the shared script and root properties as inputs.
 
 PIT runs only named host unit tests and enforces line reach, mutation score, and
-test strength independently. The current floors are:
+test strength independently. Before mutation analysis, `verifyPitestTargetInventory`
+checks each production and test selector against its compiled class inventory
+after the applicable exclusions. A stale selector fails the task even when
+other selectors still match. Run `./gradlew -p buildSrc pitestTargetInventoryTest`
+to check the inventory gate in isolation. The current floors are:
 
 | Module | Line reach | Mutation score | Test strength |
 | --- | ---: | ---: | ---: |
@@ -212,11 +216,12 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 Root `buildLogicCheck` is the explicit complete build-tool regression gate. It uses
 public GradleBuild APIs, a distinct nested build name `build-logic-verification`,
-the existing buildSrc `verificationActionsTest`, one nested worker and no project
-parallelism. Root `check` requires it, preserving existing root build/mergeCheck
-coverage; buildSrc's own test/check dependencies also remain mandatory. The bridge
-has no outer cached-success output or skip predicate: actual nested inputs and
-marker invalidation remain authoritative.
+one nested worker, and no project parallelism. The bridge selects buildSrc `test`,
+which depends on `verificationActionsTest`. This runs the Kotlin convention and
+lifecycle tests and the Java regression driver in one nested invocation. Root
+`check` requires the bridge, as do `build` and `mergeCheck` through `check`.
+The nested tasks determine cache reuse and invalidate the verifier's success
+marker when its inputs change.
 
 JAR bootstrap/help/compile/assemble do not implicitly select the verifier, though
 ordinary buildSrc compilation can still run. Lazy `mustRunAfter` edges put other
@@ -611,6 +616,20 @@ delivery. Failed cases must produce actual `DiagnosticTriageRunner` JSON while
 retaining the original failed Test/build. The collector's JVM snapshot remains
 [self-only](../profiler/profiler-design.md#self-only-diagnostic-report-scope).
 
+Run the dependency provisioning check on JDK 25 with:
+
+```bash
+./gradlew -p buildSrc verificationActionsTest -Pmazewall.coldFixtureDependencies=true
+```
+
+The root verification and failure-triage fixtures each start with an empty
+TestKit home in their temporary project. Preparation resolves their declared
+classpath and analysis inputs against the configured repositories using the
+copied dependency verification metadata. The fixture controls then run with
+`--offline` in those same homes. The cold mode ignores any ambient read-only
+dependency cache. The standalone `failureTriageTest` supports the same option.
+Ordinary runs continue to use the persistent TestKit cache.
+
 Use the owning module's named host tests while changing a contract:
 
 ```bash
@@ -636,6 +655,20 @@ neither up-to-date reused nor restored from the build cache. Named ordinary host
 tests retain reuse. An executable Gradle fixture checks unchanged repeat execution,
 deleted-output/cache behavior and host-test reuse; a successful container command
 with cached kernel task outputs is not current container protection evidence.
+
+Platform's C ABI oracle recompiles against the current host compiler and headers
+whenever `:platform:test` or `:platform:verifyCAbi` requests it. The compile task
+publishes the probe only after success and keeps its executable out of the build
+cache. Platform tests include that executable's contents in their task inputs.
+Gradle can reuse the test result when the executable and the other test inputs
+match. Run `./gradlew :platform:verifyCAbi` to execute the current probe and print
+its observations. Run independent Gradle invocations that share the Platform
+output directory serially. Concurrent invocations need separate checkout copies.
+
+The Core CI job runs `bash scripts/tests/c_abi_oracle_cache_test.sh`. The script
+uses the real Platform tasks in a checkout copy and checks unchanged test reuse
+under Configuration Cache replay, header invalidation, compiler and probe
+failure, and the two Kotlin ABI test entry points.
 
 The CET C fixture uses local up-to-date compilation reuse with source/script and
 effective compiler/header/linker/environment inputs. The native library is not stored

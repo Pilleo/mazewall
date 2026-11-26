@@ -20,7 +20,7 @@ import kotlin.reflect.KClass
 internal class ProfilerSessionMachineTest {
     @org.junit.jupiter.api.Test
     fun `terminal states reject new protocol input`() {
-        val transition = ProfilerSessionMachine.evaluate(ProfilerState.Terminated(), ProfilerSessionEvent.AckSucceeded)
+        val transition = ProfilerSessionMachine.evaluate(ProfilerState.Terminated(), ProfilerSessionEvent.AckSucceeded())
         assertTrue(transition.protocolViolation)
         assertTrue(transition.terminate)
     }
@@ -83,7 +83,7 @@ internal class ProfilerSessionMachineTest {
             SessionTestCase(
                 name = "ack from waiting returns to active session",
                 initialState = waiting,
-                event = ProfilerSessionEvent.AckSucceeded,
+                event = ProfilerSessionEvent.AckSucceeded(),
                 expectedStateType = ProfilerState.ActiveSession::class,
             ),
             SessionTestCase(
@@ -108,11 +108,30 @@ internal class ProfilerSessionMachineTest {
                 expectedTerminate = true,
             ),
             SessionTestCase(
-                name = "passed through event transitions waiting back to active with passThrough flag",
+                name = "pass-through request keeps the notification waiting",
                 initialState = waiting,
-                event = ProfilerSessionEvent.PassedThrough,
-                expectedStateType = ProfilerState.ActiveSession::class,
+                event = ProfilerSessionEvent.PassThroughRequested,
+                expectedStateType = ProfilerState.WaitingForAck::class,
+            ),
+            SessionTestCase(
+                name = "ACK commits pending pass-through",
+                initialState = waiting.copy(passThroughRequested = true),
+                event = ProfilerSessionEvent.AckSucceeded(),
+                expectedStateType = ProfilerState.PassThrough::class,
                 expectedPassThrough = true,
+            ),
+            SessionTestCase(
+                name = "handshake failure terminates pending pass-through",
+                initialState = waiting.copy(passThroughRequested = true),
+                event = ProfilerSessionEvent.HandshakeFailed,
+                expectedStateType = ProfilerState.Terminated::class,
+                expectedTerminate = true,
+            ),
+            SessionTestCase(
+                name = "ACK with shutdown takes precedence over pending pass-through",
+                initialState = waiting.copy(passThroughRequested = true),
+                event = ProfilerSessionEvent.AckSucceeded(ProfilerAckOutcome.Action.Shutdown),
+                expectedStateType = ProfilerState.ActiveSession::class,
             ),
         )
 
@@ -129,9 +148,9 @@ internal class ProfilerSessionMachineTest {
             val events = listOf(
                 ProfilerSessionEvent.NotificationReceived(9L, event),
                 ProfilerSessionEvent.EventDelivered,
-                ProfilerSessionEvent.AckSucceeded,
+                ProfilerSessionEvent.AckSucceeded(),
                 ProfilerSessionEvent.HandshakeFailed,
-                ProfilerSessionEvent.PassedThrough,
+                ProfilerSessionEvent.PassThroughRequested,
                 ProfilerSessionEvent.NoisePathBypassed,
                 ProfilerSessionEvent.PostTerminalObserved,
             )
@@ -142,7 +161,7 @@ internal class ProfilerSessionMachineTest {
                 ProfilerState.Notified::class to ProfilerSessionEvent.HandshakeFailed::class,
                 ProfilerState.WaitingForAck::class to ProfilerSessionEvent.AckSucceeded::class,
                 ProfilerState.WaitingForAck::class to ProfilerSessionEvent.HandshakeFailed::class,
-                ProfilerState.WaitingForAck::class to ProfilerSessionEvent.PassedThrough::class,
+                ProfilerState.WaitingForAck::class to ProfilerSessionEvent.PassThroughRequested::class,
             )
             return states
                 .flatMap { state ->

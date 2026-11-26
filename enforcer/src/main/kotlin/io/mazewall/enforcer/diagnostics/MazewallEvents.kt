@@ -22,6 +22,7 @@ public object MazewallEvents {
         public val timestampMillis: Long
     }
 
+    /** [lastLogLines] is the bounded tail from this daemon, prefixed with an omission count when needed. */
     public data class DaemonExited(
         val pid: Long,
         val exitCode: Int,

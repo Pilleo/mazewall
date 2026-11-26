@@ -1,13 +1,19 @@
 ---
 title: "Preserve descriptor generations through typed SCM_RIGHTS transmission"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
-target_modules: [":platform"]
+target_modules: [":platform", ":enforcer", ":portals:runtime"]
 target_files:
   - "platform/src/main/kotlin/io/mazewall/platform/socket/SocketManager.kt"
+  - "platform/src/main/kotlin/io/mazewall/platform/fd/FileDescriptor.kt"
+  - "platform/src/main/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtils.kt"
+  - "platform/src/test/kotlin/io/mazewall/ffi/networking/SupervisorSocketUtilsTest.kt"
+  - "enforcer/src/main/kotlin/io/mazewall/ffi/networking/ConfinedHelperChannel.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/PortalIo.kt"
+  - "docs/internals/designs/core/fd-token-ownership.md"
 target_symbols:
   - "sendDescriptor"
 open_questions: false
@@ -15,8 +21,29 @@ open_questions: false
 
 # 🟡 [Severity: HIGH]: Preserve descriptor generations through typed SCM_RIGHTS transmission
 
+## Resolution — 2026-11-26
+
+The shared typed send carries the original socket and payload tokens to each
+native attempt. The generation registry serializes the attempt with managed
+retirement of either token. Readiness callbacks execute outside the generation
+locks. The Portal runtime and confined helper use the typed path with their
+existing ownership and deadline handling. Raw callers still own the lifetimes
+of their descriptors. [Descriptor ownership contract](../../designs/core/fd-token-ownership.md)
+
+The new JDK 25 identity assertion failed before the change and passed after it.
+The transport tests checked original socket identity, ancillary payload
+encoding, rejection of retired tokens at entry and on retry, and close
+serialization during a send. Platform passed 549 unit tests and the existing
+real Unix socket transfer test. Portal runtime passed 165 tests.
+
+The full offline host build passed in 13m31s with strict configuration-cache
+checking. The confined Docker kernel lane passed in 2m52s and its receipt
+validator returned zero. These results qualify the local checkout.
+
+## Original finding
+
 **Context:**
-Repository-wide review, 2026-11-04: [PLAT-03](../reviews/2026-11-04-repository-review-findings.md#plat-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PLAT-03](../../reviews/2026-11-04-repository-review-findings.md#plat-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · capability/descriptor safety · confirmed source defect · high confidence; native transfer not reproduced · shared transport, supervisor and profiler; Portal callers need ownership-aware qualification.**
 

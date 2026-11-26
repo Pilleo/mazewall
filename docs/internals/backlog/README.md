@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 401 | *Total Resolved Issues:* 784
+*Total Active Issues:* 391 | *Total Resolved Issues:* 794
 
-Active status detail: 399 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 392 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -174,20 +174,20 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261110-090012-980](resolved/issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation (resolved 2026-11-21) | high | core |
 | [issue-20261107-045431-849](issue-20261107-045431-849-preserve-executable-info-ownership-across-partial-.md) | Preserve executable-info ownership across partial map-installation failures | high | core |
 | Archived [issue-20261105-182827-544](resolved/issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends (resolved 2026-11-26) | high | profiler |
-| [issue-20261105-182737-637](issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts | medium | platform |
+| Archived [issue-20261105-182737-637](resolved/issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts (resolved 2026-11-26) | medium | platform |
 | [issue-20261105-182827-530](issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) | Reject unterminated quoted values in recorded eBPF evidence | medium | profiler |
 | [issue-20261105-183230-840](issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) | Require complete class-lifetime coverage before native canonical-cache admission | medium | profiler |
 | [issue-20261105-182947-263](issue-20261105-182947-263-encode-production-supervisor-authority-work-phase-.md) | Encode production supervisor authority-work phase payloads in one closed state — design-only | low | enforcer |
 | [issue-20261103-234851-768](issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) | Correct AArch64 renameat metadata before policy compilation | high | core |
 | [issue-20261103-235243-934](issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic | medium | core |
-| [issue-20261103-235244-414](issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission | high | core |
+| Archived [issue-20261103-235244-414](resolved/issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission (resolved 2026-11-26) | high | core |
 | Archived [issue-20261103-235245-104](resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch (resolved 2026-11-21) | medium | core |
 | [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |
 | [issue-20261103-235246-003](issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) | Serialize eventfd completion signaling with native retirement | medium | core |
 | [issue-20261103-235246-361](issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) | Repoll canceled seccomp receives without retiring a live listener | medium | core |
 | Archived [issue-20261103-235246-772](resolved/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) | Route every profiler executor admission through collector installation (resolved 2026-11-26) | high | profiler |
-| [issue-20261103-235247-255](issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) | Keep published profiler events awaiting ACK during pass-through requests | medium | profiler |
-| [issue-20261103-235247-666](issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) | Propagate profiler listener handshake failure before installation readiness | medium | profiler |
+| Archived [issue-20261103-235247-255](resolved/issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) | Keep published profiler events awaiting ACK during pass-through requests (resolved 2026-11-26) | medium | profiler |
+| Archived [issue-20261103-235247-666](resolved/issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) | Propagate profiler listener handshake failure before installation readiness (resolved 2026-11-26) | medium | profiler |
 | [issue-20261103-235248-095](issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) | Preserve pending application exceptions during native capture cleanup | high | profiler |
 | [issue-20261103-235248-477](issue-20261103-235248-477-contain-allocation-failure-inside-native-profiler-.md) | Contain allocation failure inside native profiler capture boundaries | high | profiler |
 | [issue-20261103-235248-781](issue-20261103-235248-781-keep-symbolization-closed-until-the-owning-replace.md) | Keep symbolization closed until the owning replacement completes | high | profiler |
@@ -208,11 +208,11 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235255-089](issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) | Tie Spring lifecycle completion to physical retirement and retained dependencies | medium | spring |
 | [issue-20261103-235255-561](issue-20261103-235255-561-complete-kotlin-upgrade-locks-and-independent-opti.md) | Complete Kotlin upgrade locks and independent optional consumer approvals | high | build |
 | Archived [issue-20261103-235256-009](resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) | Select existing API ABI and package topology checks in required CI (resolved 2026-11-21) | medium | build |
-| [issue-20261103-235256-471](issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) | Restore intended enforcer and profiler mutation target inventories | medium | build |
+| Archived [issue-20261103-235256-471](resolved/issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) | Restore intended enforcer and profiler mutation target inventories (resolved 2026-11-25) | medium | build |
 | Archived [issue-20261103-235256-949](resolved/issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) | Make the KILL_THREAD kernel oracle reject survival and setup failures (resolved 2026-11-21) | medium | core |
 | [issue-20261103-235257-446](issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) | Reject benchmark throughput inconsistent with its enclosed sample clocks | medium | benchmarks |
-| [issue-20261103-235257-865](issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) | Align packaged consumer matrix deadline with owned child budgets | medium | build |
-| [issue-20261103-235258-396](issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) | Invalidate the C ABI oracle when effective native build inputs change | medium | core |
+| Archived [issue-20261103-235257-865](resolved/issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) | Align packaged consumer matrix deadline with owned child budgets (resolved 2026-11-26) | medium | build |
+| Archived [issue-20261103-235258-396](resolved/issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) | Invalidate the C ABI oracle when effective native build inputs change (resolved 2026-11-25) | medium | core |
 | [issue-20261103-235258-789](issue-20261103-235258-789-guard-supported-portal-binary-compatibility-with-t.md) | Guard supported Portal binary compatibility with the existing ABI mechanism | medium | portal-runtime |
 | [issue-20261103-235259-123](issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con.md) | Retire removed orchestrator entrypoints before control-plane effects | medium | tooling |
 | [issue-20261103-235259-662](issue-20261103-235259-662-preserve-canonical-issue-identities-in-any-retaine.md) | Preserve canonical issue identities in any retained standalone ingestion | medium | tooling |
@@ -221,14 +221,13 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235357-847](issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) | Align approved accept routing with tracee authority execution | high | core |
 | [issue-20261103-235358-296](issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects | high | core |
 | [issue-20261103-235358-819](issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) | Retain supervisor helper capacity across fatal worker replacement | medium | core |
-| [issue-20261103-235359-257](issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md) | Bound supervisor validation and daemon diagnostic retention | medium | core |
 | [issue-20261103-235359-647](issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) | Preserve typed ADDFD notification-gone and native-error outcomes | low | core |
 | [issue-20261103-235400-034](issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) | Escape observed paths as Kotlin literals in generated policy DSL | medium | profiler |
 | [issue-20261103-235400-350](issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) | Hide incomplete-conversion test seams from ordinary Java consumers | medium | profiler |
 | [issue-20261103-235400-690](issue-20261103-235400-690-own-late-created-strace-descendants-through-cancel.md) | Own late-created strace descendants through cancellation and retirement | medium | profiler |
 | [issue-20261103-235400-980](issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md) | Reject unknown io_uring operations as complete read-only evidence | medium | profiler |
 | [issue-20261103-235401-320](issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) | Report iterative profiling exhaustion separately from convergence | medium | profiler |
-| [issue-20261103-235401-641](issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) | Distinguish failed dmesg probes from successful empty triage evidence | medium | profiler |
+| Archived [issue-20261103-235401-641](resolved/issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) | Distinguish failed dmesg probes from successful empty triage evidence (resolved 2026-11-25) | medium | profiler |
 | [issue-20261103-235402-001](issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) | Roll back acquired demo processes when output pump startup fails | medium | demos |
 | Archived [issue-20261103-235911-795](resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) | Preserve Linux USER_NOTIF precedence over TRACE in policy intersection (resolved 2026-11-21) | high | core |
 | Archived [issue-20261103-235912-106](resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) | Install effective allow-list narrowing and restrictive default escalation (resolved 2026-11-21) | high | core |
@@ -508,7 +507,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti](resolved/issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti.md) | Review missing checksum metadata for existing optional Spring Boot build inputs | high | core |
 | Archived [issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt](resolved/issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt.md) | Approve missing checksum metadata for existing optional Koog 1.3.0 build inputs | high | core |
 | Archived [issue-20261014-083804-704-unify-build-owned-verification-and-remove-abandone](resolved/issue-20261014-083804-704-unify-build-owned-verification-and-remove-abandone.md) | Unify build-owned verification and remove abandoned repository tooling | high | core |
-| [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Keep executable buildSrc TestKit storage checkout-owned | high | testing |
+| Archived [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](resolved/issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Run complete root build-logic verification (resolved 2026-11-25) | high | testing |
 | [issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md) | Investigate Dependency-Check NVD record processing failure | high | ci |
 | [issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe](issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe.md) | Preserve canonical backlog totals and active membership after evidence closure | medium | core |
 | Archived [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](resolved/issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |

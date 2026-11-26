@@ -1,5 +1,7 @@
 package io.mazewall.profiler.internal
 
+import io.mazewall.ffi.networking.ListenerStartupReporter
+import io.mazewall.ffi.networking.SeccompListenerStartup
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -155,7 +157,7 @@ internal class ProfilerTraceListener(
     /**
      * Starts the background listener thread.
      */
-    fun start(readyLatch: CountDownLatch) {
+    fun start(reportStartup: ListenerStartupReporter) {
         check(!closed.get()) { "Listener is already closed" }
 
         val arena = io.mazewall.ffi.memory.NativeArena
@@ -164,7 +166,7 @@ internal class ProfilerTraceListener(
 
         val thread = Thread {
             try {
-                runListenerLoop(inputStream, readyLatch)
+                runListenerLoop(inputStream, reportStartup)
             } catch (expectedWorkerFailure: Exception) {
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener worker thread crashed", expectedWorkerFailure)
             } finally {
@@ -239,9 +241,8 @@ internal class ProfilerTraceListener(
         if (requestDrain) gracefulDrainRequested.set(true)
 
         try {
-            // Step 1: Signal the daemon to finish up. The daemon receives this byte,
-            // enters pass-through mode for this session, and closes its side of the socket.
-            // This triggers EOF on our read side without shutting down the global daemon.
+            // Ask the daemon to finish the active event. Once its ACK arrives, the daemon
+            // continues the syscall, sends the terminal record, and closes this session's socket.
             if (requestDrain) logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
 
             var workerJoined = false
@@ -334,24 +335,10 @@ internal class ProfilerTraceListener(
 
     private fun runListenerLoop(
         inputStream: InputStream,
-        readyLatch: CountDownLatch,
+        reportStartup: ListenerStartupReporter,
     ) {
-        val dis = DataInputStream(BufferedInputStream(inputStream))
         try {
-            try {
-                // Read handshake ACK from the daemon confirming the listener FD was received.
-                val handshakeAck = dis.readByte()
-                if (handshakeAck != PROTOCOL_ACK_BYTE) {
-                    advanceListener(TraceListenerEvent.HandshakeRejected)
-                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck; rejecting trace stream")
-                    return
-                }
-                advanceListener(TraceListenerEvent.HandshakeReceived)
-                // No config bytes are sent; event delivery uses the fixed per-frame ACK protocol.
-            } finally {
-                readyLatch.countDown()
-            }
-
+            val dis = openTraceStream(inputStream, reportStartup)
             while (true) {
                 advanceListener(TraceListenerEvent.AwaitEvent)
                 val decoded = readEventOrStop(dis) ?: break
@@ -365,6 +352,28 @@ internal class ProfilerTraceListener(
             state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SocketClosed)
             eventQueue.close()
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Transfer all startup failures to the waiting installer before unwinding the reader.
+    private fun openTraceStream(
+        inputStream: InputStream,
+        reportStartup: ListenerStartupReporter,
+    ): DataInputStream {
+        val stream = try {
+            DataInputStream(BufferedInputStream(inputStream)).also {
+                val ack = it.readByte()
+                if (ack != PROTOCOL_ACK_BYTE) {
+                    advanceListener(TraceListenerEvent.HandshakeRejected)
+                    throw TraceListenerProtocolException("Invalid handshake ACK from daemon: $ack")
+                }
+                advanceListener(TraceListenerEvent.HandshakeReceived)
+            }
+        } catch (failure: Throwable) {
+            reportStartup(SeccompListenerStartup.Failed(failure))
+            throw failure
+        }
+        reportStartup(SeccompListenerStartup.Ready)
+        return stream
     }
 
     private fun readEventOrStop(dis: DataInputStream): DecodedTraceEvent? =
