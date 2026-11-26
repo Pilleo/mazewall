@@ -12,17 +12,29 @@ For the `0.1.0` release, `:lockdown` (`io.mazewall:mazewall-lockdown`, JPMS modu
 
 | Requirement | Supported |
 |---|---|
-| **JVM runtime** | JDK 22–25 (`--release 22` bytecode) with `--enable-native-access=io.mazewall.lockdown` (module path) or `ALL-UNNAMED` (classpath) |
-| **Linux architecture** | `x86_64` (`amd64`) and `aarch64` (`arm64`) |
-| **Linux kernel** | Kernel 3.17+ with Seccomp-BPF and `SECCOMP_FILTER_FLAG_TSYNC` |
+| **JVM runtime** | HotSpot JDK 22 and 25 are the qualification targets (`--release 22` bytecode). Grant native access to `io.mazewall.lockdown` (module path) or `ALL-UNNAMED` (classpath). |
+| **Linux architecture** | `x86_64` (`amd64`) only |
+| **Linux kernel** | Seccomp-BPF with `SECCOMP_FILTER_FLAG_TSYNC` (introduced in Linux 3.17; feature floor, not a tested kernel matrix) |
 | **Privileges / Native libs** | Non-root user permitted; zero native `.so` / JNI libraries |
 
 ### Gradle Dependency
 
-Released artifacts use the `io.mazewall:mazewall-lockdown:0.1.0` coordinate:
+Once published, `0.1.0` will be available from GitHub Packages, not Maven Central. GitHub requires authentication even for public Maven packages. Set `gpr.user` to your GitHub username and `gpr.key` to a personal access token (classic) with `read:packages` in your user-level `~/.gradle/gradle.properties`. Do not commit credentials. Maven Central below supplies dependencies such as `kotlin-stdlib`, not Mazewall.
 
 ```kotlin
 repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                url = uri("https://maven.pkg.github.com/pilleo/mazewall")
+                credentials {
+                    username = providers.gradleProperty("gpr.user").get()
+                    password = providers.gradleProperty("gpr.key").get()
+                }
+            }
+        }
+        filter { includeModule("io.mazewall", "mazewall-lockdown") }
+    }
     mavenCentral()
 }
 
@@ -31,7 +43,7 @@ dependencies {
 }
 ```
 
-Before `0.1.0` is published to Maven Central, evaluate from source with a JDK 25 checkout: publish `:lockdown` to your local Maven repository (`./gradlew :lockdown:publishToMavenLocal`), then request the snapshot:
+To evaluate from source without a GitHub Packages token, publish from a JDK 25 checkout with `./gradlew :lockdown:publishToMavenLocal`, then use this configuration instead:
 
 ```kotlin
 repositories {
@@ -51,33 +63,35 @@ dependencies {
 Call `Mazewall.installOnProcess` once on a **platform thread** (`!Thread.currentThread().isVirtual()`) at application startup, after any required helper child processes exit and before opening network listeners:
 
 ```java
-import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
-import io.mazewall.lockdown.MazewallInstallationException;
 import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
 import io.mazewall.lockdown.RuntimeProfile;
 
 public final class ApplicationMain {
     public static void main(String[] args) {
-        try {
-            ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
-                .block(LockdownSyscall.MEMFD_CREATE);
-            ProcessInstallation installation = Mazewall.installOnProcess(policy);
-            System.out.println("Lockdown active (" + installation.architecture() + ")");
-        } catch (MazewallInstallationException failure) {
-            // Fail closed: do not swallow on unsupported OS/kernel, missing native access, or virtual thread.
-            throw failure;
-        }
+        ProcessInstallation installation = Mazewall.installOnProcess(
+            ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT));
+        System.out.println("Lockdown active (" + installation.architecture() + ")");
     }
 }
 ```
 
+Grant native access when launching the application. Include the runtime dependencies in `libs`:
+
+```bash
+# Classpath application on Linux
+java --enable-native-access=ALL-UNNAMED -cp 'app.jar:libs/*' ApplicationMain
+
+# Named module (replace the module and main class with your own)
+java --enable-native-access=io.mazewall.lockdown --module-path 'app.jar:libs' \
+    -m com.example.app/com.example.ApplicationMain
+```
+
 - Use `RuntimeProfile.HOTSPOT_JIT` on standard HotSpot JVMs so JIT compilation can continue allocating executable code-cache pages.
-- Use `RuntimeProfile.NATIVE_IMAGE` on GraalVM Native Image / AOT runtimes where executable `mmap`/`mprotect`/`pkey_mprotect` (`PROT_EXEC`) mappings should also be denied. Once `NATIVE_IMAGE` is installed, attempting to relax back to `HOTSPOT_JIT` fails closed with `MazewallInstallationException`.
-- **Zero-code `-javaagent` attachment:** You can also attach `mazewall-lockdown.jar` before `main()` via `-javaagent:mazewall-lockdown.jar[=preset=opensearch,runtime=hotspot_jit,block=memfd_create,unblock=ptrace]` (normal library usage remains passive unless `-javaagent` is passed).
+- `RuntimeProfile.NATIVE_IMAGE` also denies new executable `mmap`/`mprotect`/`pkey_mprotect` mappings. The policy has been exercised on interpreted HotSpot; an actual GraalVM Native Image deployment is not qualified for `0.1.0`. Once `NATIVE_IMAGE` is installed, attempting to relax back to `HOTSPOT_JIT` fails closed with `MazewallInstallationException`.
 - **Startup verification:** Default installation checks `prctl(PR_GET_SECCOMP) == 2` and `getpid()` liveness without firing synthetic denied syscalls; pass `-Dio.mazewall.selfVerify=true` in CI/staging to enable active denied-syscall probing.
-- **Container `no_new_privs` compatibility:** If an outer container profile blocks `prctl(PR_SET_NO_NEW_PRIVS, 1)`, lockdown checks `prctl(PR_GET_NO_NEW_PRIVS)` and continues if `no_new_privs == 1` was already set by the container runtime (failing closed with phase-specific diagnostics otherwise).
+- **Container `no_new_privs`:** If an outer profile denies setting this bit, lockdown proceeds only after confirming it is already set. The outer profile must still permit TSYNC installation. Test your exact deployment profile before relying on lockdown there.
 - **Incompatible JVM flags:** No-exec policies reject `-XX:OnError=...` and `-XX:OnOutOfMemoryError=...` at pre-install validation time; use `-XX:+ExitOnOutOfMemoryError` or `-XX:+CrashOnOutOfMemoryError` so OOM handling does not attempt a blocked fork/exec shell spawn.
 - **Operational limits:** Once installed, the filter is **irreversible** for the lifetime of the OS process. It fails closed with `MazewallInstallationException` on macOS/Windows, missing `--enable-native-access`, or incompatible containers. Blocking `io_uring_setup`/`io_uring_enter`, `memfd_create`, and non-allowlisted `prctl` subcommands is incompatible with Netty `IoUringIoHandler` (use standard Epoll or NIO transport) and libraries invoking `memfd_create` or restricted `prctl` options after lockdown installation.
 
@@ -168,32 +182,6 @@ dependencyResolutionManagement {
 // build.gradle.kts
 dependencies {
     implementation("com.github.Pilleo.mazewall:enforcer:master-SNAPSHOT")
-}
-```
-
-### Option 3: GitHub Packages
-
-This path requires package access and an available published version. Configure
-credentials through your existing Gradle properties or operator-managed environment:
-
-```kotlin
-// settings.gradle.kts
-dependencyResolutionManagement {
-    repositories {
-        mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-            credentials {
-                username = providers.gradleProperty("gpr.user").orElse(System.getenv("GITHUB_ACTOR")).get()
-                password = providers.gradleProperty("gpr.key").orElse(System.getenv("GITHUB_TOKEN")).get()
-            }
-        }
-    }
-}
-
-// build.gradle.kts
-dependencies {
-    implementation("io.mazewall:enforcer:0.1.0-SNAPSHOT")
 }
 ```
 
