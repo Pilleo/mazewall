@@ -30,6 +30,9 @@ SEND/RECV attempts have a ceiling of eight. Deadline expiry claims the lease,
 attempts EPERM once and terminates the session, including on EINTR or ENOENT.
 There is no fallback reply after a claimed terminal effect. FD injection retains
 the atomic ADDFD-with-SEND operation where a syscall returns a new descriptor.
+ADDFD classifies ENOENT as `NotificationGone` and preserves other errno values
+with the ADDFD operation, including EINTR after the retry budget is exhausted.
+An unconfirmed supervisor effect failure carries the supervisor operation.
 
 This deadline is the watchdog: it runs in the existing reactor and does not
 interrupt arbitrary JVM code. Completion callbacks have disposal authority only.

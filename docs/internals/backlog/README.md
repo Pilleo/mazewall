@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 391 | *Total Resolved Issues:* 794
+*Total Active Issues:* 390 | *Total Resolved Issues:* 795
 
-Active status detail: 392 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 387 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -221,7 +221,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235357-847](issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) | Align approved accept routing with tracee authority execution | high | core |
 | [issue-20261103-235358-296](issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects | high | core |
 | [issue-20261103-235358-819](issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) | Retain supervisor helper capacity across fatal worker replacement | medium | core |
-| [issue-20261103-235359-647](issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) | Preserve typed ADDFD notification-gone and native-error outcomes | low | core |
 | [issue-20261103-235400-034](issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) | Escape observed paths as Kotlin literals in generated policy DSL | medium | profiler |
 | [issue-20261103-235400-350](issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) | Hide incomplete-conversion test seams from ordinary Java consumers | medium | profiler |
 | [issue-20261103-235400-690](issue-20261103-235400-690-own-late-created-strace-descendants-through-cancel.md) | Own late-created strace descendants through cancellation and retirement | medium | profiler |

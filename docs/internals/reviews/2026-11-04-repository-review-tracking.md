@@ -96,7 +96,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | SUP-03 | P1 | W04 | [issue-20261103-235358-296](../backlog/issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) |
 | SUP-04 | P2 | W04 | [issue-20261103-235358-819](../backlog/issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) |
 | SUP-05 | P2 | W04 | [issue-20261103-235359-257](../backlog/resolved/issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md) |
-| SUP-06 | P3 | W04 | [issue-20261103-235359-647](../backlog/issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) |
+| SUP-06 | P3 | W04 | [issue-20261103-235359-647](../backlog/resolved/issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) |
 | EVID-04 | P2 | W14 | [issue-20261103-235400-034](../backlog/issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) |
 | EVID-05 | P2 | W14 | [issue-20261103-235400-350](../backlog/issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) |
 | EVID-06 | P2 | W14 | [issue-20261103-235400-690](../backlog/issue-20261103-235400-690-own-late-created-strace-descendants-through-cancel.md) |
