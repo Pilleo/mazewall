@@ -1,14 +1,52 @@
 package io.mazewall.platform.seccomp.daemon
 
+import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.platform.native.LinuxNative
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertSame
 
 class EventFdCompletionWakeupTest {
+    @ParameterizedTest
+    @ValueSource(ints = [1, 2])
+    fun `failed eventfd buffer allocation closes the arena and descriptor`(failingAllocation: Int) {
+        val number = 53_800 + failingAllocation
+        val allocation = IllegalStateException("injected eventfd buffer allocation failure")
+        val cleanup = IllegalStateException("injected descriptor close failure")
+        var arena: NativeArena? = null
+        var allocations = 0
+        val closed = mutableListOf<Int>()
+        val engine = MockNativeEngine().apply {
+            syscallResult = LinuxNative.SyscallResult.Success(number.toLong())
+            fileSystem.onClose = { fd ->
+                closed += fd.value
+                throw cleanup
+            }
+        }
+
+        val error = assertFailsWith<IllegalStateException> {
+            EventFdCompletionWakeup.create(engine) {
+                arena = it
+                if (++allocations == failingAllocation) throw allocation
+                it.allocate(8L)
+            }
+        }
+
+        assertSame(allocation, error)
+        assertEquals(listOf(cleanup), error.suppressed.toList())
+        assertEquals(failingAllocation, allocations)
+        assertEquals(listOf(number), closed)
+        assertFalse(checkNotNull(arena).isAlive)
+    }
+
     @Test
     fun `signal makes the owned eventfd readable until the reactor drains it`() {
         EventFdCompletionWakeup.create(LinuxNative).use { wakeup ->

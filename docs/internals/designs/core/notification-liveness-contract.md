@@ -142,6 +142,12 @@ must not be represented as a completed feature.
 
 ## Profiler observation and ACK
 
+Session construction retains the completion wakeup through listener setup and
+buffer acquisition. A failed startup retires the wakeup and any partially
+acquired buffers. The eventfd factory owns the descriptor and arena until both
+counter buffers are initialized. Rollback attempts every independent release
+and preserves startup and cleanup failure evidence.
+
 Profiler installation waits for a one-shot listener startup result inside
 the installation deadline. The listener reports `Ready` after accepting its
 initial daemon ACK. A rejected ACK, EOF or read failure reports `Failed(cause)`.

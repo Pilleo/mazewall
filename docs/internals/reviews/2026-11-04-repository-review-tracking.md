@@ -56,7 +56,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | PLAT-03 | P1 | W01 | [issue-20261103-235244-414](../backlog/resolved/issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) |
 | PLAT-04 | P2 | W01 | [issue-20261103-235244-769](../backlog/resolved/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) |
 | PLAT-05 | P2 | W01 | [issue-20261103-235245-104](../backlog/resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) |
-| PLAT-06 | P2 | W01 | [issue-20261103-235245-538](../backlog/issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) |
+| PLAT-06 | P2 | W01 | [issue-20261103-235245-538](../backlog/resolved/issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) |
 | PLAT-07 | P2 | W01 | [issue-20261103-235246-003](../backlog/issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) |
 | PN05-01 | P2 | W05 | [issue-20261103-235246-361](../backlog/issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) |
 | PN05-02 | P1 | W05 | [issue-20261103-235246-772](../backlog/resolved/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) |
