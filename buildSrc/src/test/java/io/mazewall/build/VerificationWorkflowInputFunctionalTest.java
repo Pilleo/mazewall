@@ -16,6 +16,9 @@ public final class VerificationWorkflowInputFunctionalTest {
         Path marker = Path.of(args[0]);
         Path repository = marker.getParent().getParent().getParent().getParent();
         var violations = CheckCiCachePolicyKt.ciCachePolicyViolations(Files.readString(repository.resolve(".github/workflows/ci.yml")));
+        if (!CiCodeFilterPolicyKt.ciCodeFilterValid(Files.readString(repository.resolve(".github/ci-code-paths.yml")))) {
+            throw new AssertionError("Actual shared code filter must cover reviewed inputs");
+        }
         if (!violations.isEmpty()) throw new AssertionError("Actual workflow must satisfy the completed-data policy: " + violations);
         Files.createDirectories(marker.getParent());
         Files.writeString(marker, "verified\n");
@@ -53,8 +56,9 @@ public final class VerificationWorkflowInputFunctionalTest {
             String valid = Files.readString(repository.resolve(".github/workflows/ci.yml"));
             Files.writeString(workflow, valid);
             Files.copy(repository.resolve(".github/workflows/security-data.yml"), fixture.resolve(".github/workflows/security-data.yml"));
+            Files.copy(repository.resolve(".github/ci-code-paths.yml"), fixture.resolve(".github/ci-code-paths.yml"));
             Files.createDirectories(fixture.resolve("scripts"));
-            for (String name : new String[] {"security_snapshot.py", "test_security_snapshot.py"}) {
+            for (String name : new String[] {"security_snapshot.py", "test_security_snapshot.py", "ci_required_gate.py", "test_ci_required_gate.py"}) {
                 Files.copy(repository.resolve("scripts").resolve(name), fixture.resolve("scripts").resolve(name));
             }
             Path helper = fixture.resolve("scripts/ci_cache_key.sh");
@@ -71,7 +75,9 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.writeString(verificationMetadata, Files.readString(verificationMetadata) + "\n<!-- Metadata-only input invalidation control -->\n");
             outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
             for (Path input : new Path[] {fixture.resolve(".github/workflows/security-data.yml"),
-                fixture.resolve("scripts/security_snapshot.py"), fixture.resolve("scripts/test_security_snapshot.py")}) {
+                fixture.resolve("scripts/security_snapshot.py"), fixture.resolve("scripts/test_security_snapshot.py"),
+                fixture.resolve(".github/ci-code-paths.yml"), fixture.resolve("scripts/ci_required_gate.py"),
+                fixture.resolve("scripts/test_ci_required_gate.py")}) {
                 Files.writeString(input, Files.readString(input) + "\n# Input invalidation control\n");
                 outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
                 outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());

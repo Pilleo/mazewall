@@ -152,6 +152,9 @@ tasks.register<JavaExec>("ciCachePolicyTest") {
     inputs.files(
         layout.projectDirectory.file("../.github/workflows/ci.yml"),
         layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../.github/ci-code-paths.yml"),
+        layout.projectDirectory.file("../scripts/ci_required_gate.py"),
+        layout.projectDirectory.file("../scripts/test_ci_required_gate.py"),
         layout.projectDirectory.file("../scripts/security_snapshot.py"),
         layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
     ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)
@@ -189,6 +192,9 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(
         layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../.github/ci-code-paths.yml"),
+        layout.projectDirectory.file("../scripts/ci_required_gate.py"),
+        layout.projectDirectory.file("../scripts/test_ci_required_gate.py"),
         layout.projectDirectory.file("../scripts/security_snapshot.py"),
         layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
     ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)

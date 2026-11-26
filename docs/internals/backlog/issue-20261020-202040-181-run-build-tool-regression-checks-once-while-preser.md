@@ -49,5 +49,21 @@ single-pass work and the proposed November2 smoke/full plan must preserve their 
 and failure propagation rather than calling Java-only selection exhaustive. No new optimization,
 threshold reduction or duplicate full-suite run was approved by the review.
 
+
+## Implementation checkpoint — 2026-11-26
+
+The required JDK 25 build-logic job and its executed 625-combination gate
+projection are in place. The required check retains its existing name and
+reports each lane's result through a typed evaluator. The core, PIT and
+security jobs use one code filter that includes wrappers, locks and dependency
+verification metadata. Publication also requires confined-kernel validation.
+Optional integrations and opted-in Go remain prerequisites of the required
+check under their existing policy.
+
+The local policy fixtures checked the production command and its inputs,
+including invalidation of a prior success marker and publication prerequisites.
+The full offline host build and confined Docker kernel lane passed on JDK 25.
+Hosted timing, runner resource data and publication qualification remain open.
+
 ---
 <!-- id: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser  file: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md -->

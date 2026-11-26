@@ -350,16 +350,20 @@ skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. The 625-result projection varies core, mutation, security and build-logic outcomes
 with Go, optional integration and confined-helper results fixed to success. Separate
 controls vary Go, optional-integration and confined-helper results with the other
-prerequisites successful. The literal required join accepts only seven `success`
-results; these bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
+prerequisites successful. The typed evaluator in `scripts/ci_required_gate.py` requires
+success from every lane, except that Go may be skipped when both opt-in flags are
+disabled. It prints the result and decision for each lane before returning an
+aggregate exit status. Missing, failed, cancelled and unexpected results fail
+closed. These bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
 required native freshness and publication gates are unchanged.
 
 The marker-producing build-tool verifier declares the actual CI workflow as a
-named relative-path-sensitive input. An applied-registration fixture checks that
-a workflow-only edit reruns executable policy checks and an invalid edit removes
+named relative-path-sensitive input, alongside `.github/ci-code-paths.yml`,
+the required-gate evaluator and its diagnostic tests. An applied-registration
+fixture checks that edits to each input rerun executable policy checks and an invalid edit removes
 the old success marker. Ownership fixtures verify a different numeric UID rather
 than assuming a system file is foreign; production ownership checks are unchanged.
 
@@ -370,8 +374,12 @@ never backgrounded together in one checkout. Core retains host quality,
 kernel/fresh-JVM and exploitation gates; independent security retains the real
 vulnerability scan. Mutation uses host Gradle without Podman
 or another container-cache archive. Core, mutation and security independently filter code
-changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
-while its job succeeds; the required join is never job-level skipped.
+changes through the same external `.github/ci-code-paths.yml` filter. It covers
+source, scripts, CI workflows, Gradle declarations and properties, root/nested
+`gradle.lockfile` and `settings-gradle.lockfile`, dependency verification metadata,
+`gradlew`/`gradlew.bat`, wrapper JAR/properties, container definitions and SpotBugs
+configuration. Changes to the shared filter also trigger these gates. Docs-only
+steps may skip while their jobs succeed; the required join is never job-level skipped.
 
 Core invokes the root `:unitCheck` explicitly, avoiding Gradle's recursive bare
 task-name selection of demo gates. Slow Gradle-backed consumer regressions are
@@ -518,13 +526,17 @@ collection. The workflow-policy regression rejects removal of failure-time uploa
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
 join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]`
-and `if: always()`; its shell requires all seven results to equal `success`.
-Failure, cancellation, skipping or a
-missing result cannot turn the join green. It forwards
+and `if: always()`. The fixed shell command passes results and Go opt-in flags
+through quoted environment variables to the typed evaluator. All required lanes
+must succeed; skipped Go is accepted only when both opt-in flags are disabled.
+Failure, cancellation, a skipped required lane or a missing result cannot turn
+the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
 
 Publication remains a separate default-branch-push-only job with `needs` edges to
-optional acceptance and that required join. Its normal success condition prevents
+`core-quality`, `mutation-tests`, `security-check`, `build-logic-validation` and
+`confined-helper-kernel`. Optional integrations and Go remain excluded from
+publication prerequisites. Its normal success condition prevents
 publication after a failed, skipped or cancelled prerequisite; PRs cannot publish.
 Only publication has package-write permission. It consumes the forwarded core
 cache identity and retains the same container runner, publication command and

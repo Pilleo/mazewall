@@ -29,7 +29,7 @@ internal enum class CiCacheViolation(val explanation: String) {
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
     GO_VALIDATION("Opt-in Go tests and pinned vulnerability scanning must stay flag-gated, bounded and fail closed for both modules"),
     REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic, optional-integration, confined-helper and enabled Go validation success"),
-    PUBLISH_GRAPH("Publication must publish only verified :lockdown after core, mutation, security, and build-logic validations succeed on a default-branch push without coupling to optional integrations"),
+    PUBLISH_GRAPH("Publication must publish only verified :lockdown after core, mutation, security, build-logic, and confined-helper validations succeed on a default-branch push without coupling to optional integrations"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
 }
@@ -150,17 +150,13 @@ private fun workflowStep(job: String, name: String): String =
     job.substringAfter("- name: $name\n", "").substringBefore("\n- name: ")
 
 private fun hasCodeFilter(job: String): Boolean {
-    val prefix = """
+    val expected = """
         id: filter
         uses: dorny/paths-filter@v3
         with:
-            filters: |
-                code:
-    """.trimIndent() + "\n"
-    val filter = workflowStep(job, "Check file changes").trimIndent().trim()
-    val paths = filter.substringAfter(prefix, "").lines()
-    return filter.startsWith(prefix) && paths.all { Regex(" {12}- '[^']+'").matches(it) } &&
-        "            - '.github/workflows/ci.yml'" in paths &&
+            filters: .github/ci-code-paths.yml
+    """.trimIndent()
+    return workflowStep(job, "Check file changes").trimIndent().trim() == expected &&
         workflowHeaders(job).any { it == "pull-requests: read" || it == "pull-requests: write" }
 }
 
@@ -327,8 +323,30 @@ private fun hasOptionalDiagnostics(job: String): Boolean =
 private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
+        - name: Checkout Code
+          uses: actions/checkout@v6
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && (test "${'$'}{{ needs.go-validation.result }}" = success || (test "${'$'}{{ vars.ENABLE_GO_VALIDATION }}" != true && test "${'$'}{{ inputs.enable_go_validation }}" != true && test "${'$'}{{ needs.go-validation.result }}" = skipped)) && test "${'$'}{{ needs.optional-integrations.result }}" = success && test "${'$'}{{ needs.confined-helper-kernel.result }}" = success
+          env:
+              CORE_QUALITY_RESULT: ${'$'}{{ needs.core-quality.result }}
+              MUTATION_TESTS_RESULT: ${'$'}{{ needs.mutation-tests.result }}
+              SECURITY_CHECK_RESULT: ${'$'}{{ needs.security-check.result }}
+              BUILD_LOGIC_VALIDATION_RESULT: ${'$'}{{ needs.build-logic-validation.result }}
+              GO_VALIDATION_RESULT: ${'$'}{{ needs.go-validation.result }}
+              OPTIONAL_INTEGRATIONS_RESULT: ${'$'}{{ needs.optional-integrations.result }}
+              CONFINED_HELPER_KERNEL_RESULT: ${'$'}{{ needs.confined-helper-kernel.result }}
+              GO_VARIABLE: ${'$'}{{ vars.ENABLE_GO_VALIDATION }}
+              GO_INPUT: ${'$'}{{ inputs.enable_go_validation }}
+          run: >-
+              python3 scripts/ci_required_gate.py
+              --core-quality="${'$'}CORE_QUALITY_RESULT"
+              --mutation-tests="${'$'}MUTATION_TESTS_RESULT"
+              --security-check="${'$'}SECURITY_CHECK_RESULT"
+              --build-logic-validation="${'$'}BUILD_LOGIC_VALIDATION_RESULT"
+              --go-validation="${'$'}GO_VALIDATION_RESULT"
+              --optional-integrations="${'$'}OPTIONAL_INTEGRATIONS_RESULT"
+              --confined-helper-kernel="${'$'}CONFINED_HELPER_KERNEL_RESULT"
+              --go-variable="${'$'}GO_VARIABLE"
+              --go-input="${'$'}GO_INPUT"
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
         headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]") &&
@@ -352,7 +370,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     val scan = workflowStep(security, "Run Security Check")
     val reports = workflowStep(security, "Require SDK Security Reports")
     return "continue-on-error:" !in security && "dependencyCheckUpdate" !in security && "NVD_API_KEY" !in security &&
-        "- '.github/workflows/security-data.yml'" in workflowStep(security, "Check file changes") &&
+        hasCodeFilter(security) &&
         controls.trimIndent().trim() == "if: steps.filter.outputs.code == 'true'\nrun: python3 scripts/test_security_snapshot.py" &&
         listOf("getWorkflow", "getWorkflowRunAttempt", "security-data.yml", "ci.yml", "error.status !== 404", "throw error", "scripts/security_snapshot.py", "origin.repository_id !== repositoryId", "origin.head_repository_id !== repositoryId", "origin.head_branch !== defaultBranch", "!trustedWorkflow", "run.head_sha !== origin.head_sha", "Number(match[2]) > run.run_attempt").all { it in selector } &&
         listOf("archiveSize > 2147483648", "bytes > archiveSize", "bytes !== archiveSize", "parseSuccessResponseBody: false", "flags: 'wx'").all { it in download } &&
@@ -397,7 +415,7 @@ internal fun securityUpdaterPolicyViolations(workflow: String): List<String> {
 private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {
     val publish = workflowJob(workflow, "publish")
     val headers = publish.substringBefore("        steps:").lines().map(String::trim)
-    val expectedNeeds = "needs: [core-quality, mutation-tests, security-check, build-logic-validation]"
+    val expectedNeeds = "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]"
     val verifyCommand = ":lockdown:verifyLockdownPublication"
     val publishCommand = ":lockdown:publishMavenJavaPublicationToGitHubPackagesRepository"
     val consumerCommand = ":lockdownConsumerCheck"
@@ -477,8 +495,23 @@ abstract class CheckCiCachePolicy : DefaultTask() {
     val securitySnapshotTests: java.io.File
         get() = workflow.get().asFile.parentFile.parentFile.parentFile.resolve("scripts/test_security_snapshot.py")
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val codePaths: java.io.File get() = workflow.get().asFile.parentFile.parentFile.resolve("ci-code-paths.yml")
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val requiredGate: java.io.File
+        get() = workflow.get().asFile.parentFile.parentFile.parentFile.resolve("scripts/ci_required_gate.py")
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    val requiredGateTests: java.io.File
+        get() = workflow.get().asFile.parentFile.parentFile.parentFile.resolve("scripts/test_ci_required_gate.py")
+
     @TaskAction
     fun verify() {
+        if (!ciCodeFilterValid(codePaths.readText())) throw GradleException("CODE_CHANGE_FILTER: invalid shared code paths")
         val updaterFailures = securityUpdaterPolicyViolations(securityUpdater.readText())
         if (updaterFailures.isNotEmpty()) throw GradleException("SECURITY_UPDATER: " + updaterFailures.joinToString())
         val violations = ciCachePolicyViolations(workflow.get().asFile.readText())
