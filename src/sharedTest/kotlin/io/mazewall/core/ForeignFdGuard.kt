@@ -21,8 +21,8 @@ import java.nio.file.attribute.BasicFileAttributes
  * failure sites.
  *
  * Invariant enforced: descriptors present before a test are foreign; tests may
- * only close what they opened themselves. Anything missing after the test is a
- * violation named by fd number and target (readlink of /proc/self/fd/N).
+ * only close what they opened themselves. A missing or changed descriptor in
+ * the verified after snapshot is reported with its fd number and target.
  *
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
@@ -41,19 +41,20 @@ class ForeignFdGuard internal constructor(
 
     override fun afterEach(context: ExtensionContext) {
         if (isDisabled()) return
-        val before = context.getStore(NAMESPACE).remove(FD_KEY, Set::class.java) as? Set<FdInfo> ?: return
+        val before = context.getStore(NAMESPACE).remove(FD_KEY, Snapshot::class.java) ?: return
         val after = currentFds()
-        val beforeById = before.associateBy { it.id }
-        val vanished = before.filterNot { candidate ->
-            after.any { it.id == candidate.id && it.target == candidate.target }
-        }
-        if (vanished.isNotEmpty()) {
-            val detail = vanished.joinToString("\n  ") {
-                "fd ${it.id} -> ${it.target} (${beforeById[it.id]?.target ?: "?"})"
+        val differences = before.targets.toSortedMap().mapNotNull { (id, previousTarget) ->
+            when (val currentTarget = after.targets[id]) {
+                previousTarget -> null
+                null -> "fd $id missing from after snapshot (previous target $previousTarget)"
+                else -> "fd $id changed target from $previousTarget to $currentTarget"
             }
+        }
+        if (differences.isNotEmpty()) {
+            val detail = differences.joinToString("\n  ")
             throw AssertionError(
-                "ForeignFdGuard: test '${context.displayName}' closed ${vanished.size} " +
-                    "descriptor(s) it did not own:\n  $detail\n" +
+                "ForeignFdGuard: test '${context.displayName}' changed ${differences.size} " +
+                    "foreign descriptor observation(s):\n  $detail\n" +
                     "Mint tokens only around integers obtained from real opens this test owns.",
             )
         }
@@ -61,27 +62,33 @@ class ForeignFdGuard internal constructor(
 
     private data class FdInfo(
         val id: Int,
-        val target: String,
+        val target: Path,
     )
 
-    private fun currentFds(): Set<FdInfo> =
-        Files
+    private class Snapshot(
+        val targets: Map<Int, Path>,
+    )
+
+    private fun currentFds(): Snapshot {
+        val inspectionDirectory = Path.of("/proc/${ProcessHandle.current().pid()}/fd")
+        val candidates = Files
             .list(inspectionRoot)
             .use { stream ->
-            val inspectionDirectory = "/proc/${ProcessHandle.current().pid()}/fd"
-            stream
-                .map { p ->
-                    val id = p.fileName.toString().toInt()
-                    descriptorTarget(p)?.let { target -> FdInfo(id, target) }
-                }.filter { it != null && it.target != inspectionDirectory }
-                .toList()
-                .filterNotNull()
-        }.filter { fd -> descriptorTarget(inspectionRoot.resolve(fd.id.toString())) == fd.target }
-            .toSet()
+                stream
+                    .map { path ->
+                        val id = path.fileName.toString().toInt()
+                        descriptorTarget(path)?.let { target -> FdInfo(id, target) }
+                    }.filter { it != null && it.target != inspectionDirectory }
+                    .toList()
+                    .filterNotNull()
+            }
+        val verified = candidates.filter { fd -> descriptorTarget(inspectionRoot.resolve(fd.id.toString())) == fd.target }
+        return Snapshot(verified.associate { it.id to it.target })
+    }
 
-    private fun descriptorTarget(path: Path): String? =
+    private fun descriptorTarget(path: Path): Path? =
         try {
-            readLink(path).toString()
+            readLink(path)
         } catch (_: NoSuchFileException) {
             // An entry race is acceptable only while the inspection root is still present.
             Files.readAttributes(inspectionRoot, BasicFileAttributes::class.java)

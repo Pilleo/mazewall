@@ -23,6 +23,7 @@ import io.mazewall.platform.lifecycle.TestFileDescriptors
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.*
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.RawSyscallOperations
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
 import io.mazewall.platform.seccomp.daemon.SeccompSessionHandler
@@ -33,13 +34,9 @@ import io.mazewall.profiler.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.ffi.HandshakeSession
-import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.RealProfilerTransport
 import io.mazewall.profiler.ffi.SeccompReplyResult
-import io.mazewall.profiler.ffi.SeccompResponder
-import io.mazewall.profiler.ffi.SocketLifecycleManager
-import io.mazewall.profiler.ffi.TraceEventPublisher
 import io.mazewall.profiler.ffi.TransportNativeEngine
 import io.mazewall.profiler.internal.TraceStreamEndWire
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
@@ -407,16 +404,17 @@ class ProfilerDaemonTest {
     @Test
     fun `transport engine bridge uses the injected raw native operations`() {
         val transport = MockTransport()
-        val bridge = TransportNativeEngine(transport, MockNativeEngine())
+        val bridge = TransportNativeEngine(transport, transport.nativeEngine)
+        val expected = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(20_001L)
+        transport.nativeEngine.syscallResult = expected
         assertSame(transport.raw, bridge.raw)
+        assertSame(transport.nativeEngine.fileSystem, bridge.fileSystem)
+        assertEquals(expected, bridge.raw.syscall(0L))
     }
 
-    private open class MockTransport :
-        ProfilerTransport,
-        SeccompResponder,
-        TraceEventPublisher,
-        NativeIoOperations,
-        SocketLifecycleManager {
+    private open class MockTransport(
+        private val beforeSetFlags: (FileDescriptor<*, FdState.Open, FdOwnership>) -> Unit = {},
+    ) : ProfilerTransport {
         val sentEvents = mutableListOf<SyscallEvent<SyscallEventState.Resolved>>()
         var continueSent = false
         var errorSent = false
@@ -431,6 +429,10 @@ class ProfilerDaemonTest {
         var nextWriteResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
             LinuxNative.SyscallResult.Success(1L)
         var nextIoctlResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+
+        val nativeEngine = MockNativeEngine().apply { syscallResult = LinuxNative.SyscallResult.Success(20_000L) }
+
+        fun daemon(): ProfilerDaemonEngine = ProfilerDaemonEngine("/tmp/test.sock", this, MockReader(), engine = nativeEngine)
 
         context(arena: Arena) override fun sendTraceEvent(
             socketFd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -507,7 +509,7 @@ class ProfilerDaemonTest {
             return LinuxNative.SyscallResult.Success(0L)
         }
 
-        override val raw = object : io.mazewall.platform.native.RawSyscallOperations {
+        override val raw = object : RawSyscallOperations {
             override fun poll(
                 fds: ManagedSegment,
                 nfds: Long,
@@ -559,25 +561,28 @@ class ProfilerDaemonTest {
                 fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 cmd: Int,
                 arg: Long,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (cmd == NativeConstants.F_SETFL) beforeSetFlags(fd)
+                return nativeEngine.raw.fcntl(fd, cmd, arg)
+            }
 
             override fun syscall(
                 nr: Long,
-                arg1: NativeArg,
-                arg2: NativeArg,
-                arg3: NativeArg,
-                arg4: NativeArg,
-                arg5: NativeArg,
-                arg6: NativeArg,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+                a1: NativeArg,
+                a2: NativeArg,
+                a3: NativeArg,
+                a4: NativeArg,
+                a5: NativeArg,
+                a6: NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeEngine.raw.syscall(nr, a1, a2, a3, a4, a5, a6)
 
             override fun syscall4(
                 nr: Long,
-                arg1: NativeArg,
-                arg2: NativeArg,
-                arg3: NativeArg,
-                arg4: NativeArg,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
+                a1: NativeArg,
+                a2: NativeArg,
+                a3: NativeArg,
+                a4: NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = nativeEngine.raw.syscall4(nr, a1, a2, a3, a4)
         }
 
         override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
@@ -675,7 +680,7 @@ class ProfilerDaemonTest {
 
     @Test
     fun `run invokes setup callback before entering daemon loop`() {
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", MockTransport(), MockReader())
+        val engine = MockTransport().daemon()
         val callbackFailure = IllegalStateException("callback invoked")
 
         val thrown = assertThrows(IllegalStateException::class.java) {
@@ -689,7 +694,7 @@ class ProfilerDaemonTest {
     fun `test daemon handshake uses injected transport write`() {
         val transport = MockTransport()
         transport.nextWriteResult = LinuxNative.SyscallResult.Error(5, -1L)
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+        val engine = transport.daemon()
 
         engine.handleConnection(
             TestFileDescriptors
@@ -962,7 +967,7 @@ class ProfilerDaemonTest {
                 throw InterruptedException("Simulated interruption")
             }
         }
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+        val engine = transport.daemon()
 
         // Clear interrupt status if any
         Thread.interrupted()
@@ -986,7 +991,7 @@ class ProfilerDaemonTest {
                 throw ClosedByInterruptException()
             }
         }
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+        val engine = transport.daemon()
 
         // Clear interrupt status if any
         Thread.interrupted()
@@ -1476,9 +1481,18 @@ class ProfilerDaemonTest {
     }
 
     @Test
-    fun `test handleConnection cleans up both socket and listener FDs if interrupted after FD attachment but prior to session reactor execution`() {
+    fun `interrupted listener setup closes the socket and listener exactly once`() {
+        val socket = TestFileDescriptors.adopt(10, FileDescriptorRole.UnixSocket)
+        val listener = TestFileDescriptors.adopt(20, FileDescriptorRole.SeccompNotif)
         val closedFds = mutableListOf<Int>()
-        val transport = object : MockTransport() {
+        val interruptListenerSetup: (FileDescriptor<*, FdState.Open, FdOwnership>) -> Unit = { fd ->
+            if (fd === listener) throw InterruptedException("Injected listener setup interruption")
+        }
+        val transport = object : MockTransport(beforeSetFlags = interruptListenerSetup) {
+            override fun recvDescriptor(
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned> = listener
+
             override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
                 closedFds.add(fd.value)
             }
@@ -1487,42 +1501,16 @@ class ProfilerDaemonTest {
                 fd: FileDescriptor<*, FdState.Open, FdOwnership>,
                 buf: MemorySegment,
                 count: Long,
-            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                return LinuxNative.SyscallResult.Success(count)
-            }
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
         }
 
-        val pool = SegmentPool.SECCOMP_NOTIF_POOL
-        val arenaField = SegmentPool::class.java.getDeclaredField("arena")
-        arenaField.isAccessible = true
-        val originalArena = arenaField.get(pool) as io.mazewall.ffi.memory.NativeArena
-
-        val queueField = SegmentPool::class.java.getDeclaredField("queue")
-        queueField.isAccessible = true
-        val queue = queueField.get(pool) as java.util.concurrent.ConcurrentLinkedQueue<*>
-
-        val tempQueue = ArrayList(queue)
-        queue.clear()
-
-        val closedArena = io.mazewall.ffi.memory.NativeArena
-            .ofConfined()
-            .apply { close() }
-        arenaField.set(pool, closedArena)
-
         try {
-            val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
-            engine.handleConnection(
-                TestFileDescriptors
-                .replace(10),
-            )
+            transport.daemon().handleConnection(socket)
 
-            assertTrue(closedFds.contains(20), "Listener FD 20 should have been closed")
-            assertTrue(closedFds.contains(10), "Socket FD 10 should have been closed")
+            assertTrue(Thread.currentThread().isInterrupted, "Listener setup should have interrupted the reactor thread")
+            assertEquals(listOf(socket.value, listener.value).sorted(), closedFds.sorted())
         } finally {
-            arenaField.set(pool, originalArena)
-            for (seg in tempQueue) {
-                (queue as java.util.concurrent.ConcurrentLinkedQueue<Any>).offer(seg)
-            }
+            Thread.interrupted()
         }
     }
 
@@ -1535,7 +1523,7 @@ class ProfilerDaemonTest {
             }
         }
 
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+        val engine = transport.daemon()
 
         // Use reflection to replace clientSockets with a list that throws an OutOfMemoryError on add
         val throwingList = object : java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>() {
@@ -1583,7 +1571,7 @@ class ProfilerDaemonTest {
             }
         }
 
-        val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+        val engine = transport.daemon()
 
         // Use reflection to replace clientSockets with a list that throws an IllegalStateException on add
         val throwingList = object : java.util.concurrent.CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>() {

@@ -8,6 +8,8 @@ component: "core"
 target_modules: []
 target_files:
   - "src/sharedTest/kotlin/io/mazewall/core/ForeignFdGuard.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/platform/lifecycle/ForeignFdGuardTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/engine/ProfilerDaemonTest.kt"
 target_symbols:
   - "ForeignFdGuard"
 open_questions: false
@@ -44,6 +46,28 @@ Detekt errors, separately recorded in issue20261009-043520-499, not waived. Init
 hook interrupted at200s tool deadline had no verdict; one reconciled durable retry
 passed133s. Originalfd101 cause remains unknown; XML proves absent OR changed target,
 not absence alone. Final repository acceptance remains open.
+
+## PR #573 follow-up
+
+The JDK 25 [CI test report](https://github.com/Pilleo/mazewall/actions/runs/45881204597/artifacts/15148760284)
+reported a changed or missing fd 0 pipe after the profiler's interrupted-session
+setup test. Its mock syscall returned 0 for eventfd acquisition, and the daemon's
+native filesystem backend dispatched a real close during startup rollback.
+
+The profiler fixture now shares a mock backend for acquisition and close. Its
+interruption test injects failure at listener flag setup and checks that the
+socket and listener are each closed once. `ForeignFdGuard` uses a typed snapshot
+and reports missing descriptors separately from changed targets. Both conditions
+still fail the guard for verified foreign descriptors. The existing inspection
+error propagation and stable-snapshot controls remain covered.
+
+The new diagnostics and mock acquisition checks failed against the original
+fixtures. On JDK 25, the exported PR #573 source with this follow-up passed all
+77 targeted Platform, Enforcer, and Profiler tests plus lint for the changed
+source sets. The full Profiler unit suite on the export reported 1,809 passed,
+five skipped, and zero failures. The host Gradle build and confined retry
+passed on JDK 25 in the shared checkout. This issue remains open pending
+hosted verification.
 
 ---
 <!-- id: issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati  file: issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md -->
