@@ -273,14 +273,14 @@ internal class SeccompSessionHandler(
     context(arena: NativeArena) private fun advancePending(pollFds: ManagedSegment): LoopAction {
         val current = checkNotNull(pending)
         observePending(current)
-        if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current, expired = true)
+        if (current.deadline.isExpired(nanoTime())) return denyAndTerminate(current, expired = true)
         val progress = try {
             checkNotNull(current.work).poll()
         } catch (expectedNotificationFailure: Throwable) {
             terminateAfterFailure(current, expectedNotificationFailure)
         }
         // Local preparation may consume the last deadline tick. A late completion never wins.
-        if (nanoTime() - current.deadline.nanoTime >= 0) {
+        if (current.deadline.isExpired(nanoTime())) {
             return denyAndTerminate(current, expired = true, lateCompletion = progress is NotificationProgress.Ready)
         }
         return when (progress) {

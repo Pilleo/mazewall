@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 390 | *Total Resolved Issues:* 796
+*Total Active Issues:* 389 | *Total Resolved Issues:* 797
 
-Active status detail: 387 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 386 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -179,7 +179,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261105-183230-840](issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) | Require complete class-lifetime coverage before native canonical-cache admission | medium | profiler |
 | [issue-20261105-182947-263](issue-20261105-182947-263-encode-production-supervisor-authority-work-phase-.md) | Encode production supervisor authority-work phase payloads in one closed state — design-only | low | enforcer |
 | [issue-20261103-234851-768](issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) | Correct AArch64 renameat metadata before policy compilation | high | core |
-| [issue-20261103-235243-934](issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic | medium | core |
+| Archived [issue-20261103-235243-934](resolved/issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) | Use consistent wrap-safe monotonic deadline arithmetic (resolved 2026-11-26) | medium | core |
 | Archived [issue-20261103-235244-414](resolved/issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) | Preserve descriptor generations through typed SCM_RIGHTS transmission (resolved 2026-11-26) | high | core |
 | Archived [issue-20261103-235245-104](resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) | Validate managed prctl pointer arguments before native dispatch (resolved 2026-11-21) | medium | core |
 | [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |

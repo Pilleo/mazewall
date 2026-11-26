@@ -21,6 +21,10 @@ bounded local work or a nonblocking I/O attempt and returns `Await` or `Ready`.
 The reactor advances work on readiness, idle polls and interrupted polls, choosing
 a timeout no later than the pending deadline. It checks expiry both before and
 after polling work; completion at the boundary loses to expiry.
+The shared `Deadline` uses signed differences for expiration and remaining
+time. Its absolute timestamp may wrap, and durations are capped at the signed
+nanosecond comparison horizon. A positive sub-millisecond budget rounds down
+to zero milliseconds for polling and remains active until its deadline.
 
 Only the reactor claims `NotificationReplyLease` and invokes a terminal reply.
 The lease is consumed even if native delivery fails or the effect throws. Every

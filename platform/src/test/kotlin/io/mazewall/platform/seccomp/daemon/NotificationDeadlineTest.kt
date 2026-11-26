@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 @org.junit.jupiter.api.parallel.Isolated
 class NotificationDeadlineTest {
@@ -127,16 +129,18 @@ class NotificationDeadlineTest {
         assertEquals(0, after.failed - before.failed)
     }
 
-    @Test
-    fun `idle reactor expires pending work at thirty seconds and ignores late completion`() {
+    @ParameterizedTest
+    @ValueSource(longs = [0L, -1_000_000_000L, Long.MAX_VALUE - 10_000_000_000L])
+    fun `idle reactor expires pending work at thirty seconds and ignores late completion`(origin: Long) {
         val before = NotificationLivenessMetrics.snapshot()
         val fixture = Fixture()
         fixture.use {
+            fixture.now = origin
             assertEquals(LoopAction.Continue, fixture.tick())
-            fixture.now = 29_999_999_999L
+            fixture.now = origin + 29_999_999_999L
             assertEquals(LoopAction.Continue, fixture.tick())
             assertEquals(0, fixture.replies.size)
-            fixture.now = 30_000_000_000L
+            fixture.now = origin + 30_000_000_000L
             assertEquals(LoopAction.Break, fixture.tick())
             assertEquals(listOf(-1), fixture.replies)
             assertEquals(1, fixture.closes)
@@ -152,12 +156,19 @@ class NotificationDeadlineTest {
         assertEquals(1, after.replyLatencyCount - before.replyLatencyCount)
     }
 
-    @Test
-    fun `deadline wins over a completion returned at its boundary`() {
+    @ParameterizedTest
+    @ValueSource(longs = [0L, -1_000_000_000L, Long.MAX_VALUE - 10_000_000_000L])
+    fun `deadline wins over a completion returned at its boundary`(origin: Long) {
         Fixture().use { fixture ->
+            var polled = false
+            fixture.now = origin
             fixture.ready = true
-            fixture.duringPoll = { fixture.now = 30_000_000_000L }
+            fixture.duringPoll = {
+                polled = true
+                fixture.now = origin + 30_000_000_000L
+            }
             assertEquals(LoopAction.Break, fixture.tick())
+            assertTrue(polled)
             assertEquals(listOf(-1), fixture.replies)
             assertEquals(0, fixture.completions)
         }

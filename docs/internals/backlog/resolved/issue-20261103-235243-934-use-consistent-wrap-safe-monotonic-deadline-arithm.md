@@ -1,7 +1,7 @@
 ---
 title: "Use consistent wrap-safe monotonic deadline arithmetic"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Use consistent wrap-safe monotonic deadline arithmetic
 
 **Context:**
-Repository-wide review, 2026-11-04: [PLAT-02](../reviews/2026-11-04-repository-review-findings.md#plat-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PLAT-02](../../reviews/2026-11-04-repository-review-findings.md#plat-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · liveness/correctness · reproduced against freshly compiled current source · high confidence · shared core/supervisor/profiler/Portal timing.**
 
@@ -30,6 +30,17 @@ Repository-wide review, 2026-11-04: [PLAT-02](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution — 2026-11-26
+
+Deadline construction caps durations before conversion and allows the target
+timestamp to wrap. The reactor, control socket, install handshake and live
+listener use Deadline's relative time operations. Existing budgets and
+millisecond rounding remain intact.
+
+JDK 25 tests cover negative origins, signed wrap, the exact expiry boundary,
+huge durations, and a completion that arrives at expiry.
+[Deadline contract](../../designs/core/notification-liveness-contract.md#reactor-deadline-and-reply-authority)
 
 ---
 <!-- id: issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm  file: issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md -->

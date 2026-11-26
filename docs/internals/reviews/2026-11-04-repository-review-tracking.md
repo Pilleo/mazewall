@@ -52,7 +52,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | Finding | Priority | Package | Exact owner |
 |---|---|---|---|
 | PLAT-01 | P1 | W01 | [issue-20261103-234851-768](../backlog/issue-20261103-234851-768-correct-aarch64-renameat-metadata-before-policy-co.md) |
-| PLAT-02 | P2 | W01 | [issue-20261103-235243-934](../backlog/issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) |
+| PLAT-02 | P2 | W01 | [issue-20261103-235243-934](../backlog/resolved/issue-20261103-235243-934-use-consistent-wrap-safe-monotonic-deadline-arithm.md) |
 | PLAT-03 | P1 | W01 | [issue-20261103-235244-414](../backlog/resolved/issue-20261103-235244-414-preserve-descriptor-generations-through-typed-scm-.md) |
 | PLAT-04 | P2 | W01 | [issue-20261103-235244-769](../backlog/resolved/issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md) |
 | PLAT-05 | P2 | W01 | [issue-20261103-235245-104](../backlog/resolved/issue-20261103-235245-104-validate-managed-prctl-pointer-arguments-before-na.md) |
