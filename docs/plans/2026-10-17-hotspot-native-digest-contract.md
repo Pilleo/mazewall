@@ -111,9 +111,8 @@ socklen_t carriers are 32-bit, pointers ADDRESS, Linux-amd64 size_t/ssize_t 64-b
 Reuse and verify existing message/iovec layouts behind FFM, not profiler copies.
 These are proposed requirements, not installed layouts or a new layout test pass.
 
-Follow the [FFM safety guide](../../.agents/skills/ffm_safety/SKILL.md),
-[NativeArena](../../platform/src/main/kotlin/io/mazewall/ffi/memory/NativeArena.kt)
-and official [JDK 25 Arena contract](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/foreign/Arena.html):
+Follow [NativeArena](../../platform/src/main/kotlin/io/mazewall/ffi/memory/NativeArena.kt)
+and the official [JDK 25 Arena contract](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/foreign/Arena.html):
 confined memory is accessible/closeable only by its creating thread. Downcalls
 capture errno and read it immediately before another native call; retain numeric
 and symbolic errno, operation context and independent failure causes.

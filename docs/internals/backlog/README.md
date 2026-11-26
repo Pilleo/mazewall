@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 403 | *Total Resolved Issues:* 782
+*Total Active Issues:* 403 | *Total Resolved Issues:* 783
 
 Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -136,6 +136,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261126-172817-960](resolved/issue-20261126-172817-960-close-the-raw-memorysegment-escape-on-sock-filter-.md) | Close the raw MemorySegment escape on sock_filter so a widened k does not compile (resolved 2026-11-26) | high | core |
 | [issue-20261121-175747-959](issue-20261121-175747-959-add-oci-container-seccomp-profile-and-no-new-privs.md) | Add OCI container seccomp profile and no_new_privs matrix integration tests for mazewall-lockdown | high | core |
 | Archived [issue-20261121-175746-741](resolved/issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown (resolved 2026-11-21) | high | core |
 | [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
