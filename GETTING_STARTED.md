@@ -63,26 +63,29 @@ dependencies {
 Call `Mazewall.installOnProcess` once on a **platform thread** (`!Thread.currentThread().isVirtual()`) at application startup, after any required helper child processes exit and before opening network listeners:
 
 ```java
-import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
-import io.mazewall.lockdown.MazewallInstallationException;
 import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
 import io.mazewall.lockdown.RuntimeProfile;
 
 public final class ApplicationMain {
     public static void main(String[] args) {
-        try {
-            ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
-                .block(LockdownSyscall.MEMFD_CREATE);
-            ProcessInstallation installation = Mazewall.installOnProcess(policy);
-            System.out.println("Lockdown active (" + installation.architecture() + ")");
-        } catch (MazewallInstallationException failure) {
-            // Fail closed: do not swallow on unsupported OS/kernel, missing native access, or virtual thread.
-            throw failure;
-        }
+        ProcessInstallation installation = Mazewall.installOnProcess(
+            ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT));
+        System.out.println("Lockdown active (" + installation.architecture() + ")");
     }
 }
+```
+
+Grant native access when launching the application. Include the runtime dependencies in `libs`:
+
+```bash
+# Classpath application on Linux
+java --enable-native-access=ALL-UNNAMED -cp 'app.jar:libs/*' ApplicationMain
+
+# Named module (replace the module and main class with your own)
+java --enable-native-access=io.mazewall.lockdown --module-path 'app.jar:libs' \
+    -m com.example.app/com.example.ApplicationMain
 ```
 
 - Use `RuntimeProfile.HOTSPOT_JIT` on standard HotSpot JVMs so JIT compilation can continue allocating executable code-cache pages.
@@ -179,32 +182,6 @@ dependencyResolutionManagement {
 // build.gradle.kts
 dependencies {
     implementation("com.github.Pilleo.mazewall:enforcer:master-SNAPSHOT")
-}
-```
-
-### Option 3: GitHub Packages
-
-This path requires package access and an available published version. Configure
-credentials through your existing Gradle properties or operator-managed environment:
-
-```kotlin
-// settings.gradle.kts
-dependencyResolutionManagement {
-    repositories {
-        mavenCentral()
-        maven {
-            url = uri("https://maven.pkg.github.com/Pilleo/mazewall")
-            credentials {
-                username = providers.gradleProperty("gpr.user").orElse(System.getenv("GITHUB_ACTOR")).get()
-                password = providers.gradleProperty("gpr.key").orElse(System.getenv("GITHUB_TOKEN")).get()
-            }
-        }
-    }
-}
-
-// build.gradle.kts
-dependencies {
-    implementation("io.mazewall:enforcer:0.1.0-SNAPSHOT")
 }
 ```
 

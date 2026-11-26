@@ -14,7 +14,21 @@ Keep one repository and the existing `master` development line, using the normal
 
 This blocks a common payload step after remote code execution. It does not prevent all RCE, establish a separate address space, or make arbitrary hostile Java code safe. The user's Elasticsearch comparison motivates the scope; current Elasticsearch behavior was not independently researched.
 
-## Agreed premises and scope
+## Current implementation
+
+[`lockdown/README.md`](../../lockdown/README.md) is the user entry point;
+[`docs/public-api.md`](../public-api.md) identifies the supported API. The
+`prepareLockdownCoreSources` task packages a curated subset of shared `:platform`
+and `:enforcer` sources into internal lockdown packages. These are build-time
+source inputs, not dependencies in the published POM. The published artifact
+depends only on `kotlin-stdlib`; it does not share process state with a separately
+loaded enforcer artifact.
+
+The Phase 1 proposal below records the original design, not the current API or
+module dependency graph. The acceptance and distribution sections describe the
+release gates.
+
+## Phase 1 premises and scope
 
 - Target applications need no child programs after lockdown, including diagnostic helpers, dynamic agent attach helpers, or Portal worker startup/replacement. Document this incompatibility before installation.
 - **Minimum JDK 22 (D1):** FFM is final from JDK 22; build with the JDK 25 toolchain targeting JDK 22 bytecode (`major version: 66` verified on `HEAD`) and qualify packaged consumers on JDK 22 and 25.
@@ -26,7 +40,7 @@ This blocks a common payload step after remote code execution. It does not preve
 - Keep worker/thread compartments, profiling/SBoB, Portals, stack-based supervision, framework starters, and Java agents in their existing development areas. Their unrelated implementations stay outside `:lockdown`'s transitive dependency set. Preserve existing experimental callers in `:enforcer` while moving experimental `Mazewall.callContained` off the stable `Mazewall` class (or keeping `io.mazewall.enforcer.api.Mazewall` separate and unpublished).
 - No new filesystem or network isolation promise. Existing descriptors, application memory and secrets, allowed network/file operations, resource exhaustion, indirect process launch via external daemons/sockets, and kernel vulnerabilities remain outside this guarantee. Previously spawned processes are not retroactively constrained.
 
-### Target stable contract (to finalize in Phase 3)
+### Historical API sketch (superseded by the public API reference)
 
 ```kotlin
 package io.mazewall.lockdown
@@ -184,7 +198,7 @@ Move shared implementation to its selected owner and update existing callers in 
 
 Stage the selected artifacts to an isolated candidate repository and compile the consumer outside the producer source tree with dependency substitution disabled. Record the complete resolved dependency set, JAR/resource inventory, checksums, source identity, and exact environment. Reject accidental dependencies on broad experimental artifacts even if their API is hidden from the compile classpath.
 
-Reuse the consumer infrastructure deliberately: root `consumerCheck` is the existing real-publication JDK22/JDK25 matrix; `consumerNativeCheck` covers finished publications and native application effects. `consumerBootstrapCheck` is specifically a Portal packaging/freshness test, not an existing lockdown-startup test. A new narrow consumer needs explicit selection and assertions; existing task names alone do not establish coverage.
+Use `./gradlew :lockdownConsumerCheck` for the standalone JDK 22/25 consumer suite. It stages only `:lockdown` into a local file repository and checks classpath Java, JPMS Java, and Kotlin consumers. Remote GitHub Packages resolution is a separate release check.
 
 Run the mapped host and native checks, including installation rejection and JVM liveness, then the required `./gradlew build` completion gate. Preserve all currently required checks unless an explicit artifact-to-gate change has been approved and verified. Record skips and unsupported environments rather than counting them as passes.
 

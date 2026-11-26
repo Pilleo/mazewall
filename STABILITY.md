@@ -1,10 +1,10 @@
 # Mazewall API Stability Policy
 
-Mazewall divides its modules and packages into three stability tiers. For the `0.1.0` release, only `io.mazewall:mazewall-lockdown` (`io.mazewall.lockdown`) is published and supported as a stable external API.
+Mazewall divides its modules and packages into three stability tiers. The only stable artifact planned for `0.1.0` is `io.mazewall:mazewall-lockdown` (`io.mazewall.lockdown`).
 
-## Tier 1 — Stable (Published in `0.1.0`)
+## Tier 1 — Stable surface for `0.1.0`
 
-- **Artifact:** `io.mazewall:mazewall-lockdown` (`:lockdown`, with `-sources.jar` and `-javadoc.jar`)
+- **Artifact:** [`:lockdown`](lockdown/README.md), planned as `io.mazewall:mazewall-lockdown` on GitHub Packages. See the [public API reference](docs/public-api.md) and the source JAR for API documentation.
 - **JPMS module:** `io.mazewall.lockdown` (exports only `io.mazewall.lockdown`)
 - **Public package:** `io.mazewall.lockdown`
 - **Public API surface:**
@@ -15,7 +15,7 @@ Mazewall divides its modules and packages into three stability tiers. For the `0
     - `ProcessPolicy.denyProcessCreation([runtime])` (default `MAZEWALL` preset: `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`)
     - `ProcessPolicy.fromPreset(preset: LockdownPreset, [runtime])` (`ELASTICSEARCH`, `OPENSEARCH`, `MAZEWALL`, `MAZEWALL_STRICT`)
     - `ProcessPolicy.block(...)`, `ProcessPolicy.unblock(...)`, `ProcessPolicy.blockedSyscalls()`, `ProcessPolicy.runtimeProfile()`
-  - `LockdownPreset`, `LockdownSyscall`
+  - `LockdownPreset` (`defaultBlockedSyscalls()`), `LockdownSyscall`
   - `RuntimeProfile` (`HOTSPOT_JIT`, `NATIVE_IMAGE`)
   - `ProcessInstallation` (`filterDepth`, `architecture`; the supported architecture is `"amd64"`)
   - `MazewallInstallationException`
@@ -26,7 +26,7 @@ Mazewall divides its modules and packages into three stability tiers. For the `0
 - **Supported runtime matrix (`0.1.0`):**
   - **OS & kernel:** Linux `x86_64` (`amd64`) only, with Seccomp-BPF and `SECCOMP_FILTER_FLAG_TSYNC` enabled. Linux 3.17 introduced TSYNC; that is a feature floor, not a tested deployment matrix.
   - **JVM:** HotSpot JDK 22 and 25 are the release qualification targets (`--release 22` bytecode floor). Use `--enable-native-access=io.mazewall.lockdown` (module path) or `--enable-native-access=ALL-UNNAMED` (classpath). GraalVM Native Image is not a qualified deployment target.
-  - **Language compatibility:** Java 22+ (all standard types); Kotlin consumers require a Kotlin compiler compatible with `2.4.21` metadata (Kotlin `2.3+`).
+  - **Language compatibility:** Java 22 bytecode floor; independent Kotlin consumers are checked with Kotlin `2.4.21`. Older Kotlin compiler versions are not qualified here.
   - **Filter & verification contract (`0.1.0`):** Each preset denies its documented syscalls (and non-allowlisted `prctl` options outside `PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM`, returns `ENOSYS` for `clone3` (falling back to `clone`), and can be immutably tailored with `ProcessPolicy.block(...)` / `ProcessPolicy.unblock(...)` over `LockdownSyscall` without touching critical JVM coordination syscalls. `fork`/`vfork` are blocked in `ELASTICSEARCH`, `OPENSEARCH`, and `MAZEWALL_STRICT`, and left permitted (with inherited filter) in the `MAZEWALL` (`denyProcessCreation`) preset. Startup verification checks `PR_GET_SECCOMP == 2` plus `getpid()` liveness by default; active denied-syscall probing is opt-in via `-Dio.mazewall.selfVerify=true`.
 
 ## Tier 2 — Experimental (Unpublished in `0.1.0`)

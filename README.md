@@ -11,40 +11,18 @@
 
 ## `0.1.0` Stable Quickstart: Process-Wide Execution Lockdown
 
-The `0.1.0` artifact (`io.mazewall:mazewall-lockdown:0.1.0`) is planned for **GitHub Packages only**. See [installation instructions](GETTING_STARTED.md#gradle-dependency) for the authenticated registry and local snapshot option. The artifact targets JDK 22 bytecode, uses FFM without shipping native C libraries, and depends only on `kotlin-stdlib`.
+If your JVM service never needs to launch external programs after startup, [Mazewall Lockdown](lockdown/README.md) lets the Linux kernel deny that operation across every thread in the process. It is a standalone library; you don't need the experimental sandbox or profiler.
 
-Run your JVM with native access granted to Mazewall (modular apps can scope access strictly to `io.mazewall.lockdown`; classpath apps use `ALL-UNNAMED`):
-
-```bash
-# Modular application (recommended: scopes native FFM access strictly to Mazewall)
-java --module-path libs --enable-native-access=io.mazewall.lockdown -m com.example.app
-
-# Classpath application
-java --enable-native-access=ALL-UNNAMED -jar app.jar
-```
-
-Call `Mazewall.installOnProcess` once on your startup platform thread after any required startup child commands finish and before opening network traffic:
+The `0.1.0` artifact is planned for **GitHub Packages only**. See [installation instructions](GETTING_STARTED.md#gradle-dependency) for the authenticated registry, local snapshot, and JVM flags. Install on a startup platform thread before accepting traffic:
 
 ```java
-import io.mazewall.lockdown.LockdownPreset;
-import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
-import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
 import io.mazewall.lockdown.RuntimeProfile;
 
 public final class ServiceBootstrap {
     public static void main(String[] args) {
-        // Choose Elasticsearch (execve, execveat, fork, vfork),
-        // OpenSearch (+ ptrace, process_vm_readv/writev, pidfd_getfd),
-        // Mazewall default (denyProcessCreation), or MAZEWALL_STRICT,
-        // and add/remove syscalls with .block(...) / .unblock(...):
-        ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
-            .unblock(LockdownSyscall.PTRACE)
-            .block(LockdownSyscall.MEMFD_CREATE);
-
-        ProcessInstallation installation = Mazewall.installOnProcess(policy);
-        // Process-wide lockdown is active (installation.filterDepth() >= 1)
+        Mazewall.installOnProcess(ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT));
     }
 }
 ```
@@ -93,7 +71,7 @@ A successful exploit in your YAML importer is a successful exploit of your entir
 
 mazewall lets you wrap trusted code that processes risky input in **kernel-enforced behavioral contracts**. On a contained worker, configured syscalls and filesystem accesses are denied by the Linux kernel. This limits direct data-plane attacks; it does not isolate arbitrary hostile Java code or remove capabilities already present elsewhere in the JVM.
 
-## Try an independent runnable example
+## Try an experimental worker sandbox example
 
 From the repository root, use JDK 25 on Linux with the required Seccomp/Landlock
 support **and Clang with a BPF backend** for the source build, then run:
