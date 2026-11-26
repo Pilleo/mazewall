@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 403 | *Total Resolved Issues:* 782
+*Total Active Issues:* 401 | *Total Resolved Issues:* 784
 
-Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 399 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -173,7 +173,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261110-090012-628](resolved/issue-20261110-090012-628-refactor-classic-bpf-instructions-into-a-type-safe.md) | Refactor classic-BPF instructions into a type-safe sealed hierarchy (resolved 2026-11-21) | high | core |
 | Archived [issue-20261110-090012-980](resolved/issue-20261110-090012-980-make-verified-bpf-programs-immutable-and-distingui.md) | Make verified BPF programs immutable and distinguish static verification from installation (resolved 2026-11-21) | high | core |
 | [issue-20261107-045431-849](issue-20261107-045431-849-preserve-executable-info-ownership-across-partial-.md) | Preserve executable-info ownership across partial map-installation failures | high | core |
-| [issue-20261105-182827-544](issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends | high | profiler |
+| Archived [issue-20261105-182827-544](resolved/issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) | Retain profiler collection until accepted executor work ends (resolved 2026-11-26) | high | profiler |
 | [issue-20261105-182737-637](issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) | Reject non-descriptor BPF commands before creating owned descriptor receipts | medium | platform |
 | [issue-20261105-182827-530](issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) | Reject unterminated quoted values in recorded eBPF evidence | medium | profiler |
 | [issue-20261105-183230-840](issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) | Require complete class-lifetime coverage before native canonical-cache admission | medium | profiler |
@@ -185,7 +185,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235245-538](issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) | Roll back eventfd ownership when notification session construction fails | medium | core |
 | [issue-20261103-235246-003](issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) | Serialize eventfd completion signaling with native retirement | medium | core |
 | [issue-20261103-235246-361](issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) | Repoll canceled seccomp receives without retiring a live listener | medium | core |
-| [issue-20261103-235246-772](issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) | Route every profiler executor admission through collector installation | high | profiler |
+| Archived [issue-20261103-235246-772](resolved/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) | Route every profiler executor admission through collector installation (resolved 2026-11-26) | high | profiler |
 | [issue-20261103-235247-255](issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) | Keep published profiler events awaiting ACK during pass-through requests | medium | profiler |
 | [issue-20261103-235247-666](issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) | Propagate profiler listener handshake failure before installation readiness | medium | profiler |
 | [issue-20261103-235248-095](issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) | Preserve pending application exceptions during native capture cleanup | high | profiler |

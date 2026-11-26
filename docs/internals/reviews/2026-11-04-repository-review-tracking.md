@@ -59,7 +59,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | PLAT-06 | P2 | W01 | [issue-20261103-235245-538](../backlog/issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md) |
 | PLAT-07 | P2 | W01 | [issue-20261103-235246-003](../backlog/issue-20261103-235246-003-serialize-eventfd-completion-signaling-with-native.md) |
 | PN05-01 | P2 | W05 | [issue-20261103-235246-361](../backlog/issue-20261103-235246-361-repoll-canceled-seccomp-receives-without-retiring-.md) |
-| PN05-02 | P1 | W05 | [issue-20261103-235246-772](../backlog/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) |
+| PN05-02 | P1 | W05 | [issue-20261103-235246-772](../backlog/resolved/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) |
 | PN05-04 | P2 | W05 | [issue-20261103-235247-255](../backlog/issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) |
 | PN05-06 | P2 | W05 | [issue-20261103-235247-666](../backlog/issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) |
 | TE-01 | P1 | W08 | [issue-20261103-235248-095](../backlog/issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) |

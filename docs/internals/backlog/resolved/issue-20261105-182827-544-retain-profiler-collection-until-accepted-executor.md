@@ -1,7 +1,7 @@
 ---
 title: "Retain profiler collection until accepted executor work ends"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -31,7 +31,7 @@ Recursive state-design review C-01: wrapper shutdown closes its profiling sessio
 
 ## Evidence and correction boundary
 
-[Recursive review C-01](../reviews/2026-11-05-state-complexity-review.md):
+[Recursive review C-01](../../reviews/2026-11-05-state-complexity-review.md):
 `Profiler.kt:139–142` closes collection immediately after `delegate.shutdown()`;
 `awaitTermination` remains delegated at `:97`. `ProfilerSession.kt:168–174`
 requires collector drain/cleanup but no accepted-work-end proof. Queued tasks
@@ -71,12 +71,26 @@ ownership and permanent-filter pass-through; no public ownership-API redesign.
 ## Ownership reconciliation
 
 Coordinate the existing [all-admission-path owner](issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md)
-and [pending-ACK owner](issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md).
+and [pending-ACK owner](../issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md).
 Neither fixes accepted work after collector retirement: this schedule uses an
-already-overridden Callable and no pending ACK. The [direct-worker interruption owner](issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md)
-retains its separate scope. The [resolved application migration](resolved/issue-20261011-230257-867-migrate-remaining-application-callers-to-owned-run.md)
+already-overridden Callable and no pending ACK. The [direct-worker interruption owner](../issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md)
+retains its separate scope. The [resolved application migration](issue-20261011-230257-867-migrate-remaining-application-callers-to-owned-run.md)
 already drains the raw demo pool before closing its collector; keep it resolved.
 No duplicate implementation owner or mandatory unrelated dependency is introduced.
+
+## Resolution — 2026-11-26
+
+Wrapper shutdown stops admission and retires collectors after physical
+executor termination. Awaiting termination shares one timeout with collector
+retirement. Early service shutdown records an incomplete cutoff that later
+work completion cannot clear.
+
+The JDK 25 fixture proves an interrupt-resistant body still counts as live
+after its Future is cancelled. The native test records distinct operations
+from an already-running task and an accepted queued task after shutdown.
+
+The complete offline host build and confined Docker kernel lane passed on JDK 25.
+[Profiler executor lifecycle](../../designs/api/profiler-public-api.md#session-ownership)
 
 ---
 <!-- id: issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor  file: issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md -->
