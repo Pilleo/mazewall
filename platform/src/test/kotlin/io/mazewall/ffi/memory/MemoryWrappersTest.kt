@@ -10,11 +10,24 @@ import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
+import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
+import java.lang.reflect.Modifier
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MemoryWrappersTest {
+    @Test
+    fun `sock filter exposes typed access without writable filter getters or array factories`() {
+        val types = listOf(SockFilterSegment::class.java, SockFilterSegment.Companion::class.java)
+        val aliases = types.flatMap { it.declaredMethods.asList() }.filter { method ->
+            Modifier.isPublic(method.modifiers) &&
+                (method.name.startsWith("get") || method.name == "allocateArray") &&
+                (method.returnType == MemorySegment::class.java || method.returnType == ManagedSegment::class.java)
+        }
+        assertEquals(emptyList(), aliases.map { it.name }.sorted())
+    }
+
     @Test
     fun `test SockFilterSegment getters and setters`() {
         Arena.ofConfined().use { arena ->

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 390 | *Total Resolved Issues:* 795
+*Total Active Issues:* 390 | *Total Resolved Issues:* 796
 
 Active status detail: 387 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.

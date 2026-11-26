@@ -17,6 +17,9 @@ import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.lang.foreign.ValueLayout
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.test.*
 
 @ExtendWith(ForeignFdGuard::class)
@@ -100,17 +103,23 @@ class LinuxNativeDelegationTest {
             BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 255, 128, 0x12345678),
             BpfInstruction.Ld(4),
         )
-        val prog = SockFprogSegment.of(LinuxNative.memory.newSockFProg(filters))
-        assertNotNull(prog.segment)
-
-        assertEquals(2, prog.getLen().toInt())
-        val f1 = SockFilterSegment.of(prog.managedFilter.asSlice(0, Layouts.SOCK_FILTER_SIZE))
-
-        // Verify first filter
-        assertEquals(0x15.toShort(), f1.getCode())
-        assertEquals(255, f1.getJt().toInt() and 0xff)
-        assertEquals(128, f1.getJf().toInt() and 0xff)
-        assertEquals(0x12345678, f1.getK())
+        val program = LinuxNative.memory.newSockFProg(filters).unwrap
+        assertTrue(program.isReadOnly)
+        assertEquals(2, program.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET).toInt())
+        val instructions = program
+            .get(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET)
+            .reinterpret(16)
+        val expected = ByteBuffer.allocate(16).order(ByteOrder.nativeOrder())
+        expected
+            .putShort(0x15)
+            .put(0xff.toByte())
+            .put(0x80.toByte())
+            .putInt(0x12345678)
+            .putShort(0x20)
+            .put(0)
+            .put(0)
+            .putInt(4)
+        assertContentEquals(expected.array(), instructions.toArray(ValueLayout.JAVA_BYTE))
     }
 
     @Test

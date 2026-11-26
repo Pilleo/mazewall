@@ -800,6 +800,11 @@ Getting `k` wrong (using `JAVA_LONG` instead of `JAVA_INT`) produces a silently-
 BPF program. The kernel BPF verifier may or may not catch this depending on the values
 involved — it is not safe to rely on the verifier as a correctness check.
 
+The FFM packer owns the writable filter array. It populates each entry through
+the width-specific `SockFilterSegment` setters and returns a read-only view of
+the completed `sock_fprog` header for installation. The header and array share
+the caller's arena lifetime.
+
 ---
 
 ## 8. `errno` Capture Pattern
