@@ -2,21 +2,52 @@ package io.mazewall.ffi.memory
 
 import io.mazewall.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.ffi.Layouts
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
+import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.Test
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.lang.reflect.Modifier
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MemoryWrappersTest {
+    @Test
+    fun `sock filter program packs exact bytes for adjacent instructions`() {
+        Arena.ofConfined().use { arena ->
+            val filters = listOf(
+                BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 255, 128, 0x12345678),
+                BpfInstruction.Ld(4),
+            )
+            val program = with(arena) { SockFilterSegment.packProgram(filters) }.unwrap
+            assertTrue(program.isReadOnly)
+            assertEquals(2, program.get(ValueLayout.JAVA_SHORT, Layouts.SOCK_FPROG_LEN_OFFSET).toInt())
+            val address = program.get(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET)
+            val instructions = address.reinterpret(16, arena, null).asReadOnly()
+            val expected = ByteBuffer.allocate(16).order(ByteOrder.nativeOrder())
+            expected
+                .putShort(0x15)
+                .put(0xff.toByte())
+                .put(0x80.toByte())
+                .putInt(0x12345678)
+                .putShort(0x20)
+                .put(0)
+                .put(0)
+                .putInt(4)
+            assertContentEquals(expected.array(), instructions.toArray(ValueLayout.JAVA_BYTE))
+        }
+    }
+
     @Test
     fun `sock filter exposes typed access without writable filter getters or array factories`() {
         val types = listOf(SockFilterSegment::class.java, SockFilterSegment.Companion::class.java)
