@@ -15,6 +15,7 @@ import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.frozenCopy
+import io.mazewall.enforcer.api.hasWorkerFilesystemIntent
 import io.mazewall.enforcer.diagnostics.requirePlatformThread
 import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.enforcer.internal.execution.ConfinedHelperConfiguration
@@ -355,7 +356,7 @@ public class ManagedRuntime private constructor(
             requirePositive(preparationTimeout)
             requirePositive(closeTimeout)
             requireUnrestrictedBootstrap()
-            require(!baseline.definition.enforceLandlock) { "The host baseline must have process-safe scope" }
+            require(!baseline.definition.hasWorkerFilesystemIntent()) { "The host baseline must have process-safe scope" }
             require(baseline.allowMmapExec == runtime.allowsExecutableMappings) { "Process mapping floor does not match the declared runtime" }
             synchronized(lock) {
                 check(phase == Phase.BOOTSTRAPPING && !initialBaselineReserved) { "Initial baseline already reserved" }
@@ -1123,7 +1124,7 @@ public class ManagedRuntime private constructor(
             requirePositive(preparationTimeout)
             requirePositive(closeTimeout)
             requireUnrestrictedBootstrap()
-            require(!baseline.definition.enforceLandlock) { "The host baseline must have process-safe scope" }
+            require(!baseline.definition.hasWorkerFilesystemIntent()) { "The host baseline must have process-safe scope" }
             require(baseline.allowMmapExec == runtime.allowsExecutableMappings) { "Process mapping floor does not match the declared runtime" }
             val owner = ManagedRuntime(runtime, preparationTimeout, closeTimeout)
             try {

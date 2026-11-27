@@ -287,6 +287,57 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    void testJavaProcessBuilderRejectsRawFilesystemIntent() {
+        SandboxedPath path = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead("/tmp")
+                .build()
+                .getAllowedFsReadPaths()
+                .iterator()
+                .next();
+        var reads = new java.util.HashSet<SandboxedPath>();
+        reads.add(path);
+        PolicyDefinition<PolicyScope.ProcessWideSafe> forged = new PolicyDefinition<>(
+                SeccompAction.ACT_ALLOW.INSTANCE,
+                new java.util.HashMap<Syscall, SeccompAction>(),
+                false,
+                false,
+                false,
+                false,
+                reads,
+                new java.util.HashSet<SandboxedPath>(),
+                false,
+                new java.util.ArrayList<String>(),
+                new java.util.ArrayList<kotlin.text.Regex>()
+        );
+        IllegalArgumentException thrown = assertThrows(
+                IllegalArgumentException.class,
+                () -> ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).base(forged)
+        );
+        assertTrue(thrown.getMessage().contains("worker filesystem intent"));
+
+        PolicyDefinition<PolicyScope.ProcessWideSafe> process = ProcessPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .build()
+                .getDefinition();
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> process.copy(
+                        process.getDefaultAction(),
+                        process.getSyscallActions(),
+                        process.getAllowMmapExec(),
+                        process.getAllowNonThreadClone(),
+                        process.getAllowUnsafePrctl(),
+                        process.getLockIntelCet(),
+                        reads,
+                        process.getAllowedFsWritePaths(),
+                        false,
+                        process.getCustomViolationPhrases(),
+                        process.getCustomViolationRegexes()
+                )
+        );
+    }
+
+    @Test
     void testJavaInstallationApiReturnsReceiptOnly() {
         assertTrue(
                 java.util.Arrays.stream(ContainedExecutors.class.getDeclaredMethods())

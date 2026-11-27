@@ -1,7 +1,7 @@
 ---
 title: "Prevent raw policy definitions from asserting invalid process scope"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -36,9 +36,28 @@ Host-only external Kotlin consumer constructs PolicyDefinition<PolicyScope.Proce
 - Preserve runtime/JVM compatibility checks and installation-time kernel validation. Include negative constructor/copy/builder-base/Java cases and valid worker/process cases; this construction correction does not establish a kernel containment bypass.
 
 ---
+## Progress — 2026-11-27
+
+Fail-closed process-scope validation is in place without removing the public constructor:
+
+- `ProcessPolicyBuilder.base` and `build` reject path grants and active-empty `enforceLandlock`.
+- A process-built definition keeps that claim across `copy`; adding filesystem intent throws.
+- `installOnProcess` and `assessOnProcess` reject the same intent before Landlock or preflight.
+- Java `ProcessPolicyBuilder.base` and process `copy` are covered. Worker `DenyAll` and path grants still build.
+- Canonical process artifacts, `ProcessFilterInstaller`, and host-baseline checks use the same predicate.
+
+The raw constructor still accepts filesystem fields. The type argument is erased, so it cannot tell a worker definition from a process-typed one; banning paths there would also reject valid worker policies. Process claim, `ProcessPolicyBuilder.base`, copy of a claimed process definition, and process install/assess reject that intent.
+
+## Resolution Evidence (2026-11-27)
+
+- Process policies cannot carry worker filesystem intent. `ProcessPolicyBuilder.base`/`build`, copy of a process-claimed definition, `installOnProcess`, `assessOnProcess`, canonical process artifacts, and `ProcessFilterInstaller` reject `enforceLandlock` or a nonempty path set before Landlock.
+- Worker policies still carry path grants and Landlock. The public constructor was not banned: `PolicyDefinition<ProcessWideSafe>` and `PolicyDefinition<ThreadLocalOnly>` are the same JVM constructor, so a constructor ban would also reject valid worker policies.
+- Host `./gradlew build` passed in 6m 42s (281 tasks). The confined kernel lane in `scripts/run_local_build.sh` then verified confined-helper mounts, identity, namespace, and ownership.
+- LL-01 documentation and ABI8 qualification were not done. Operator closed this construction slice and left that qualification on the existing platform-envelope owner.
+
 ## Repository-review expansion — 2026-11-04
 
-[BPF-05](../reviews/2026-11-04-repository-review-findings.md#bpf-05) confirms that public
+[BPF-05](../../reviews/2026-11-04-repository-review-findings.md#bpf-05) confirms that public
 path fields alone suffice for forged process filesystem intent; setting an internal property
 is unnecessary. Reject raw/copy/base/Java and active-empty invalid scope at the direct process
 installation boundary **before Landlock effects**. Canonical-import rejection alone is insufficient.
@@ -46,7 +65,7 @@ Astra's connected ABI8 recipe uses parked siblings, a shared Seccomp baseline, n
 Landlock, then forged process Landlock and stale deduplication: caller-domain TSYNC can replace
 the sibling's narrower domain. This is conditional source analysis, not an executed native
 bypass or a new valid-scope supported-path finding. Preserve ManagedRuntime's baseline guard.
-[LL-01](../reviews/2026-11-04-repository-review-findings.md#ll-01) also requires correcting
+[LL-01](../../reviews/2026-11-04-repository-review-findings.md#ll-01) also requires correcting
 unconditional monotonicity/flags-zero prose and qualifying baseline-before-local-domain ordering.
 
 ---

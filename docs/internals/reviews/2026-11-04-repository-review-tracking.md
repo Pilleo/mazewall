@@ -107,7 +107,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | PLAT-08 | P1 | W01 | [issue-20261103-235911-795](../backlog/resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) |
 | BPF-01 | P1 | W02 | [issue-20261103-235912-106](../backlog/resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
 | BPF-03 | P1 | W02 | [issue-20261103-235912-401](../backlog/resolved/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) |
-| BPF-06 | P2 | W02 | [issue-20261103-235912-625](../backlog/issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) |
+| BPF-06 | P2 | W02 | [issue-20261103-235912-625](../backlog/resolved/issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) |
 | PN-E2 | P2 | W05 | [issue-20261103-235912-820](../backlog/issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) |
 | BUILD-RUN | P1 | W04 | [issue-20261103-235434-538](../backlog/issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) |
 
@@ -120,7 +120,7 @@ remain those in the detailed finding register; a mapping is not a closure claim.
 | Finding | Current owner priority | Package | Exact owner |
 |---|---|---|---|
 | BPF-04 | P1 | W02 | [issue-20261028-232811-132](../backlog/resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
-| BPF-05 | P1 | W02 | [issue-20261028-232810-687](../backlog/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
+| BPF-05 | P1 | W02 | [issue-20261028-232810-687](../backlog/resolved/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
 | BPF-08 | P2 | W02 | [issue-20261103-123347-795](../backlog/resolved/issue-20261103-123347-795-validate-bpf-inspection-fragment-exits-before-acce.md) |
 | BPF-09 / TEST-06 | P2 | W11 | [issue-20261103-123359-606](../backlog/resolved/issue-20261103-123359-606-fail-differential-seccomp-checks-when-simulator-ha.md) |
 | LIF-01 | P1 | W03 | [issue-20261007-092325-883](../backlog/issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic.md) |
