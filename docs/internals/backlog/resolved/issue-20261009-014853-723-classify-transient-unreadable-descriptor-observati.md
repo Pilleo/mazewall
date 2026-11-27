@@ -1,13 +1,14 @@
 ---
 title: "Classify transient unreadable descriptor observations in ForeignFdGuard"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
 target_modules: []
 target_files:
   - "src/sharedTest/kotlin/io/mazewall/core/ForeignFdGuard.kt"
+  - "src/sharedTest/kotlin/io/mazewall/core/ProcessDescriptorResources.kt"
   - "enforcer/src/test/kotlin/io/mazewall/platform/lifecycle/ForeignFdGuardTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/engine/ProfilerDaemonTest.kt"
 target_symbols:
@@ -66,8 +67,26 @@ fixtures. On JDK 25, the exported PR #573 source with this follow-up passed all
 77 targeted Platform, Enforcer, and Profiler tests plus lint for the changed
 source sets. The full Profiler unit suite on the export reported 1,809 passed,
 five skipped, and zero failures. The host Gradle build and confined retry
-passed on JDK 25 in the shared checkout. This issue remains open pending
-hosted verification.
+passed on JDK 25 in the shared checkout. Hosted verification was still pending
+when that follow-up was recorded.
+
+## PR #574 resolution
+
+The observation-classification change is on the branch. JUnit now schedules
+descriptor guards exclusively and lets concurrent child-process probes share
+access across their test lifecycle. A guarded test can launch its own child
+from a separate timeout thread. The Profiler daemon interruption fixture
+keeps its simulated eventfd acquisition and retirement in the mock engine.
+
+On JDK 25, the new launch regression reproduced the timeout with the old
+thread-owned read/write lock and passed with scheduler coordination. The
+guard suite also passed the real foreign-close, disappearing-readlink and
+permission-failure checks. All 180 focused tests across the Platform,
+Enforcer and Profiler suites passed, including 112 concurrent Enforcer
+probe tests.
+
+The repository-wide JDK 25 `build` passed on the baseline kernel lane in
+21 minutes and 4 seconds, with the legacy CET exploit-demo class excluded.
 
 ---
 <!-- id: issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati  file: issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md -->

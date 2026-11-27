@@ -7,7 +7,7 @@ import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.lifecycle.*
-import io.mazewall.platform.lifecycle.ForeignFdGuard
+import io.mazewall.platform.lifecycle.GuardProcessDescriptors
 import io.mazewall.platform.lifecycle.TestFileDescriptors
 import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
@@ -16,10 +16,9 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.BpfInstruction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
 import kotlin.test.*
 
-@ExtendWith(ForeignFdGuard::class)
+@GuardProcessDescriptors
 class LinuxNativeDelegationTest {
     @AfterEach
     fun tearDown() {

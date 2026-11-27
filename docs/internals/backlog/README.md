@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 388 | *Total Resolved Issues:* 798
+*Total Active Issues:* 387 | *Total Resolved Issues:* 799
 
-Active status detail: 385 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 384 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -136,6 +136,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261126-172817-960](resolved/issue-20261126-172817-960-close-the-raw-memorysegment-escape-on-sock-filter-.md) | Close the raw MemorySegment escape on sock_filter so a widened k does not compile (resolved 2026-11-26) | high | core |
 | [issue-20261121-175747-959](issue-20261121-175747-959-add-oci-container-seccomp-profile-and-no-new-privs.md) | Add OCI container seccomp profile and no_new_privs matrix integration tests for mazewall-lockdown | high | core |
 | Archived [issue-20261121-175746-741](resolved/issue-20261121-175746-741-add-zero-code-javaagent-premain-class-attachment-f.md) | Add zero-code -javaagent Premain-Class attachment for mazewall-lockdown (resolved 2026-11-21) | high | core |
 | [issue-20261120-170412-295-security-oriented-profiling](issue-20261120-170412-295-security-oriented-profiling.md) | Security-oriented profiling | medium | profiler |
@@ -545,7 +546,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt](issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt.md) | Collect owned Boot child coverage and bind nonempty kernel coverage classes | high | core |
 | [issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek](issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek.md) | Clear existing shared-test and enforcer test Detekt errors without weakening native verification | high | core |
 | [issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por](issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por.md) | Clear final candidate Detekt ZIP constants and Portal declaration naming findings | high | core |
-| [issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati](issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md) | Classify transient unreadable descriptor observations in ForeignFdGuard | high | core |
+| Archived [issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati](resolved/issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md) | Classify transient unreadable descriptor observations in ForeignFdGuard | high | core |
 | [issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr](issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr.md) | Adopt typed prepared ordinary-JAR resources in Spring and prove native JDBC lifecycle | high | spring-integration |
 | [issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-](issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-.md) | Declare optional Koog production plugin bootstrap and Portal runtime publication | high | integrations |
 | [issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin](issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin.md) | Bind supported exploded and Boot deployment origins to genuine prepared owners | high | enforcer |

@@ -5,9 +5,12 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.extension.BeforeEachCallback
 import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.parallel.ResourceLock
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.AccessDeniedException
@@ -16,13 +19,47 @@ import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.util.concurrent.TimeUnit
 
+@ResourceLock(PROCESS_DESCRIPTORS)
 class ForeignFdGuardTest {
     private lateinit var testContext: ExtensionContext
 
     @JvmField
     @RegisterExtension
     val contextCapture = BeforeEachCallback { testContext = it }
+
+    @Test
+    @Timeout(value = 5, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    @GuardProcessDescriptors
+    fun guardedTestCanLaunchOnItsTimeoutThread() {
+        val child = TestProcessLauncher.startInherited(ProcessBuilder("/bin/true"))
+        try {
+            assertTrue(child.waitFor(3, TimeUnit.SECONDS))
+            assertEquals(0, child.exitValue())
+        } finally {
+            if (child.isAlive) child.destroyForcibly().waitFor(3, TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
+    @GuardProcessDescriptors
+    fun loggedLaunchCapturesBothStreams(
+        @TempDir directory: Path,
+    ) {
+        val log = directory.resolve("child.log")
+        val child = TestProcessLauncher.startWithLog(
+            ProcessBuilder("/bin/sh", "-c", "printf 'stdout\\n'; printf 'stderr\\n' >&2"),
+            log,
+        )
+        try {
+            assertTrue(child.waitFor(5, TimeUnit.SECONDS))
+            assertEquals(0, child.exitValue())
+            assertEquals("stdout\nstderr\n", TestProcessLauncher.readLog(log))
+        } finally {
+            if (child.isAlive) child.destroyForcibly().waitFor(5, TimeUnit.SECONDS)
+        }
+    }
 
     @Test
     fun enumeratedOwnedDescriptorDisappearsBeforeFirstReadlink() =

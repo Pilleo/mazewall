@@ -7,7 +7,7 @@
 - Keep raw FFM (`MemorySegment`, layouts, downcalls) behind `NativeEngine` and `io.mazewall.ffi`; preserve the ArchUnit isolation boundary.
 - Use confined arenas with `Arena.ofConfined().use { }`. Capture `errno` immediately after a native call and never share confined segments across threads.
 - Do not block JVM coordination syscalls. See `enforcer/AGENTS.md` for the complete invariant list.
-- Before changing layouts or downcalls, read `.agents/skills/ffm_safety/SKILL.md` and `docs/internals/designs/enforcer/containment-design.md`.
+- Before changing layouts or downcalls, read `docs/internals/designs/enforcer/containment-design.md`.
 
 Verification:
 

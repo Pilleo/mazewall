@@ -102,7 +102,7 @@ public class ProcessBroker internal constructor(
     private val retainedCapabilities: MutableSet<Capability.ReadFd> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val startupRetirement = StartupRetirement(sockets, cgroupController)
-    private val closeRetirement = CloseRetirement()
+    private val workerOwnership = WorkerOwnership()
     private val socketAcceptance = SocketAcceptance()
     private val generationCaptures = PortalGenerationCaptures()
 
@@ -137,17 +137,12 @@ public class ProcessBroker internal constructor(
             repeat(limits.workers) {
                 check(lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled) { "broker startup cancelled" }
                 val slot = spawnWorker(deadline) { lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled }
-                provisionalSlots.add(slot)
                 acquired += slot
                 check(lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled) { "broker startup cancelled" }
             }
             synchronized(lifecycleGate) {
                 check(lifecycle == ProcessBrokerLifecycle.Starting) { "broker closed during startup" }
-                acquired.forEach {
-                    provisionalSlots.remove(it)
-                    trackedSlots.add(it)
-                }
-                acquired.forEach { idle.add(it) }
+                acquired.forEach(workerOwnership::publishSlot)
                 lifecycle = ProcessBrokerLifecycleMachine
                     .evaluate(lifecycle, ProcessBrokerLifecycleEvent.StartupSucceeded)
                     .state
@@ -453,24 +448,32 @@ public class ProcessBroker internal constructor(
         generationCaptures.cancel()
         val maintenanceStopped = awaitMaintenance(maintenance, logger, deadline)
         retireRetainedCapabilities(retainedCapabilities, cleanup)
-        closeRetirement.retireHandoffs(cleanup)
-        provisionalSlots.toList().forEach { slot ->
-            cleanup.attempt("provisional worker") { destroySlot(slot) }
+        workerOwnership.retireHandoffs(cleanup)
+        if (startupToJoin?.count == 1L) {
+            provisionalSlots.toList().forEach { slot ->
+                cleanup.attempt("provisional worker") { destroySlot(slot) }
+            }
         }
         val startupStopped = awaitBrokerStartup(startupToJoin, deadline)
-        closeRetirement.retireAllSlots(cleanup)
+        workerOwnership.retireAllSlots(cleanup)
         provisionalAttempts.toList().forEach { attempt ->
             cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
         }
-        closeRetirement.retireHandoffs(cleanup)
+        workerOwnership.retireHandoffs(cleanup)
         val operationsStopped = operations.await(deadline)
         var capturesStopped = false
         cleanup.attempt("generation capture ownership") { capturesStopped = generationCaptures.retire(deadline) }
-        return capturesStopped && operationsStopped && maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
+        return capturesStopped && operationsStopped && maintenanceStopped && startupStopped && workerOwnership.allOwnedResourcesRetired(cleanup)
     }
 
-    /** Keeps close-only ownership retirement separate from public broker operations. */
-    private inner class CloseRetirement {
+    private inner class WorkerOwnership {
+        /** Moves a ready slot into the live pool while the caller holds the lifecycle gate. */
+        fun publishSlot(slot: WorkerSlot) {
+            trackedSlots.add(slot)
+            check(provisionalSlots.remove(slot)) { "portal worker was not registered before publication" }
+            idle.add(slot)
+        }
+
         fun retireHandoff(handoff: AcceptedSocketHandoff) {
             val failure = runCatching { handoff.cancel() }.exceptionOrNull()
             failure?.let {
@@ -614,6 +617,7 @@ public class ProcessBroker internal constructor(
             synchronized(attempt) {
                 check(active() && !attempt.retirementRequested) { "portal worker acquisition cancelled before publication" }
                 attempt.acquisitionFinished = true
+                provisionalSlots.add(slot)
                 attempt.transferred = true
             }
             spawned.incrementAndGet()
@@ -737,7 +741,7 @@ public class ProcessBroker internal constructor(
                     .use { }
             }
             accepted.cancel(true)
-            closeRetirement.retireHandoff(handoff)
+            workerOwnership.retireHandoff(handoff)
         }
     }
 
@@ -755,16 +759,12 @@ public class ProcessBroker internal constructor(
                     check(destroySlot(dead)) { "failed to retire dead portal worker" }
                     if (lifecycle != ProcessBrokerLifecycle.Running) return@runCatching
                     val fresh = spawnWorker()
-                    val published = synchronized(lifecycleGate) {
+                    synchronized(lifecycleGate) {
                         if (lifecycle == ProcessBrokerLifecycle.Running) {
-                            trackedSlots.add(fresh)
-                            idle.add(fresh)
-                            true
-                        } else {
-                            false
+                            workerOwnership.publishSlot(fresh)
                         }
                     }
-                    if (!published) destroySlot(fresh)
+                    // On rejection the provisional owner stays registered for close to retire.
                 }.exceptionOrNull()?.let { failure ->
                     logger.log(Level.WARNING, "failed to replenish portal worker", failure)
                 }

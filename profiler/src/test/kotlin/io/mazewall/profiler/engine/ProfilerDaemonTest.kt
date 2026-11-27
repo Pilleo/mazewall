@@ -56,7 +56,7 @@ import java.lang.foreign.ValueLayout
 import java.nio.channels.ClosedByInterruptException
 
 @Isolated
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class ProfilerDaemonTest {
     @Test
     fun `pass-through requested before ACK drains the published event first`() = checkPendingPassThrough(expectAck = true)

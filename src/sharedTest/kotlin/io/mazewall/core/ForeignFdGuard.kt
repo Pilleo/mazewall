@@ -23,6 +23,8 @@ import java.nio.file.attribute.BasicFileAttributes
  * Invariant enforced: descriptors present before a test are foreign; tests may
  * only close what they opened themselves. A missing or changed descriptor in
  * the verified after snapshot is reported with its fd number and target.
+ * [GuardProcessDescriptors] reserves the resource across both snapshots through
+ * JUnit's scheduler. Concurrent child probes declare [UsesProcessDescriptors].
  *
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
@@ -40,7 +42,6 @@ class ForeignFdGuard internal constructor(
     }
 
     override fun afterEach(context: ExtensionContext) {
-        if (isDisabled()) return
         val before = context.getStore(NAMESPACE).remove(FD_KEY, Snapshot::class.java) ?: return
         val after = currentFds()
         val differences = before.targets.toSortedMap().mapNotNull { (id, previousTarget) ->

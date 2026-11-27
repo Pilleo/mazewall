@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.api
 
 import io.mazewall.platform.fd.CleanupFailures
+import io.mazewall.platform.lifecycle.TestProcessLauncher
 import java.io.File
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -160,8 +161,7 @@ object IsolatedProcessTester {
         // Isolated children inherit them and then crash in C1 mmap(PROT_EXEC).
         io.mazewall.platform.process.JvmChildProcess
             .stripInheritedJvmOptions(builder.environment())
-        builder.inheritIO()
-        val process = builder.start()
+        val process = TestProcessLauncher.startInherited(builder)
         verifyLifecycleForTesting(process, timeout, command, JdkProcessLifecycle(onDescendantsObserved))
     }
 

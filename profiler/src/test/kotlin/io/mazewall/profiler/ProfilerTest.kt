@@ -34,7 +34,7 @@ import java.nio.file.attribute.FileAttribute
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class ProfilerTest {
     class MockProcess(
         private val pid: Long,
