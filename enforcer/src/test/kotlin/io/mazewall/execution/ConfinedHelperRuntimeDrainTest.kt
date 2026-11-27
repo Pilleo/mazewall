@@ -3927,22 +3927,31 @@ class ConfinedHelperRuntimeDrainTest {
             val policy = (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy
             val owner = DirectResolutionCapture.create()
             val direct = owner.prepare(RuntimeProfile.HOTSPOT_JIT, policy, fixture.resources.implementationClass, emptySet())
-            val completed = fixture.manager.completedTaskCount
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val blocker = fixture.manager.submit {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
             val nativeCalls = AtomicInteger()
             beforeNative = { nativeCalls.incrementAndGet() }
             try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertTrue(fixture.manager.queue.isEmpty())
                 val failure = assertFailsWith<IllegalStateException> {
                     fixture.runtime.prepareConfinedRead(fixture.reviewed, DomainLimits(1, 1), direct, fixture.endpoint.context, fixture.support, HelperSupportLifetime.NoWriters)
                 }
                 assertTrue(failure.message.orEmpty().contains("Direct result confined preparation is not available"))
-                assertEquals(completed, fixture.manager.completedTaskCount)
+                assertTrue(fixture.manager.queue.isEmpty(), "A direct result must not queue a manager task")
                 assertEquals(0, nativeCalls.get())
                 val helperDrain = ManagedRuntime::class.java.getDeclaredField("helperDrainMode").apply { isAccessible = true }
                 assertFalse(helperDrain.getBoolean(fixture.runtime))
                 direct.validate()
             } finally {
+                release.countDown()
                 beforeNative = {}
                 direct.close()
+                blocker.get(5, TimeUnit.SECONDS)
             }
         }
 
