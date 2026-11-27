@@ -30,10 +30,11 @@ internal sealed interface SupervisorInjectionPlan {
         ): SupervisorInjectionPlan =
             when (injectTarget(SupervisorNotificationMachine.classify(SyscallNumber(nr), arch))) {
                 is InjectTarget.Open ->
-                    extracted.pathStr
-                    ?.let { SupervisedOpen.parse(nr, args, it, arch, extracted.openHow) }
-                    ?.let(::Open)
-                    ?: Deny()
+                    extracted.openHowErrno?.let { Deny(it) }
+                        ?: extracted.pathStr
+                            ?.let { SupervisedOpen.parse(nr, args, it, arch, extracted.openHow) }
+                            ?.let(::Open)
+                        ?: Deny()
                 is InjectTarget.Connect -> extracted.sockaddrBytes?.let(::Connect) ?: Deny()
                 is InjectTarget.Accept -> Accept
                 is InjectTarget.Unsupported -> Deny()

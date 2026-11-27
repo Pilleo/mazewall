@@ -93,7 +93,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | TOOL-04 | P2 | W18 | [issue-20261103-235300-192](../backlog/issue-20261103-235300-192-return-failure-after-unsuccessful-or-ambiguous-ret.md) |
 | SUP-01 | P1 | W04 | [issue-20261103-235357-491](../backlog/issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md) |
 | SUP-02 | P1 | W04 | [issue-20261103-235357-847](../backlog/issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) |
-| SUP-03 | P1 | W04 | [issue-20261103-235358-296](../backlog/issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) |
+| SUP-03 | P1 | W04 | [issue-20261103-235358-296](../backlog/resolved/issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) |
 | SUP-04 | P2 | W04 | [issue-20261103-235358-819](../backlog/issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) |
 | SUP-05 | P2 | W04 | [issue-20261103-235359-257](../backlog/issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md) |
 | SUP-06 | P3 | W04 | [issue-20261103-235359-647](../backlog/issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) |

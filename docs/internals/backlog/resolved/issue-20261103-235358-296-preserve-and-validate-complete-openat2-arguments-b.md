@@ -1,7 +1,7 @@
 ---
 title: "Preserve and validate complete openat2 arguments before supervised effects"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -52,6 +52,10 @@ Pure extraction/planning only; no native call or file effect was performed
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution Evidence (2026-11-27)
+- `SupervisorArgumentExtractor` now uses `openat2` size. Sizes below 24 are `EINVAL`. Sizes above 4096 and nonzero extension tails are `E2BIG`. Flag bits above 31 are `EINVAL` and are not narrowed into `OpenFlags`. A zero tail is accepted. `SupervisorInjectionPlan` turns that errno into `Deny` before an open plan exists.
+- Regression: `OpenAt2HowValidationTest` covers sizes 0, 23, 24, 32 with a zero and nonzero tail, 4097, and a high flag bit, plus a valid size-24 read. No native open was run. Direct-versus-brokered errno and sentinel-file retention remain a later host check.
 
 ---
 <!-- id: issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b  file: issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md -->
