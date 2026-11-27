@@ -89,18 +89,9 @@ APP_BASE_NAME=${0##*/}
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
 # Mazewall's full build needs a separate confined kernel lane on ordinary Linux hosts.
-if [ "${1:-}" = build ] && [ "$(pwd -P)" = "$APP_HOME" ] && [ -r /proc/self/status ] &&
-   [ -z "${ORG_GRADLE_PROJECT_mazewallKernelLane:-}" ]; then
-    split_build=true
-    for arg do
-        case "$arg" in
-            -PmazewallKernelLane*|-Dorg.gradle.project.mazewallKernelLane*|--project-prop*|-P|\
-            --dry-run|-m|--help|-h|-\?|--plan|--project-dir*|-p*) split_build=false ;;
-        esac
-    done
-    if [ "$split_build" = true ]; then
-        exec bash "$APP_HOME/scripts/run_local_build.sh" "$@"
-    fi
+# `build` may follow flags. An explicit lane, help, or another directory stays on Gradle.
+if sh "$APP_HOME/scripts/should_split_host_build.sh" "$APP_HOME" "$(pwd -P)" "$@"; then
+    exec bash "$APP_HOME/scripts/run_local_build.sh" "$@"
 fi
 
 # Use the maximum available, or set MAX_FD != -1 to use that value.
