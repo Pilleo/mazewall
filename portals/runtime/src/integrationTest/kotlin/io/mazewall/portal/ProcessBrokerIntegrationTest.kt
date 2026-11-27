@@ -965,6 +965,103 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `replacement rejected during close remains owned after a retryable cleanup failure`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val replacementReady = CountDownLatch(1)
+        val releaseReplacement = CompletableFuture<Unit>()
+        val receipts = ChildReceipts()
+        val socketReceipts = SocketReceipts()
+        val closeAttempts = AtomicInteger()
+        val failure = java.io.IOException("replacement listener close failed before dispatch")
+        val sockets = object : SocketManager by socketReceipts {
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                if (fd === socketReceipts.acquired.getOrNull(2) && closeAttempts.incrementAndGet() == 1) throw failure
+                socketReceipts.close(fd)
+            }
+        }
+        lateinit var broker: ProcessBroker
+        val launcher = object : ProcessLauncher by receipts {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
+            ): Process {
+                val child = receipts.startProcess(args, redirectErrorStream, preparation)
+                if (receipts.children.size == 1) return child
+                return object : Process() {
+                    override fun getOutputStream() = child.outputStream
+
+                    override fun getInputStream() = child.inputStream
+
+                    override fun getErrorStream() = child.errorStream
+
+                    override fun waitFor() = child.waitFor()
+
+                    override fun waitFor(
+                        timeout: Long,
+                        unit: TimeUnit,
+                    ) = child.waitFor(timeout, unit)
+
+                    override fun exitValue() = child.exitValue()
+
+                    override fun destroy() = child.destroy()
+
+                    override fun destroyForcibly() = apply { child.destroyForcibly() }
+
+                    override fun isAlive() = child.isAlive
+
+                    override fun toHandle() = child.toHandle()
+
+                    override fun pid(): Long {
+                        // This diagnostic read follows the acquisition handoff and precedes pool publication.
+                        if (broker.spawnedWorkers() == 2 && replacementReady.count != 0L) {
+                            replacementReady.countDown()
+                            releaseReplacement.orTimeout(10, TimeUnit.SECONDS).join()
+                            Thread.interrupted()
+                        }
+                        return child.pid()
+                    }
+                }
+            }
+        }
+        broker = ProcessBroker(launcher = launcher, sockets = sockets)
+        var closing: CompletableFuture<Throwable?>? = null
+        try {
+            broker.start()
+            broker.crashIdleWorkerProcess()
+            assertThrows(PortalCallException::class.java) { broker.echo("trigger replacement") }
+            assertTrue(replacementReady.await(10, TimeUnit.SECONDS), "replacement must finish acquisition")
+            assertEquals(0, broker.idleSize(), "replacement must not be published during the test pause")
+            closing = CompletableFuture.supplyAsync { runCatching { broker.close() }.exceptionOrNull() }
+            awaitCondition(java.time.Duration.ofSeconds(5), "broker starts closing before replacement publication") {
+                broker.lifecycleState() == ProcessBrokerLifecycle.Closing
+            }
+            releaseReplacement.complete(Unit)
+
+            assertSame(failure, closing.get(10, TimeUnit.SECONDS))
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            assertEquals(1, broker.provisionalWorkers(), "retryable listener must retain its replacement owner")
+            assertEquals(1, closeAttempts.get())
+            assertTrue(receipts.children.none(Process::isAlive), "independent child cleanup must finish")
+            broker.close()
+            assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+            assertEquals(0, broker.provisionalWorkers())
+            assertEquals(2, closeAttempts.get(), "retry must close only the unfinished listener")
+            socketReceipts.assertAllRetired()
+        } finally {
+            releaseReplacement.complete(Unit)
+            closing?.get(10, TimeUnit.SECONDS)
+            try {
+                broker.close()
+            } finally {
+                socketReceipts.acquired.getOrNull(2)?.let { listener ->
+                    if (socketReceipts.retired.none { it === listener }) RealSocketManager.close(listener)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `worker survives multiple idle ticks and still serves calls`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         // Regression for the pooled-worker self-exit bug (011654): a 500ms receive deadline

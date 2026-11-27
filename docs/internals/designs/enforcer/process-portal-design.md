@@ -173,8 +173,11 @@ authorization, independent measurements, all-thread static containment and dispa
 
 Stateless worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
-replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
-so a slot cannot be returned after closing admission begins.
+replace or delay the original failure. Initial and replacement acquisition both register
+the ready slot as provisional before relinquishing the startup attempt. Publication moves
+that owner to the live pool under the lifecycle gate. If close wins, the slot stays
+provisional until close retires it, and an unfinished cleanup remains available to a later
+close. Checkout and return also consult the lifecycle gate.
 
 A fatal broker call error retires and reaps its checked-out worker before propagation. The
 original error retains cleanup failures as suppressed evidence; replacement remains separate
