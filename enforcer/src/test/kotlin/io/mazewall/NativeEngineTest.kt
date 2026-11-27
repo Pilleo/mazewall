@@ -10,7 +10,7 @@ import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.close
 import io.mazewall.platform.lifecycle.*
-import io.mazewall.platform.lifecycle.ForeignFdGuard
+import io.mazewall.platform.lifecycle.GuardProcessDescriptors
 import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
@@ -19,11 +19,10 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
-@ExtendWith(ForeignFdGuard::class)
+@GuardProcessDescriptors
 class NativeEngineTest {
     companion object {
         @JvmStatic

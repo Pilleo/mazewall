@@ -32,10 +32,9 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
 import java.util.concurrent.CancellationException
 
-@ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 @org.junit.jupiter.api.parallel.Isolated
 class SeccompCleanupInterpreterTest {
     private val ownedDescriptors = mutableListOf<FileDescriptor<*, FdState.Open, FdOwnership.Owned>>()

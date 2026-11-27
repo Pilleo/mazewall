@@ -23,6 +23,8 @@ import java.nio.file.attribute.BasicFileAttributes
  * Invariant enforced: descriptors present before a test are foreign; tests may
  * only close what they opened themselves. Anything missing after the test is a
  * violation named by fd number and target (readlink of /proc/self/fd/N).
+ * [GuardProcessDescriptors] reserves the resource across both snapshots through
+ * JUnit's scheduler. Concurrent child probes declare [UsesProcessDescriptors].
  *
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
@@ -36,21 +38,14 @@ class ForeignFdGuard internal constructor(
 
     override fun beforeEach(context: ExtensionContext) {
         if (isDisabled()) return
-        context.getStore(NAMESPACE).put(FD_KEY, currentFds())
+        context.getStore(NAMESPACE).put(FD_KEY, Snapshot(currentFds()))
     }
 
     override fun afterEach(context: ExtensionContext) {
-        if (isDisabled()) return
-        val before = context.getStore(NAMESPACE).remove(FD_KEY, Set::class.java) as? Set<FdInfo> ?: return
-        val after = currentFds()
-        val beforeById = before.associateBy { it.id }
-        val vanished = before.filterNot { candidate ->
-            after.any { it.id == candidate.id && it.target == candidate.target }
-        }
+        val before = context.getStore(NAMESPACE).remove(FD_KEY, Snapshot::class.java) ?: return
+        val vanished = before.descriptors - currentFds()
         if (vanished.isNotEmpty()) {
-            val detail = vanished.joinToString("\n  ") {
-                "fd ${it.id} -> ${it.target} (${beforeById[it.id]?.target ?: "?"})"
-            }
+            val detail = vanished.joinToString("\n  ") { "fd ${it.id} -> ${it.target}" }
             throw AssertionError(
                 "ForeignFdGuard: test '${context.displayName}' closed ${vanished.size} " +
                     "descriptor(s) it did not own:\n  $detail\n" +
@@ -58,6 +53,10 @@ class ForeignFdGuard internal constructor(
             )
         }
     }
+
+    private data class Snapshot(
+        val descriptors: Set<FdInfo>,
+    )
 
     private data class FdInfo(
         val id: Int,

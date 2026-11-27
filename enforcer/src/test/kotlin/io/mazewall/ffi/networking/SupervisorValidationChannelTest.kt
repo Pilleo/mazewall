@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.io.IOException
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class SupervisorValidationChannelTest {
     @AfterEach
     fun tearDown() {

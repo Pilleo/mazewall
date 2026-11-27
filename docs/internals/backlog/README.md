@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 403 | *Total Resolved Issues:* 783
+*Total Active Issues:* 402 | *Total Resolved Issues:* 784
 
-Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 400 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -548,7 +548,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt](issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt.md) | Collect owned Boot child coverage and bind nonempty kernel coverage classes | high | core |
 | [issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek](issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek.md) | Clear existing shared-test and enforcer test Detekt errors without weakening native verification | high | core |
 | [issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por](issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por.md) | Clear final candidate Detekt ZIP constants and Portal declaration naming findings | high | core |
-| [issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati](issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md) | Classify transient unreadable descriptor observations in ForeignFdGuard | high | core |
+| Archived [issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati](resolved/issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md) | Classify transient unreadable descriptor observations in ForeignFdGuard | high | core |
 | [issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr](issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr.md) | Adopt typed prepared ordinary-JAR resources in Spring and prove native JDBC lifecycle | high | spring-integration |
 | [issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-](issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-.md) | Declare optional Koog production plugin bootstrap and Portal runtime publication | high | integrations |
 | [issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin](issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin.md) | Bind supported exploded and Boot deployment origins to genuine prepared owners | high | enforcer |

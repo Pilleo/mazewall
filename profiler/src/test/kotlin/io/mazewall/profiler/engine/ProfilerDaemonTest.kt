@@ -53,7 +53,7 @@ import java.lang.foreign.ValueLayout
 import java.nio.channels.ClosedByInterruptException
 
 @Isolated
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class ProfilerDaemonTest {
     @Test
     fun `stalled preparation expires in reactor and late evidence cannot publish or reply`() {
@@ -1395,7 +1395,7 @@ class ProfilerDaemonTest {
         arenaField.set(pool, closedArena)
 
         try {
-            val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader())
+            val engine = ProfilerDaemonEngine("/tmp/test.sock", transport, MockReader(), engine = MockNativeEngine())
             engine.handleConnection(
                 TestFileDescriptors
                 .replace(10),

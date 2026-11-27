@@ -762,3 +762,9 @@ state they mutate; module-specific mutable globals stay with their owning
 module. Do not add tests named `*CoverageTest`: coverage is a result, not a behavior. Replace a
 coverage-only probe with a behavior-level specification when its production
 seam is available.
+
+Use `@GuardProcessDescriptors` for tests that check the worker JVM's descriptor
+table. Concurrent child-process probes use `@UsesProcessDescriptors` and declare
+that access for the whole test, including child retirement. JUnit schedules the
+probes together and keeps them out of guarded snapshots. A guarded test can
+launch its own child from a separate timeout thread without taking a second lock.
