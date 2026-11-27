@@ -695,8 +695,10 @@ completion gate for included modules: formatting, lint/static analysis, tests,
 and configured coverage thresholds. Its task graph already selects kernel and
 fresh-JVM integration suites. On a Linux host without `CAP_CHECKPOINT_RESTORE`,
 run `./gradlew build` from the checkout root to run the baseline on the host and
-the confined tests through the project's rootful Docker runner. Both must pass.
-An explicit `-PmazewallKernelLane` selects just that Gradle lane. Select
+the confined tests through the project's rootful Docker runner. Flags may precede
+`build`. Both must pass. An explicit `-PmazewallKernelLane` selects just that
+Gradle lane. An unset lane is `ALL`; if this host cannot open `/proc/self/map_files`,
+that lane fails before the confined-helper classes run. Select
 owning-module integration tasks for focused iteration, or use
 `./scripts/run_containerized_tests.sh kernelCheck` as the containerized test runner;
 equivalent test commands are alternatives, not additional gates after a successful
