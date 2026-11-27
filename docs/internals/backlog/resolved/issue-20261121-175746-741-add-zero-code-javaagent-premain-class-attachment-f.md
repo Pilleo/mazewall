@@ -22,6 +22,7 @@ Post-0.1.0 enhancement from the v1 hardening spec: allow operators to attach io.
 1. Design the -javaagent Premain-Class entrypoint and argument grammar in lockdown/ and verify modular/classpath agent startup without auto-activating on normal library classpath usage.
 
 ## Resolution Evidence (2026-11-21)
+- Release scope decision: the implementation below is historical. The agent is excluded from `0.1.0`; lockdown requires an explicit application startup call.
 - Added `MazewallAgent` (`premain(String?)`, `parsePolicy(String?)`), manifest `Premain-Class`, `VerifyLockdownPublication` enforcement, `lockdown/api/lockdown.api`, unit tests (`MazewallAgentTest`, `LockdownJavaApiTest`), and packaged `-javaagent` subprocess verification in `MazewallLockdownIntegrationTest`.
 
 ---

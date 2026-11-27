@@ -38,5 +38,17 @@ Repository-wide review, 2026-11-04: [PRT-02](../reviews/2026-11-04-repository-re
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
 
+**Implementation evidence (2026-11-27):** Initial and replacement startup now
+register the ready slot before relinquishing its startup attempt. Both use the
+same provisional-to-live transfer, and rejection during close leaves the slot
+in the close path's ownership.
+
+The real-child integration regression first reproduced a successful close
+despite an injected replacement-listener cleanup failure. After the correction,
+the first close reports the original failure, both children are reaped, and
+the retry closes only the retained listener. The replacement and initial
+startup rollback controls, runtime unit tests, ABI validation and lint also
+passed on JDK 25.
+
 ---
 <!-- id: issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-  file: issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md -->

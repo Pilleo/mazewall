@@ -35,7 +35,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class ProfilerDaemonBenchmarkTest {
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()

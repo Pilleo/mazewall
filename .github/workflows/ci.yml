@@ -154,21 +154,7 @@ jobs:
               id: filter
               uses: dorny/paths-filter@v3
               with:
-                  filters: |
-                      code:
-                          - '**/*.kt'
-                          - '**/*.java'
-                          - '**/*.kts'
-                          - '**/*.gradle'
-                          - 'gradle/libs.versions.toml'
-                          - '**/gradle.lockfile'
-                          - 'gradle/verification-metadata.xml'
-                          - 'config/spotbugs/**'
-                          - '**/gradle.properties'
-                          - '**/Containerfile'
-                          - 'scripts/**'
-                          - '.github/workflows/ci.yml'
-                          - '.github/workflows/security-data.yml'
+                  filters: .github/ci-code-paths.yml
 
             - name: Restore Container Gradle Cache
               uses: actions/cache/restore@v4
@@ -199,6 +185,8 @@ jobs:
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
               run: ./gradlew :unitCheck :verifyGradleReproducibility --no-daemon
+            - name: Run C ABI oracle cache regression
+              run: bash scripts/tests/c_abi_oracle_cache_test.sh
             - name: Prove configuration-cache reuse
               run: |
                   set -o pipefail
@@ -365,21 +353,7 @@ jobs:
               id: filter
               uses: dorny/paths-filter@v3
               with:
-                  filters: |
-                      code:
-                          - '**/*.kt'
-                          - '**/*.java'
-                          - '**/*.kts'
-                          - '**/*.gradle'
-                          - 'gradle/libs.versions.toml'
-                          - '**/gradle.lockfile'
-                          - 'gradle/verification-metadata.xml'
-                          - 'config/spotbugs/**'
-                          - '**/gradle.properties'
-                          - '**/Containerfile'
-                          - 'scripts/**'
-                          - '.github/workflows/ci.yml'
-                          - '.github/workflows/security-data.yml'
+                  filters: .github/ci-code-paths.yml
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
@@ -423,21 +397,7 @@ jobs:
               id: filter
               uses: dorny/paths-filter@v3
               with:
-                  filters: |
-                      code:
-                          - '**/*.kt'
-                          - '**/*.java'
-                          - '**/*.kts'
-                          - '**/*.gradle'
-                          - 'gradle/libs.versions.toml'
-                          - '**/gradle.lockfile'
-                          - 'gradle/verification-metadata.xml'
-                          - 'config/spotbugs/**'
-                          - '**/gradle.properties'
-                          - '**/Containerfile'
-                          - 'scripts/**'
-                          - '.github/workflows/ci.yml'
-                          - '.github/workflows/security-data.yml'
+                  filters: .github/ci-code-paths.yml
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
@@ -701,7 +661,7 @@ jobs:
                   path: build/reports/confined-helper-*
                   if-no-files-found: warn
     build-test-publish:
-        # Keep the required check stable and fail closed for every skipped/failed lane.
+        # Keep the required check stable and fail closed for every required lane.
         name: Build, Test, Security Scan & Publish
         needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]
         if: always()
@@ -711,11 +671,33 @@ jobs:
         outputs:
             container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
         steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
             - name: Require Core and Mutation Success
-              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && (test "${{ needs.go-validation.result }}" = success || (test "${{ vars.ENABLE_GO_VALIDATION }}" != true && test "${{ inputs.enable_go_validation }}" != true && test "${{ needs.go-validation.result }}" = skipped)) && test "${{ needs.optional-integrations.result }}" = success && test "${{ needs.confined-helper-kernel.result }}" = success
+              env:
+                  CORE_QUALITY_RESULT: ${{ needs.core-quality.result }}
+                  MUTATION_TESTS_RESULT: ${{ needs.mutation-tests.result }}
+                  SECURITY_CHECK_RESULT: ${{ needs.security-check.result }}
+                  BUILD_LOGIC_VALIDATION_RESULT: ${{ needs.build-logic-validation.result }}
+                  GO_VALIDATION_RESULT: ${{ needs.go-validation.result }}
+                  OPTIONAL_INTEGRATIONS_RESULT: ${{ needs.optional-integrations.result }}
+                  CONFINED_HELPER_KERNEL_RESULT: ${{ needs.confined-helper-kernel.result }}
+                  GO_VARIABLE: ${{ vars.ENABLE_GO_VALIDATION }}
+                  GO_INPUT: ${{ inputs.enable_go_validation }}
+              run: >-
+                  python3 scripts/ci_required_gate.py
+                  --core-quality="$CORE_QUALITY_RESULT"
+                  --mutation-tests="$MUTATION_TESTS_RESULT"
+                  --security-check="$SECURITY_CHECK_RESULT"
+                  --build-logic-validation="$BUILD_LOGIC_VALIDATION_RESULT"
+                  --go-validation="$GO_VALIDATION_RESULT"
+                  --optional-integrations="$OPTIONAL_INTEGRATIONS_RESULT"
+                  --confined-helper-kernel="$CONFINED_HELPER_KERNEL_RESULT"
+                  --go-variable="$GO_VARIABLE"
+                  --go-input="$GO_INPUT"
     publish:
         name: Publish Verified Packages
-        needs: [core-quality, mutation-tests, security-check, build-logic-validation]
+        needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         runs-on: ubuntu-26.04
         timeout-minutes: 30

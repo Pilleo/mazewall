@@ -9,7 +9,6 @@ target_modules: ["scripts"]
 target_files:
   - ".agent-devkit.json"
   - ".agents/hooks.json"
-  - ".agents/skills/file_structure/SKILL.md"
   - ".agents/skills/fix_backlog_item/SKILL.md"
   - ".claude/skills/file_structure/SKILL.md"
   - ".claude/skills/fix_backlog_item/SKILL.md"

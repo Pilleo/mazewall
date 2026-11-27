@@ -86,8 +86,8 @@ internal class PortalIo(
         deadline: Deadline,
     ) {
         if (!SupervisorSocketUtils.sendDescriptor(
-                socket.value,
-                fd.value,
+                socket,
+                fd,
                 LinuxNative.networking,
             ) { await(deadline, NativeConstants.POLLOUT, false) }
         ) {

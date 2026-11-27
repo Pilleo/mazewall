@@ -28,6 +28,7 @@ public final class VerificationActionsTest {
             NativeTestDiscoveryFunctionalTest.verify(rootBuild.getParent());
             CoreLaneFunctionalTest.verify(rootBuild.getParent());
             ConfinedHelperLaneFunctionalTest.verify(rootBuild.getParent());
+            PitestTargetInventoryFunctionalTest.verify(rootBuild.getParent());
         } catch (Exception failure) {
             throw new AssertionError("Relocatable producer compilation failed", failure);
         }

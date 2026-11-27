@@ -40,7 +40,7 @@ class UserNotifSharedTest {
                 }
             }
             assertEquals(
-                UserNotifReplyResult.Failed(NativeConstants.EINTR),
+                UserNotifReplyResult.Failed(NativeConstants.EINTR, UserNotifReplyResult.Operation.SEND),
                 UserNotifReply.send(engine.raw, TestFileDescriptors.replace<FileDescriptorRole.SeccompNotif>(17), arena.allocate(Layouts.SECCOMP_NOTIF_RESP)),
             )
             assertEquals(8, attempts)
@@ -106,7 +106,7 @@ class UserNotifSharedTest {
                 arena.allocate(Layouts.SECCOMP_NOTIF_RESP),
             )
 
-            assertEquals(UserNotifReplyResult.Failed(NativeConstants.EPERM), outcome)
+            assertEquals(UserNotifReplyResult.Failed(NativeConstants.EPERM, UserNotifReplyResult.Operation.SEND), outcome)
         }
     }
 

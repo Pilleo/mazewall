@@ -101,10 +101,10 @@ internal class SupervisorReplyInterpreter(
                 is SupervisorReplyEffect.AddFdAndReply -> effect.descriptor.use { injectReply(context, it, effect.flags) }
                 is SupervisorReplyEffect.AcceptedSocket -> acceptedReply(effect, context)
                 is SupervisorReplyEffect.SecureExecAndReply -> secureExec(effect, context)
-                is SupervisorReplyEffect.Recycle -> ReplyExecutionResult.ReplyFailed(IllegalStateException(effect.reason))
+                is SupervisorReplyEffect.Recycle -> ReplyExecutionResult.ReplyFailed.unconfirmed(IllegalStateException(effect.reason))
             }
         } catch (expectedReplyFailure: Exception) {
-            ReplyExecutionResult.ReplyFailed(expectedReplyFailure)
+            ReplyExecutionResult.ReplyFailed.unconfirmed(expectedReplyFailure)
         }
 
     context(arena: NativeArena) private fun acceptedReply(
@@ -130,7 +130,10 @@ internal class SupervisorReplyInterpreter(
     ): ReplyExecutionResult =
         when (val result = inject(context.id, descriptor, flags, NativeConstants.SECCOMP_ADDFD_FLAG_SEND.toInt())) {
             is FdInjectionResult.Injected -> ReplyExecutionResult.ReplySucceeded
-            is FdInjectionResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor injection failed with errno=${result.errno}"))
+            is FdInjectionResult.Failed -> ReplyExecutionResult.ReplyFailed(
+                IllegalStateException("Supervisor ADDFD reply failed with errno=${result.errno}"),
+                UserNotifReplyResult.fromErrno(result.errno, UserNotifReplyResult.Operation.ADDFD),
+            )
         }
 
     /** Admission overload consumes the reactor's terminal lease even on EINTR. */
@@ -155,7 +158,10 @@ internal class SupervisorReplyInterpreter(
     private fun confirmed(result: UserNotifReplyResult): ReplyExecutionResult =
         when (result) {
             UserNotifReplyResult.Sent -> ReplyExecutionResult.ReplySucceeded
-            UserNotifReplyResult.NotificationGone -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor notification expired before kernel reply"), result)
+            UserNotifReplyResult.NotificationGone -> ReplyExecutionResult.ReplyFailed(
+                IllegalStateException("Supervisor notification expired before kernel reply"),
+                UserNotifReplyResult.NotificationGone,
+            )
             is UserNotifReplyResult.Failed -> ReplyExecutionResult.ReplyFailed(IllegalStateException("Supervisor kernel reply failed with errno=${result.errno}"), result)
         }
 

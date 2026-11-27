@@ -82,10 +82,7 @@ tasks.named<JavaCompile>("compileJava") {
 
 tasks.named<org.gradle.jvm.tasks.Jar>("jar") {
     manifest {
-        attributes(
-            "Automatic-Module-Name" to "io.mazewall.lockdown",
-            "Premain-Class" to "io.mazewall.lockdown.MazewallAgent",
-        )
+        attributes("Automatic-Module-Name" to "io.mazewall.lockdown")
     }
 }
 
@@ -413,11 +410,14 @@ abstract class VerifyLockdownPublication : DefaultTask() {
         val archive = jarFile.get().asFile
         val entries: Set<String>
         val automaticModuleName: String?
-        val premainClass: String?
         JarFile(archive).use { jar ->
             val attrs = jar.manifest?.mainAttributes
             automaticModuleName = attrs?.getValue("Automatic-Module-Name")
-            premainClass = attrs?.getValue("Premain-Class")
+            val agentHooks =
+                listOf("Premain-Class", "Agent-Class", "Launcher-Agent-Class").filter { attrs?.getValue(it) != null }
+            check(agentHooks.isEmpty()) {
+                "Unexpected Java agent manifest attributes in ${archive.name}: $agentHooks"
+            }
             entries =
                 jar
                     .entries()
@@ -427,9 +427,6 @@ abstract class VerifyLockdownPublication : DefaultTask() {
         }
         check(automaticModuleName == "io.mazewall.lockdown") {
             "Expected Automatic-Module-Name io.mazewall.lockdown in ${archive.name}, was $automaticModuleName"
-        }
-        check(premainClass == "io.mazewall.lockdown.MazewallAgent") {
-            "Expected Premain-Class io.mazewall.lockdown.MazewallAgent in ${archive.name}, was $premainClass"
         }
         check("module-info.class" in entries) {
             "Missing JPMS descriptor module-info.class in ${archive.name}"
@@ -548,7 +545,6 @@ abstract class VerifyLockdownPublication : DefaultTask() {
                 "io/mazewall/lockdown/LockdownPreset.class",
                 "io/mazewall/lockdown/LockdownSyscall.class",
                 "io/mazewall/lockdown/Mazewall.class",
-                "io/mazewall/lockdown/MazewallAgent.class",
                 "io/mazewall/lockdown/MazewallInstallationException.class",
                 "io/mazewall/lockdown/ProcessInstallation.class",
                 "io/mazewall/lockdown/ProcessPolicy.class",
@@ -560,7 +556,6 @@ abstract class VerifyLockdownPublication : DefaultTask() {
                 "LockdownPreset",
                 "LockdownSyscall",
                 "Mazewall",
-                "MazewallAgent",
                 "MazewallInstallationException",
                 "ProcessInstallation",
                 "ProcessPolicy",

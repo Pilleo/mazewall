@@ -1,6 +1,7 @@
 package io.mazewall.platform.process
 
 import io.mazewall.platform.lifecycle.MazewallInternal
+import java.io.BufferedReader
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -95,6 +96,29 @@ internal object JvmChildProcess {
         onLine: (String) -> Unit,
         threadName: String,
         onStreamClosed: () -> Unit = {},
+    ): ChildStdoutPump = startStdoutPump(process, readySentinel, onLine, threadName, onStreamClosed, BufferedReader::readLine)
+
+    internal fun startBoundedStdoutPump(
+        process: Process,
+        readySentinel: String,
+        maxLineChars: Int,
+        onLine: (String) -> Unit,
+        onOversizedLine: () -> Unit,
+        threadName: String,
+        onStreamClosed: () -> Unit,
+    ): ChildStdoutPump {
+        require(maxLineChars > 0)
+        val boundedReader = BoundedOutputReader(maxLineChars, onOversizedLine)
+        return startStdoutPump(process, readySentinel, onLine, threadName, onStreamClosed, boundedReader::readLine)
+    }
+
+    private fun startStdoutPump(
+        process: Process,
+        readySentinel: String?,
+        onLine: (String) -> Unit,
+        threadName: String,
+        onStreamClosed: () -> Unit,
+        readLine: (BufferedReader) -> String?,
     ): ChildStdoutPump {
         val ready = CountDownLatch(1)
         val observed = java.util.concurrent.atomic
@@ -103,14 +127,14 @@ internal object JvmChildProcess {
             Thread {
                 try {
                     process.inputStream.bufferedReader().use { reader ->
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        if (readySentinel != null && line.contains(readySentinel)) {
-                            observed.set(true)
-                            ready.countDown()
+                        while (true) {
+                            val line = readLine(reader) ?: break
+                            if (readySentinel != null && line.contains(readySentinel)) {
+                                observed.set(true)
+                                ready.countDown()
+                            }
+                            onLine(line)
                         }
-                        onLine(line)
-                    }
                     }
                 } catch (_: IOException) {
                     // Child closed stdout.
@@ -124,6 +148,43 @@ internal object JvmChildProcess {
             }
         thread.start()
         return ChildStdoutPump(ready, thread, observed)
+    }
+
+    private class BoundedOutputReader(
+        private val maxLineChars: Int,
+        private val onOversizedLine: () -> Unit,
+    ) {
+        private var skipLineFeed = false
+
+        fun readLine(reader: BufferedReader): String? {
+            val line = StringBuilder()
+            var oversized = false
+            while (true) {
+                val next = reader.read()
+                if (skipLineFeed) {
+                    skipLineFeed = false
+                    if (next == '\n'.code) continue
+                }
+                when (next) {
+                    -1 -> return line.takeIf { !oversized && it.isNotEmpty() }?.toString()
+                    '\r'.code, '\n'.code -> {
+                        skipLineFeed = next == '\r'.code
+                        if (!oversized) return line.toString()
+                        line.setLength(0)
+                        oversized = false
+                    }
+                    else -> {
+                        if (oversized) continue
+                        if (line.length < maxLineChars) {
+                            line.append(next.toChar())
+                        } else {
+                            oversized = true
+                            onOversizedLine()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public fun awaitReady(

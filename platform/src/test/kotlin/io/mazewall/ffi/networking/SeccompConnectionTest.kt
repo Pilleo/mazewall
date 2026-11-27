@@ -23,9 +23,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import io.mazewall.platform.lifecycle.ForeignFdGuard as FdGuardImport
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
+@io.mazewall.platform.lifecycle.GuardProcessDescriptors
 @org.junit.jupiter.api.parallel.Isolated
 class SeccompConnectionTest {
     @Test

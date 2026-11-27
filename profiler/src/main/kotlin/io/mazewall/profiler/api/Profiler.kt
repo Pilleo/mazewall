@@ -6,6 +6,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -96,6 +97,8 @@ public object Profiler {
         private val session: ProfilerSession,
     ) : ExecutorService by delegate,
         AutoCloseable {
+        private val drain = ProfilerExecutorDrain(delegate, session)
+
         public val recentLogs: CopyOnWriteArrayList<TraceEvent> = session.logs
         public val recentStackProfiles: Map<TraceEvent, List<Array<StackTraceElement>>> = session.stackProfiles
 
@@ -103,51 +106,78 @@ public object Profiler {
             shutdown()
         }
 
-        override fun <T : Any?> submit(task: Callable<T>): Future<T> =
-            delegate.submit(
-                Callable {
-                session.installOnCurrentThread()
-                task.call()
-            },
-            )
+        override fun <T : Any?> submit(task: Callable<T>): Future<T> = delegate.submit(profiled(task))
 
-        override fun submit(task: Runnable): Future<*> =
-            delegate.submit(
-                Runnable {
-                session.installOnCurrentThread()
-                task.run()
-            },
-            )
+        override fun submit(task: Runnable): Future<*> = delegate.submit(profiled(task))
+
+        override fun <T : Any?> submit(
+            task: Runnable,
+            result: T,
+        ): Future<T> = delegate.submit(profiled(task), result)
 
         override fun execute(command: Runnable) {
-            delegate.execute {
-                session.installOnCurrentThread()
-                command.run()
+            delegate.execute(profiled(command))
+        }
+
+        override fun <T : Any?> invokeAll(tasks: Collection<Callable<T>>): List<Future<T>> = delegate.invokeAll(profiled(tasks))
+
+        override fun <T : Any?> invokeAll(
+            tasks: Collection<Callable<T>>,
+            timeout: Long,
+            unit: TimeUnit,
+        ): List<Future<T>> = delegate.invokeAll(profiled(tasks), timeout, unit)
+
+        override fun <T : Any?> invokeAny(tasks: Collection<Callable<T>>): T = delegate.invokeAny(profiled(tasks))
+
+        override fun <T : Any?> invokeAny(
+            tasks: Collection<Callable<T>>,
+            timeout: Long,
+            unit: TimeUnit,
+        ): T = delegate.invokeAny(profiled(tasks), timeout, unit)
+
+        private fun profiled(task: Runnable): Runnable = Runnable { runProfiled { task.run() } }
+
+        private fun <T> profiled(task: Callable<T>): Callable<T> = Callable { runProfiled { task.call() } }
+
+        private fun <T> profiled(tasks: Collection<Callable<T>>): Collection<Callable<T>> =
+            object : AbstractCollection<Callable<T>>() {
+                override val size: Int get() = tasks.size
+
+                override fun iterator(): Iterator<Callable<T>> =
+                    tasks
+                        .asSequence()
+                        .map(::profiled)
+                        .iterator()
             }
+
+        private inline fun <T> runProfiled(run: () -> T): T {
+            session.installOnCurrentThread()
+            return run()
         }
 
         override fun shutdownNow(): List<Runnable> {
             val pending = delegate.shutdownNow()
-            // Executor shutdown is the ownership boundary for the profiling session too.
-            // Leaving the session registered keeps its daemon listener (and output pump)
-            // alive after callers have discarded the wrapper, which can stall test/JVM
-            // shutdown and leak a permanent notification path.
-            session.closeWithResult().throwIfIncomplete("Profiler executor session cleanup failed")
+            drain.beginRetirement()
             return pending
         }
 
         override fun shutdown() {
             delegate.shutdown()
-            session.closeWithResult().throwIfIncomplete("Profiler executor session cleanup failed")
+            drain.beginRetirement()
         }
+
+        override fun awaitTermination(
+            timeout: Long,
+            unit: TimeUnit,
+        ): Boolean = drain.awaitTermination(timeout, unit)
 
         /** Compiles a [BillOfBehavior] from the events captured so far. */
         public fun compileBillOfBehavior(): BillOfBehavior = session.compileBillOfBehavior()
 
         /**
-         * Immutable behavior and collector-coverage snapshot. Drain this executor and call
-         * [Profiler.shutdown] before using the snapshot for enforcement; active collection
-         * remains incomplete. Shutting down an unused wrapper yields an empty, drained result.
+         * Immutable behavior and coverage snapshot. After [shutdown], a successful
+         * [awaitTermination] settles accepted work and collector cleanup. Active or
+         * prematurely stopped collection remains incomplete.
          */
         public fun snapshot(): ProfilingResult<Unit> = session.result(Unit)
     }

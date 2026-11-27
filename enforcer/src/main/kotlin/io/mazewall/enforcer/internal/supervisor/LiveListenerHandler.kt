@@ -93,7 +93,7 @@ private class LiveNotificationWork(
     context(arena: NativeArena) private fun advance(): NotificationProgress {
         val current = exchange
         if (current == null) {
-            val bytes = LiveObservationProtocol.request(notification, serial, ConfinedDeadline.mint(native) { (deadline.nanoTime - System.nanoTime()).coerceAtLeast(0) })
+            val bytes = LiveObservationProtocol.request(notification, serial, ConfinedDeadline.mint(native) { deadline.remainingNanos(System.nanoTime()) })
             request = bytes
             exchange = ControlSocketExchange(native.raw, native.memory, socket, bytes, LiveObservationProtocol.RESPONSE_BYTES, deadline)
             return NotificationProgress.Await

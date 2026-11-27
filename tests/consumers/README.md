@@ -6,8 +6,8 @@ External artifacts resolve from Maven Central. It has no included source builds
 or project dependencies; the gates reject dependency edges selecting projects
 and require the MazeWall JAR paths to match the supplied repository/version.
 
-The default consumer compiler is **stable Kotlin 2.4.20**, independently of the
-producer's **2.4.20-Beta1**. No metadata or prerelease skip flags are used.
+The default consumer compiler is **stable Kotlin 2.4.20**. The producer pins its
+compiler separately. No metadata or prerelease skip flags are used.
 `consumerKotlinVersion` accepts only a pinned stable release. `consumerJdk`
 selects the compilation and execution toolchain, including diagnostic javac.
 Foojay can supply JDK22 if needed.
@@ -41,15 +41,19 @@ flock "$lock" ./gradlew --console=plain --no-build-cache \
   -PconsumerVersion="$version" -PconsumerEvidence="$PWD/build/consumer-acceptance"
 ```
 
-The Kotlin test acquires that same `flock` lock internally for its entire matrix. It does not
-publish anything. The init script adds only the selected file publication target;
-the staging commands do not select remote publication or Maven Local tasks.
+The Kotlin test acquires the same `flock` lock for its entire JDK 25 check. The
+test has a 10-minute deadline. It waits up to one minute for the lock and gives
+the consumer build six minutes. The Git preflight commands each have 15 seconds,
+and the Gradle version check has 30 seconds. The test writes `jdk25.argv`,
+`jdk25.log`, per-stream logs, and a command receipt that records exit or timeout
+and cleanup. The staging init script adds only the selected file publication target.
 
-Each JDK22/JDK25 row cleans both consumer outputs, disables build/configuration
-caches, logs the actual compiler and resolved artifact paths, compiles and runs
-Java/Kotlin policy construction, independently compiles an **uncast** Callable
-lambda, and requires actual javac rejection of process filesystem configuration
-and worker-to-process policy assignment. Stable Kotlin independently checks both
+The JDK 25 check cleans both consumer outputs, disables daemon reuse and
+build/configuration caches, and logs the actual compiler and resolved artifact
+paths. It compiles and runs Java/Kotlin policy construction, independently
+compiles an **uncast** Callable lambda, and requires actual javac rejection of
+process filesystem configuration and worker-to-process policy assignment.
+Stable Kotlin independently checks both
 fixed-scope rejections. Each language also checks the two retired `wrap` signatures,
 `wrapTyped`, single/fixed/cached factories and `ContainedExecutor`, one source and
 exact missing-symbol diagnostic per retired surface. Negative fixtures require exactly one

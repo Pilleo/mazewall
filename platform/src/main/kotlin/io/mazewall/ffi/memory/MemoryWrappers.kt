@@ -1,9 +1,10 @@
 package io.mazewall.ffi.memory
 
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.lifecycle.threadLocal
+import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.Arena
-import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 import java.nio.charset.StandardCharsets
@@ -16,11 +17,9 @@ private val JAVA_LONG_NATIVE = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrde
  * Type-safe wrapper for `struct sock_filter`.
  */
 @JvmInline
-internal value class SockFilterSegment(
-    public val segment: MemorySegment,
+internal value class SockFilterSegment private constructor(
+    private val segment: MemorySegment,
 ) {
-    public val managed: ManagedSegment get() = ConfinedSegment(segment)
-
     public fun getCode(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.SOCK_FILTER_CODE_OFFSET)
 
     public fun setCode(value: Short) {
@@ -46,41 +45,25 @@ internal value class SockFilterSegment(
     }
 
     public companion object {
-        public fun of(managed: ManagedSegment): SockFilterSegment = SockFilterSegment(managed.unwrap)
-
         context(arena: Arena) public fun allocate(): SockFilterSegment = SockFilterSegment(arena.allocate(Layouts.SOCK_FILTER))
 
-        context(arena: Arena) public fun allocateArray(size: Int): MemorySegment = arena.allocate(MemoryLayout.sequenceLayout(size.toLong(), Layouts.SOCK_FILTER))
-    }
-}
-
-/**
- * Type-safe wrapper for `struct sock_fprog`.
- */
-@JvmInline
-internal value class SockFprogSegment(
-    public val segment: MemorySegment,
-) {
-    public val managed: ManagedSegment get() = ConfinedSegment(segment)
-
-    public val managedFilter: ManagedSegment get() = ConfinedSegment(getFilter())
-
-    public fun getLen(): Short = segment.get(JAVA_SHORT_NATIVE, Layouts.SOCK_FPROG_LEN_OFFSET)
-
-    public fun setLen(value: Short) {
-        segment.set(JAVA_SHORT_NATIVE, Layouts.SOCK_FPROG_LEN_OFFSET, value)
-    }
-
-    public fun getFilter(): MemorySegment = segment.get(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET).reinterpret(getLen().toLong() * Layouts.SOCK_FILTER_SIZE)
-
-    public fun setFilter(value: MemorySegment) {
-        segment.set(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET, value)
-    }
-
-    public companion object {
-        public fun of(managed: ManagedSegment): SockFprogSegment = SockFprogSegment(managed.unwrap)
-
-        context(arena: Arena) public fun allocate(): SockFprogSegment = SockFprogSegment(arena.allocate(Layouts.SOCK_FPROG))
+        context(arena: Arena) internal fun packProgram(filters: List<BpfInstruction>): ManagedSegment {
+            require(filters.size <= NativeConstants.BPF_MAXINSNS) {
+                "BPF program exceeds kernel maximum instruction limit of ${NativeConstants.BPF_MAXINSNS} instructions"
+            }
+            val array = arena.allocate(Layouts.SOCK_FILTER, filters.size.toLong())
+            filters.forEachIndexed { index, instruction ->
+                val filter = SockFilterSegment(array.asSlice(index * Layouts.SOCK_FILTER_SIZE, Layouts.SOCK_FILTER_SIZE))
+                filter.setCode(instruction.code)
+                filter.setJt(instruction.jt.toByte())
+                filter.setJf(instruction.jf.toByte())
+                filter.setK(instruction.k)
+            }
+            val program = arena.allocate(Layouts.SOCK_FPROG)
+            program.set(JAVA_SHORT_NATIVE, Layouts.SOCK_FPROG_LEN_OFFSET, filters.size.toShort())
+            program.set(ValueLayout.ADDRESS, Layouts.SOCK_FPROG_FILTER_OFFSET, array)
+            return ConfinedSegment(program.asReadOnly())
+        }
     }
 }
 

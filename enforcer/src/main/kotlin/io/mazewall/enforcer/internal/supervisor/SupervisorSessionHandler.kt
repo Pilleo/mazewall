@@ -187,7 +187,7 @@ internal class SupervisorSessionHandler internal constructor(
                     return@handle false
                 }
                 if (failure != null) {
-                    completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
+                    completeReply(id, ReplyExecutionResult.ReplyFailed.unconfirmed(failure))
                 } else {
                     SupervisorReplyHandoff(effect).use { handoff ->
                         replyArena().use { workerArena ->
@@ -231,7 +231,7 @@ internal class SupervisorSessionHandler internal constructor(
         failure: Throwable,
     ) {
         try {
-            completeReply(id, ReplyExecutionResult.ReplyFailed(failure))
+            completeReply(id, ReplyExecutionResult.ReplyFailed.unconfirmed(failure))
         } catch (expectedShutdownFailure: Throwable) {
             if (expectedShutdownFailure !== failure) failure.addSuppressed(expectedShutdownFailure)
         }

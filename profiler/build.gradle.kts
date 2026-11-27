@@ -927,10 +927,10 @@ pitest {
     targetClasses.set(
         setOf(
             "io.mazewall.profiler.compiler.BobCompiler*",
-            "io.mazewall.profiler.engine.SyscallPathResolver*",
-            "io.mazewall.profiler.engine.ProfilerSessionMachine*",
-            "io.mazewall.profiler.ProfilingCoverage*",
-            "io.mazewall.profiler.BillOfBehavior*",
+            "io.mazewall.profiler.internal.engine.SyscallPathResolver*",
+            "io.mazewall.profiler.internal.engine.ProfilerSessionMachine*",
+            "io.mazewall.profiler.api.ProfilingCoverage*",
+            "io.mazewall.profiler.api.BillOfBehavior*",
             "io.mazewall.profiler.tierE.daemon.ControlProtocol*",
         ),
     )
@@ -947,11 +947,11 @@ pitest {
     targetTests.set(
         setOf(
             "io.mazewall.profiler.compiler.BobCompilerTest",
-            "io.mazewall.profiler.engine.SyscallPathResolverTest",
-            "io.mazewall.profiler.engine.ProfilerSessionMachineTest",
+            "io.mazewall.profiler.internal.engine.SyscallPathResolverTest",
+            "io.mazewall.profiler.internal.engine.ProfilerSessionMachineTest",
             "io.mazewall.profiler.ProfilingCoverageTest",
-            "io.mazewall.profiler.ProfilerSessionApiTest",
-            "io.mazewall.profiler.BillOfBehaviorTest",
+            "io.mazewall.profiler.api.ProfilerSessionApiTest",
+            "io.mazewall.profiler.api.BillOfBehaviorTest",
             "io.mazewall.profiler.tierE.daemon.ControlProtocolTest",
         ),
     )

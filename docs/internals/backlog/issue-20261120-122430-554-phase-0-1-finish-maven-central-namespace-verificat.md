@@ -1,7 +1,7 @@
 ---
 title: "Phase 0-1: Finish Maven Central namespace verification and close Phase 1 review items"
 severity: "MEDIUM"
-status: "open"
+status: "deferred"
 priority: high
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Phase 0-1: Finish Maven Central namespace verification and close Phase 1 review items
 
 **Context:**
-Phase 1 closure measurement and backlog triage are complete (GO for Option 2 at commit `ccbe82740325480b2e99d7bd9e92df7dc7680872`). D7 Maven Central namespace verification (`io.mazewall` or `io.github.pilleo`) and D8 final package/module naming sign-off remain open before Phase 6 publication.
+Phase 1 closure measurement and backlog triage are complete (GO for Option 2 at commit `ccbe82740325480b2e99d7bd9e92df7dc7680872`). The `0.1.0` release uses `io.mazewall` on GitHub Packages only; Maven Central verification is not a Phase 6 dependency.
 
 ## Phase 1 Baseline & Closure Evidence
 
@@ -26,7 +26,7 @@ Phase 1 closure measurement and backlog triage are complete (GO for Option 2 at 
 - **`jdeps -v` static closure:** Unmodified `ContainedExecutors` + `ProcessPolicies` reaches 1,494 bytecode classes; bypassing `ContainedExecutors` narrows to 385 bytecode classes (76 pre-trim source files, ~63 files after cutting the 4 seams S1–S4) with zero references to supervisor, execution, artifact, `sbob`, `kotlinx-serialization`, `platform.seccomp.daemon`, `platform.daemon`, `platform.socket`, `platform.process`, `ffi.networking`, or `ffi.supervisor`.
 
 **Needed:**
-1. Verify Maven Central namespace ownership (D7) and confirm final package/module naming (D8) while Phase 2 proceeds.
+1. Verify Maven Central namespace ownership if a later release targets Central.
 
 ---
 <!-- id: issue-20261120-122430-554-phase-0-1-finish-maven-central-namespace-verificat  file: issue-20261120-122430-554-phase-0-1-finish-maven-central-namespace-verificat.md -->

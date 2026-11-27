@@ -113,8 +113,22 @@ internal object SupervisorSeccompNotifInstaller {
     private class CoordinatorHooks(
         val connect: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         val send: (Int, Int) -> Boolean,
-        val onConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
+        val listener: ListenerConnection,
     )
+
+    private fun interface ListenerConnection {
+        fun startAndAwait(
+            socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            handshake: SeccompInstallHandshake,
+        )
+    }
+
+    private fun latchListener(start: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit): ListenerConnection =
+        ListenerConnection { socket, handshake ->
+            val ready = CountDownLatch(1)
+            start(socket, ready)
+            handshake.await(ready)
+        }
 
     private sealed interface ValidationMode {
         data object Legacy : ValidationMode
@@ -146,9 +160,7 @@ internal object SupervisorSeccompNotifInstaller {
         listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?>,
         handshake: SeccompInstallHandshake,
         mode: ValidationMode,
-        connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-        sendDescriptor: (Int, Int) -> Boolean,
-        onSocketConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
+        hooks: CoordinatorHooks,
     ): Thread =
         Thread {
             val coordinator = CoordinatorCleanup()
@@ -158,7 +170,7 @@ internal object SupervisorSeccompNotifInstaller {
                 handshake.publishApplied()
                 handshake.checkActive()
 
-                val socketFd = if (connectWithRetry === defaultConnect) transport.connect(socketPath) else connectWithRetry(socketPath)
+                val socketFd = if (hooks.connect === defaultConnect) transport.connect(socketPath) else hooks.connect(socketPath)
                 var socketTransferred = false
                 val connection = CoordinatorCleanup()
                 connection.attempt {
@@ -168,7 +180,7 @@ internal object SupervisorSeccompNotifInstaller {
                     val transfer = CoordinatorCleanup()
                     transfer.attempt {
                         val sent = when (mode) {
-                            ValidationMode.Legacy -> if (sendDescriptor === defaultSend) transport.send(socketFd, fdRef.value) else sendDescriptor(socketFd.value, fdRef.value)
+                            ValidationMode.Legacy -> if (hooks.send === defaultSend) transport.send(socketFd, fdRef.value) else hooks.send(socketFd.value, fdRef.value)
                             is ValidationMode.Live -> transferLiveListener(native, socketFd, fdRef, mode.receipt, handshake)
                         }
                         check(sent) { "Failed to send seccomp listener FD to daemon" }
@@ -178,11 +190,9 @@ internal object SupervisorSeccompNotifInstaller {
                     handshake.advance(SeccompInstallStage.Transferred)
                     handshake.checkActive()
 
-                    val readyLatch = CountDownLatch(1)
                     // The callback owns the socket on entry, including startup failure.
                     socketTransferred = true
-                    onSocketConnected(socketFd, readyLatch)
-                    handshake.await(readyLatch)
+                    hooks.listener.startAndAwait(socketFd, handshake)
                 }
                 if (!socketTransferred) {
                     connection.attempt { native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket") }
@@ -322,7 +332,44 @@ internal object SupervisorSeccompNotifInstaller {
             socketPath,
             filter,
             processWide,
-            CoordinatorHooks(connectWithRetry, sendDescriptor, onSocketConnected),
+            CoordinatorHooks(connectWithRetry, sendDescriptor, latchListener(onSocketConnected)),
+            onFilterApplied,
+            installationGate,
+            ValidationMode.Legacy,
+        )
+    }
+
+    /** The socket owner reports startup once. Only a successful startup advances installation. */
+    internal fun installOwnedWithStartup(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        connectWithRetry: ((String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>)?,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        onSocketConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, ListenerStartupReporter) -> Unit,
+    ) {
+        val listener = ListenerConnection { socket, handshake ->
+            val completed = CountDownLatch(1)
+            val outcome = AtomicReference<SeccompListenerStartup>()
+            onSocketConnected(socket) { startup ->
+                if (outcome.compareAndSet(null, startup)) completed.countDown()
+            }
+            handshake.await(completed)
+            when (val startup = checkNotNull(outcome.get())) {
+                SeccompListenerStartup.Ready -> Unit
+                is SeccompListenerStartup.Failed -> throw startup.cause
+            }
+        }
+        installOwnedInternal(
+            native,
+            userNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            CoordinatorHooks(connectWithRetry ?: defaultConnect, defaultSend, listener),
             onFilterApplied,
             installationGate,
             ValidationMode.Legacy,
@@ -346,7 +393,7 @@ internal object SupervisorSeccompNotifInstaller {
             socketPath,
             filter,
             false,
-            CoordinatorHooks(defaultConnect, defaultSend, onSocketConnected),
+            CoordinatorHooks(defaultConnect, defaultSend, latchListener(onSocketConnected)),
             onFilterApplied,
             installationGate,
             ValidationMode.Live(receipt),
@@ -391,9 +438,7 @@ internal object SupervisorSeccompNotifInstaller {
             listenerFdVal,
             handshake,
             mode,
-            hooks.connect,
-            hooks.send,
-            hooks.onConnected,
+            hooks,
         )
 
         val installation = CoordinatorCleanup()
