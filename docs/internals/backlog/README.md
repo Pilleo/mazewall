@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 387 | *Total Resolved Issues:* 799
+*Total Active Issues:* 384 | *Total Resolved Issues:* 802
 
-Active status detail: 384 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 381 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -311,7 +311,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261111-204426-270](issue-20261111-204426-270-bind-checked-live-bootstrap-to-original-request-an.md) | Bind checked live bootstrap to original request and runtime references | high | core |
 | [issue-20261111-185936-203](issue-20261111-185936-203-preserve-confined-child-cleanup-when-ptracer-bookk.md) | Preserve confined child cleanup when ptracer bookkeeping throws | high | core |
 | [issue-20261109-200553-461](issue-20261109-200553-461-hide-jvm-visible-mutable-runtime-authority-before-.md) | Hide JVM-visible mutable runtime authority before reporting retirement | high | core |
-| [issue-20261109-192741-507](issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a.md) | Reject process-wide ACT_NOTIFY before supervisor acquisition | high | core |
+| Archived [issue-20261109-192741-507](resolved/issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a.md) | Reject process-wide ACT_NOTIFY before supervisor acquisition (resolved 2026-11-27) | high | core |
 | [issue-20261109-110052-812](issue-20261109-110052-812-preserve-prepared-resource-close-failures-across-r.md) | Preserve prepared resource close failures across repeat calls | high | core |
 | [issue-20261109-063230-677](issue-20261109-063230-677-retain-eventfd-completion-wakeup-ownership-after-c.md) | Retain eventfd completion wakeup ownership after close failure | high | platform |
 | [issue-20261109-054828-051](issue-20261109-054828-051-investigate-socket-helper-prewarm-cleanup-timeout-.md) | Investigate socket helper prewarm cleanup timeout during process spawn | high | enforcer |

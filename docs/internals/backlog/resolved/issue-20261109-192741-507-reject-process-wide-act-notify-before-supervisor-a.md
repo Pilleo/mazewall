@@ -1,7 +1,7 @@
 ---
 title: "Reject process-wide ACT_NOTIFY before supervisor acquisition"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -24,6 +24,10 @@ The source-backed [baseline installer ownership audit](../../../.superpowers/sdd
 
 **Needed:**
 1. Trace the earliest process-wide explicit/default notification admission checks through `PolicyBuilder`, `PolicyDefinition` and `ContainedExecutors`; then propose a fail-closed refusal before supervisor acquisition with focused ordering and rollback tests. Do not change behavior until separately reviewed.
+
+## Resolution Evidence (2026-11-27)
+- `platform/.../policy/PolicyBuilder.kt` and `PolicyDefinition.kt` are not in this tree. `ProcessPolicyBuilder` still accepts `ACT_NOTIFY` because those definitions are also installed on a thread. Process-wide install is the refusal point: `ContainedExecutors.installInternal` throws the existing process-wide refusal before `preparePreSeccompEffects` spawns the supervisor and before the failure quarantine. `open` behavior is unchanged. `applyBpfFilter` still refuses process-wide notify if a later path reaches it.
+- Regression: `PolicyBuilderContractTest.process install rejects ACT_NOTIFY before supervisor acquisition` checks default and explicit notify on process install, and that no child process is spawned.
 
 ---
 <!-- id: issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a  file: issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a.md -->

@@ -270,6 +270,10 @@ public object ContainedExecutors {
             is InstallationScoping.Legacy -> prepareSpawnPolicy(policy, capturedScoping.captured)
             is InstallationScoping.Live -> augmentForScoping(policy.copy(syscallActions = java.util.Map.copyOf(policy.syscallActions)), requireNotNull(live).first).also(::validateSpawnComposition)
         }
+        // preparePreSeccompEffects spawns the supervisor; refuse before that effect or the failure quarantine.
+        if (processWide && augmentedPolicy?.hasSupervisedSyscalls == true) {
+            throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
+        }
         val attempt = InstallationAttempt(processWide, environment, preparedLandlock)
         if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
