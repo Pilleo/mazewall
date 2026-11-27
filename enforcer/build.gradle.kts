@@ -205,10 +205,9 @@ fun mapFilesOpenDenied(): Boolean {
 
 fun Test.rejectUnopenableAllLane() {
     if (mazewallKernelLane != "ALL") return
-    val denied = mapFilesOpenDenied()
-    inputs.property("mapFilesOpenDenied", denied.toString())
+    // Probe at execution. A configuration-time directory listing is a changing cache input.
     doFirst {
-        if (denied) {
+        if (mapFilesOpenDenied()) {
             error(
                 "Lane ALL cannot open /proc/self/map_files on this host. " +
                     "From the checkout root, ./gradlew build runs BASELINE here and CONFINED in Docker. " +
