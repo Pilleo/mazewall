@@ -158,6 +158,32 @@ class PolicyBuilderContractTest {
         }
     }
 
+    @Test
+    fun `process install rejects ACT_NOTIFY before supervisor acquisition`() {
+        val childrenBefore = childPids()
+        val defaultFailure =
+            assertThrows(UnsupportedOperationException::class.java) {
+                ContainedExecutors.installOnDedicatedProcess(
+                    Policy(PolicyDefinition<PolicyScope.ProcessWideSafe>(defaultAction = SeccompAction.ACT_NOTIFY)),
+                )
+            }
+        val explicitFailure =
+            assertThrows(UnsupportedOperationException::class.java) {
+                ContainedExecutors.installOnProcess(
+                    Policy(PolicyDefinition<PolicyScope.ProcessWideSafe>(syscallActions = mapOf(Syscall.OPEN to SeccompAction.ACT_NOTIFY))),
+                )
+            }
+        assertTrue(defaultFailure.message.orEmpty().contains("Process-wide supervised"))
+        assertTrue(explicitFailure.message.orEmpty().contains("Process-wide supervised"))
+        assertEquals(childrenBefore, childPids())
+    }
+
+    private fun childPids(): Set<Long> {
+        val pids = mutableSetOf<Long>()
+        ProcessHandle.current().children().forEach { pids.add(it.pid()) }
+        return pids
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun assertUnmodifiableCollections(definition: PolicyDefinition<*>) {
         assertThrows(UnsupportedOperationException::class.java) {
