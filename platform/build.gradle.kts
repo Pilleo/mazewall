@@ -80,10 +80,20 @@ val compileCAbiOracle =
         inputs.file(layout.projectDirectory.file("src/test/resources/abi/layout_oracle.c"))
         inputs.file(rootProject.layout.projectDirectory.file("profiler-native/include/live_stack_context_abi.h"))
         outputs.file(cAbiOracle)
+        // The host compiler and headers can change outside Gradle's declared inputs.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("The oracle must use the current host compiler and headers") { true }
         commandLine(
             "/bin/sh",
             "-c",
-            "mkdir -p \"$1\" && exec cc -std=c11 -Wall -Werror -I\"$4\" \"$2\" -o \"$3\"",
+            """
+            set -eu
+            mkdir -p "$1"
+            temporary=${'$'}(mktemp -d "$1/.layout-oracle.XXXXXXXX")
+            trap 'rm -rf -- "${'$'}temporary"' EXIT
+            cc -std=c11 -Wall -Werror -I"$4" "$2" -o "${'$'}temporary/layout-oracle"
+            mv -fT -- "${'$'}temporary/layout-oracle" "$3"
+            """.trimIndent(),
             "compileCAbiOracle",
             cAbiOracleDirectory.get().asFile.absolutePath,
             layout.projectDirectory
@@ -105,6 +115,7 @@ tasks.register<Exec>("verifyCAbi") {
 
 tasks.test {
     dependsOn(compileCAbiOracle)
+    inputs.file(cAbiOracle).withPropertyName("cAbiOracle").withPathSensitivity(PathSensitivity.NONE)
 }
 
 val plantumlConfig by configurations.creating

@@ -346,7 +346,7 @@ tasks.named("check") { dependsOn("consumerHarnessTest", "consumerBuildLogicTest"
 
 tasks.register<Test>("consumerCheck") {
     group = "verification"
-    description = "Runs the independent real-publication JDK22/JDK25 consumer matrix."
+    description = "Verifies independent Java and stable Kotlin consumers of real publications on JDK 25."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
     useJUnitPlatform { includeTags("packaged-consumer") }
@@ -1045,7 +1045,7 @@ val buildLogicCheck =
         description = "Runs the complete build-logic verification suite."
         setDir(layout.projectDirectory.dir("buildSrc").asFile)
         setBuildName("build-logic-verification")
-        setTasks(listOf("verificationActionsTest"))
+        setTasks(listOf("test"))
         startParameter.maxWorkerCount = 1
         startParameter.isParallelProjectExecutionEnabled = false
     }

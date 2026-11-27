@@ -1,6 +1,7 @@
 package io.mazewall.profiler.triage
 import com.tngtech.archunit.core.importer.ClassFileImporter
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
@@ -14,12 +15,62 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+@EnabledIfLinuxAndSupported
 class DiagnosticTriageRunnerTest {
     @TempDir
     lateinit var temporaryDirectory: File
+
+    @Test
+    fun `denied dmesg probe records exit status and stderr`() {
+        val result = runProbe("printf 'dmesg: Operation not permitted\\n' >&2; exit 1")
+
+        assertEquals("Unable to capture dmesg: exited with status 1: dmesg: Operation not permitted", result)
+    }
+
+    @Test
+    fun `successful dmesg only reports matching stdout records`() {
+        assertEquals("", runProbe("printf 'unrelated record\\n'; printf 'audit warning\\n' >&2"))
+        assertEquals("seccomp record\nLandlock record", runProbe("printf 'unrelated\\nseccomp record\\nLandlock record\\n'"))
+    }
+
+    @Test
+    fun `dmesg read deadline is visible`() {
+        val result = DiagnosticTriageRunner.captureDmesg(ProcessBuilder("sleep", "30"), Duration.ofMillis(100))
+
+        assertTrue(result.startsWith("Unable to capture dmesg:"), result)
+        assertTrue(result.contains("timed out"), result)
+    }
+
+    @Test
+    fun `dmesg must exit even after closing both streams`() {
+        val command = ProcessBuilder("sh", "-c", "exec 1>&- 2>&-; exec sleep 30")
+        val result = DiagnosticTriageRunner.captureDmesg(command, Duration.ofMillis(500))
+
+        assertTrue(result.startsWith("Unable to capture dmesg: Process did not exit"), result)
+    }
+
+    @Test
+    fun `dmesg launch failure retains its cause`() {
+        val missing = File(temporaryDirectory, "missing-dmesg")
+        val result = DiagnosticTriageRunner.captureDmesg(ProcessBuilder(missing.absolutePath), Duration.ofSeconds(2))
+
+        assertTrue(result.startsWith("Unable to capture dmesg:"), result)
+        assertTrue(result.contains("Cannot run program"), result)
+        assertTrue(result.contains(missing.absolutePath), result)
+    }
+
+    @Test
+    fun `dmesg drains oversized stderr without returning the entire stream`() {
+        val result = runProbe("printf '%0200000d' 0 >&2; exit 1")
+
+        assertTrue(result.startsWith("Unable to capture dmesg: exited with status 1:"), result.take(120))
+        assertTrue(result.endsWith("[truncated]"), result.takeLast(120))
+        assertTrue(result.length < 3000)
+    }
 
     @Test
     fun `diagnostics cannot enumerate or attach to ambient processes`() {
@@ -175,4 +226,6 @@ class DiagnosticTriageRunnerTest {
         ready.countDown()
         check(release.await(5, TimeUnit.SECONDS)) { "Owned fixture release was not received" }
     }
+
+    private fun runProbe(script: String): String = DiagnosticTriageRunner.captureDmesg(ProcessBuilder("sh", "-c", script), Duration.ofSeconds(2))
 }

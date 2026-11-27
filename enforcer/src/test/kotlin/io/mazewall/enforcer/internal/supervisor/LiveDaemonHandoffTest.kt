@@ -31,7 +31,7 @@ class LiveDaemonHandoffTest {
 
     @Test
     fun `Live denial reports a reply failure`() {
-        assertDenialFailure(NativeConstants.EIO, UserNotifReplyResult.Failed(NativeConstants.EIO))
+        assertDenialFailure(NativeConstants.EIO, UserNotifReplyResult.Failed(NativeConstants.EIO, UserNotifReplyResult.Operation.SEND))
     }
 
     private fun assertDenialFailure(

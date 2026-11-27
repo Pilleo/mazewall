@@ -18,6 +18,7 @@ import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owns one operation's listeners, TID mappings, buffered observations, and cleanup result. */
@@ -41,6 +42,7 @@ internal class ProfilerSession(
     private var closureNotified = false
     private var installations = 0
     private var collectorRequested = false
+    private var executorScope: ExecutorScope? = null
     private val installer = runtime.installer.forSession(
         SeccompInstallationGate { operation ->
             synchronized(lifecycleLock) {
@@ -53,6 +55,20 @@ internal class ProfilerSession(
     @Volatile
     var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
         private set
+
+    private enum class ExecutorEvidence { Waiting, WorkEnded, CutOff }
+
+    private class ExecutorScope(
+        val executor: ExecutorService,
+        var evidence: ExecutorEvidence,
+    )
+
+    fun bindExecutor(executor: ExecutorService) {
+        synchronized(lifecycleLock) {
+            check(executorScope == null) { "Profiler session already has an executor" }
+            executorScope = ExecutorScope(executor, if (closed.get()) ExecutorEvidence.CutOff else ExecutorEvidence.Waiting)
+        }
+    }
 
     fun installOnCurrentThread() {
         val thread = Thread.currentThread()
@@ -121,7 +137,13 @@ internal class ProfilerSession(
 
     @Suppress("TooGenericExceptionCaught") // Record aborted cleanup before propagating the original fatal error.
     fun closeWithResult(): SeccompCleanupOutcome {
-        synchronized(lifecycleLock) { closed.set(true) }
+        synchronized(lifecycleLock) {
+            if (!closed.getAndSet(true)) {
+                executorScope?.let { scope ->
+                    scope.evidence = if (scope.executor.isTerminated) ExecutorEvidence.WorkEnded else ExecutorEvidence.CutOff
+                }
+            }
+        }
         return synchronized(cleanupLock) {
             try {
                 listeners.forEach { it.closeWithResult() }
@@ -157,7 +179,19 @@ internal class ProfilerSession(
     fun compileBillOfBehavior(): BillOfBehavior = BobCompiler.compile(logs)
 
     fun <T> result(value: T): ProfilingResult<T> {
-        val observations = logs.map(ProfileObservation::fromTraceEvent)
+        val (executorEvidence, drained) = synchronized(lifecycleLock) {
+            val evidence = executorScope?.evidence
+            evidence to (
+                closed.get() &&
+                    installations == 0 &&
+                    cleanupOutcome == SeccompCleanupOutcome.Complete &&
+                    (evidence == null || evidence == ExecutorEvidence.WorkEnded) &&
+                    (listeners.isNotEmpty() || !collectorRequested) &&
+                    listeners.all { it.drainComplete }
+            )
+        }
+        val events = logs.toList()
+        val observations = events.map(ProfileObservation::fromTraceEvent)
         val inferred = ProfilingCoverage.infer(
             strategy = ProfileStrategy.USER_NOTIF,
             strategyReason = "Profiler.profile USER_NOTIF session",
@@ -165,18 +199,13 @@ internal class ProfilerSession(
             observations = observations,
             stacks = if (captureStackTraces) StackAttribution.CAPTURED else StackAttribution.SKIPPED,
             droppedEvents = listeners.sumOf { it.eventQueue.droppedCount + it.droppedEvents.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-            drainComplete = synchronized(lifecycleLock) {
-                closed.get() &&
-                    installations == 0 &&
-                    cleanupOutcome == SeccompCleanupOutcome.Complete &&
-                    (listeners.isNotEmpty() || !collectorRequested) &&
-                    listeners.all { it.drainComplete }
-            },
+            drainComplete = drained,
             environment = runtime.environment(),
         )
-        val failedConnections = logs.mapNotNull { (it.connectResolution as? ConnectResolution.Failed)?.detail }.distinct()
-        val coverage = inferred.withWarnings(inferred.warnings + failedConnections)
-        return ProfilingResult(value, compileBillOfBehavior().copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)
+        val failedConnections = events.mapNotNull { (it.connectResolution as? ConnectResolution.Failed)?.detail }.distinct()
+        val cutoff = if (executorEvidence == ExecutorEvidence.CutOff) listOf("Profiler collection stopped before accepted executor work ended") else emptyList()
+        val coverage = inferred.withWarnings(inferred.warnings + failedConnections + cutoff)
+        return ProfilingResult(value, BobCompiler.compileObservations(observations).copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)
     }
 }
 

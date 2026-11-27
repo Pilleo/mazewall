@@ -24,7 +24,7 @@ public final class BuildLogicGateFunctionalTest {
             require(root.contains(begin) && root.contains(end), "Missing production explicit build-logic gate");
             String gate = root.substring(root.indexOf(begin), root.indexOf(end) + end.length());
             verifyGate(gate);
-            System.out.println("BUILD_LOGIC_GATE_OK bootstrap isolation, lifecycle failure, strict cache reuse, input invalidation and direct ordering edges; serial execution only");
+            System.out.println("BUILD_LOGIC_GATE_OK bootstrap isolation, nested test selection and failure, lifecycle failure, strict cache reuse, input invalidation and direct ordering edges; serial execution only");
         } catch (Exception failure) {
             throw new AssertionError("Explicit build-logic gate contract failed", failure);
         }
@@ -64,8 +64,14 @@ public final class BuildLogicGateFunctionalTest {
             """);
         write(fixture, "buildSrc/settings.gradle", "rootProject.name = 'gate-build-logic'\n");
         write(fixture, "buildSrc/verification-input.txt", "PASS\n");
+        write(fixture, "buildSrc/nested-test-input.txt", "PASS\n");
         write(fixture, "buildSrc/build.gradle", """
             plugins { id 'java' }
+            repositories { mavenCentral() }
+            dependencies {
+                testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+                testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+            }
             def input = layout.projectDirectory.file('verification-input.txt').asFile
             def marker = layout.buildDirectory.file('verification/success').get().asFile
             def count = layout.buildDirectory.file('verification/count').get().asFile
@@ -85,15 +91,51 @@ public final class BuildLogicGateFunctionalTest {
                     marker.text = 'SUCCESS\\n'
                 }
             }
-            tasks.named('test') { dependsOn('verificationActionsTest') }
+            tasks.named('test') {
+                dependsOn('verificationActionsTest')
+                useJUnitPlatform()
+                def testInput = layout.projectDirectory.file('nested-test-input.txt').asFile
+                def testMarker = layout.buildDirectory.file('verification/nested-test-success').get().asFile
+                def testCount = layout.buildDirectory.file('verification/nested-test-count').get().asFile
+                inputs.file(testInput).withPathSensitivity(PathSensitivity.RELATIVE)
+                outputs.file(testMarker)
+                localState.register(testCount)
+                systemProperty 'nestedTestInput', testInput.absolutePath
+                systemProperty 'nestedTestMarker', testMarker.absolutePath
+                systemProperty 'nestedTestCount', testCount.absolutePath
+            }
             tasks.named('check') { dependsOn('verificationActionsTest') }
+            """);
+        write(fixture, "buildSrc/src/test/java/NestedGateTest.java", """
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import org.junit.jupiter.api.Test;
+
+            class NestedGateTest {
+                @Test void verifiesNestedSuite() throws Exception {
+                    Path marker = Path.of(System.getProperty("nestedTestMarker"));
+                    Path count = Path.of(System.getProperty("nestedTestCount"));
+                    Files.createDirectories(marker.getParent());
+                    Files.deleteIfExists(marker);
+                    int previous = Files.exists(count) ? Integer.parseInt(Files.readString(count)) : 0;
+                    Files.writeString(count, Integer.toString(previous + 1));
+                    if (Files.readString(Path.of(System.getProperty("nestedTestInput"))).trim().equals("FAIL")) {
+                        throw new AssertionError("deliberate nested test failure");
+                    }
+                    Files.writeString(marker, "SUCCESS\\n");
+                }
+            }
             """);
         Path marker = fixture.resolve("buildSrc/build/verification/success");
         Path count = fixture.resolve("buildSrc/build/verification/count");
+        Path testMarker = fixture.resolve("buildSrc/build/verification/nested-test-success");
+        Path testCount = fixture.resolve("buildSrc/build/verification/nested-test-count");
+        Path testResult = fixture.resolve("buildSrc/build/test-results/test/TEST-NestedGateTest.xml");
         for (String task : List.of("help", "assemble")) {
             BuildResult fast = run(fixture, false, task);
             require(fast.task(":buildLogicCheck") == null, "Fast path selected gate: " + fast.getOutput());
             require(!Files.exists(count), "Fast path ran verifier");
+            require(!Files.exists(testCount), "Fast path ran nested test");
         }
         BuildResult ordering = run(fixture, false, "inspectGateOrdering");
         assertDirectAnchors(ordering);
@@ -105,9 +147,14 @@ public final class BuildLogicGateFunctionalTest {
         require(first.getOutput().contains("Configuration cache entry stored"), first.getOutput());
         require(first.getOutput().contains("HEAVY_AFTER_VERIFICATION"), first.getOutput());
         require(Files.readString(count).equals("1"), "Verifier must run once");
+        require(Files.exists(testMarker) && Files.readString(testCount).equals("1"), "Gate must run nested test once");
+        require(Files.readString(testResult).contains("tests=\"1\"") && Files.readString(testResult).contains("failures=\"0\""),
+            "Nested test did not produce a passing JUnit result");
+        Files.copy(testResult, fixture.resolve("nested-test-success.xml"));
         BuildResult reused = run(fixture, false, "check", ":child:check", "--parallel");
         require(reused.getOutput().contains("Reusing configuration cache."), reused.getOutput());
         require(Files.readString(count).equals("1"), "Unchanged verifier should be up-to-date");
+        require(Files.readString(testCount).equals("1"), "Unchanged nested test should be up-to-date");
         Files.writeString(fixture.resolve("buildSrc/verification-input.txt"), "FAIL\n");
         BuildResult failed = run(fixture, true, "check", ":child:check", "--parallel");
         require(failed.getOutput().contains("Reusing configuration cache."), failed.getOutput());
@@ -119,6 +166,29 @@ public final class BuildLogicGateFunctionalTest {
         Files.writeString(fixture.resolve("buildSrc/verification-input.txt"), "PASS\n");
         run(fixture, false, "buildLogicCheck");
         require(Files.exists(marker) && Files.readString(count).equals("4"), "Explicit gate did not recover");
+
+        Files.writeString(fixture.resolve("buildSrc/nested-test-input.txt"), "FAIL\n");
+        for (String task : List.of("check", "build")) {
+            BuildResult failedTest = run(fixture, true, task);
+            require(failedTest.getOutput().contains("NestedGateTest > verifiesNestedSuite() FAILED"), failedTest.getOutput());
+            require(Files.readString(testResult).contains("deliberate nested test failure"), "Missing deliberate JUnit failure");
+            Files.copy(testResult, fixture.resolve("nested-test-" + task + "-failure.xml"));
+            require(!Files.exists(testMarker), "Nested test failure retained old success");
+            require(Files.readString(count).equals("4"), "Nested test failure reran unchanged verifier");
+        }
+        require(Files.readString(testCount).equals("3"), "Both lifecycles must run the failing nested test");
+        Files.writeString(fixture.resolve("buildSrc/nested-test-input.txt"), "PASS\n");
+        run(fixture, false, "buildLogicCheck");
+        require(Files.exists(testMarker) && Files.readString(testCount).equals("4"), "Explicit gate did not recover nested test");
+
+        String verifierOnly = gate.replace("setTasks(listOf(\"test\"))", "setTasks(listOf(\"verificationActionsTest\"))");
+        require(!verifierOnly.equals(gate), "Nested test negative control did not alter gate selection");
+        writeRoot(fixture, verifierOnly);
+        Files.writeString(fixture.resolve("buildSrc/nested-test-input.txt"), "FAIL\n");
+        Files.delete(testMarker);
+        run(fixture, false, "check");
+        require(!Files.exists(testMarker) && Files.readString(testCount).equals("4"), "Verifier-only control unexpectedly ran nested test");
+        System.out.println("VERIFIER_ONLY_NEGATIVE_CONTROL_REJECTED missing nested test execution");
 
         String omittedHeavy = gate.replace("path != \":buildLogicCheck\"", "path != \":buildLogicCheck\" && path != \":child:heavy\"");
         rejectOrderingControl(fixture, gate, omittedHeavy, "OMITTED_HEAVY");
@@ -162,11 +232,17 @@ public final class BuildLogicGateFunctionalTest {
         throw new AssertionError("Direct anchor assertion accepted " + name);
     }
 
-    private static BuildResult run(Path fixture, boolean failure, String... tasks) {
+    private static BuildResult run(Path fixture, boolean failure, String... tasks) throws Exception {
         var arguments = new ArrayList<>(List.of(tasks));
-        arguments.addAll(List.of("--console=plain", "--max-workers=1", "--configuration-cache", "--configuration-cache-problems=fail"));
+        arguments.addAll(List.of("--console=plain", "--max-workers=1", "--no-build-cache", "--configuration-cache", "--configuration-cache-problems=fail"));
         GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments);
-        return failure ? runner.buildAndFail() : runner.build();
+        Path log = Files.createTempFile(fixture, "gate-run-", ".log");
+        System.out.println("Build-logic fixture log: " + log);
+        try (var output = Files.newBufferedWriter(log)) {
+            output.write("Arguments: " + arguments + "\n");
+            runner.forwardStdOutput(output).forwardStdError(output);
+            return failure ? runner.buildAndFail() : runner.build();
+        }
     }
 
     private static void write(Path root, String file, String content) throws Exception {

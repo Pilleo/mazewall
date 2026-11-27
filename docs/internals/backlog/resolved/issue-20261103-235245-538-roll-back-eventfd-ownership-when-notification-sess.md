@@ -1,7 +1,7 @@
 ---
 title: "Roll back eventfd ownership when notification session construction fails"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Roll back eventfd ownership when notification session construction fails
 
 **Context:**
-Repository-wide review, 2026-11-04: [PLAT-06](../reviews/2026-11-04-repository-review-findings.md#plat-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PLAT-06](../../reviews/2026-11-04-repository-review-findings.md#plat-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · resource lifecycle · confirmed source defect · high confidence · shared supervisor/profiler USER_NOTIF sessions.**
 
@@ -29,6 +29,17 @@ Repository-wide review, 2026-11-04: [PLAT-06](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution — 2026-11-26
+
+Session startup rolls back its completion wakeup when listener setup or buffer
+acquisition fails. Partial buffer acquisition returns every acquired lease.
+The eventfd factory retires its descriptor and arena on allocation failure.
+Cleanup failures retain their evidence under the shared retirement policy.
+
+JDK 25 tests inject both listener setup failures, a session buffer failure,
+failures at each eventfd buffer allocation, and cleanup errors. They verify
+exactly one close attempt per owner and preservation of the startup error.
 
 ---
 <!-- id: issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess  file: issue-20261103-235245-538-roll-back-eventfd-ownership-when-notification-sess.md -->

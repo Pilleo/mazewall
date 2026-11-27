@@ -11,76 +11,23 @@
 
 ## `0.1.0` Stable Quickstart: Process-Wide Execution Lockdown
 
-Released artifacts use `io.mazewall:mazewall-lockdown:0.1.0` (only transitive dependency: `kotlin-stdlib`, JDK 22+ bytecode, pure FFM with zero native C dependencies):
+If your JVM service never needs to launch external programs after startup, [Mazewall Lockdown](lockdown/README.md) lets the Linux kernel deny that operation across every thread in the process. It is a standalone library; you don't need the experimental sandbox or profiler.
 
-```kotlin
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    implementation("io.mazewall:mazewall-lockdown:0.1.0")
-}
-```
-
-This checkout still publishes `0.1.0-SNAPSHOT`. Before `0.1.0` is live on Maven Central, evaluate from source with `./gradlew :lockdown:publishToMavenLocal` and request the snapshot:
-
-```kotlin
-repositories {
-    mavenLocal {
-        content { includeGroup("io.mazewall") }
-    }
-    mavenCentral()
-}
-
-dependencies {
-    implementation("io.mazewall:mazewall-lockdown:0.1.0-SNAPSHOT")
-}
-```
-
-Run your JVM with native access granted to Mazewall (modular apps can scope access strictly to `io.mazewall.lockdown`; classpath apps use `ALL-UNNAMED`):
-
-```bash
-# Modular application (recommended: scopes native FFM access strictly to Mazewall)
-java --module-path libs --enable-native-access=io.mazewall.lockdown -m com.example.app
-
-# Classpath application
-java --enable-native-access=ALL-UNNAMED -jar app.jar
-```
-
-Call `Mazewall.installOnProcess` once on your startup platform thread after any required startup child commands finish and before opening network traffic:
+The `0.1.0` artifact is planned for **GitHub Packages only**. See [installation instructions](GETTING_STARTED.md#gradle-dependency) for the authenticated registry, local snapshot, and JVM flags. Install on a startup platform thread before accepting traffic:
 
 ```java
-import io.mazewall.lockdown.LockdownPreset;
-import io.mazewall.lockdown.LockdownSyscall;
 import io.mazewall.lockdown.Mazewall;
-import io.mazewall.lockdown.ProcessInstallation;
 import io.mazewall.lockdown.ProcessPolicy;
 import io.mazewall.lockdown.RuntimeProfile;
 
 public final class ServiceBootstrap {
     public static void main(String[] args) {
-        // Choose Elasticsearch (execve, execveat, fork, vfork),
-        // OpenSearch (+ ptrace, process_vm_readv/writev, pidfd_getfd),
-        // Mazewall default (denyProcessCreation), or MAZEWALL_STRICT,
-        // and add/remove syscalls with .block(...) / .unblock(...):
-        ProcessPolicy policy = ProcessPolicy.openSearch(RuntimeProfile.HOTSPOT_JIT)
-            .unblock(LockdownSyscall.PTRACE)
-            .block(LockdownSyscall.MEMFD_CREATE);
-
-        ProcessInstallation installation = Mazewall.installOnProcess(policy);
-        // Process-wide lockdown is active (installation.filterDepth() >= 1)
+        Mazewall.installOnProcess(ProcessPolicy.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT));
     }
 }
 ```
 
-Or attach with zero application code changes via `-javaagent`:
-
-```bash
-java --enable-native-access=ALL-UNNAMED \
-  -javaagent:mazewall-lockdown.jar=preset=opensearch,block=memfd_create,unblock=ptrace \
-  -jar app.jar
-```
+Adding the dependency alone does not activate lockdown. `0.1.0` requires an explicit startup call.
 
 ## Promise and Limits (`io.mazewall:mazewall-lockdown` `0.1.0`)
 
@@ -90,7 +37,7 @@ java --enable-native-access=ALL-UNNAMED \
   - `ProcessPolicy.openSearch(...)` (`LockdownPreset.OPENSEARCH`): `ELASTICSEARCH` + `ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`
   - `ProcessPolicy.denyProcessCreation(...)` (`LockdownPreset.MAZEWALL`): `execve`, `execveat`, `memfd_create`, `io_uring_setup`, `io_uring_enter`
   - `ProcessPolicy.fromPreset(LockdownPreset.MAZEWALL_STRICT, ...)`: full union of `OPENSEARCH` + `MAZEWALL` (`11` syscalls)
-- After `Mazewall.installOnProcess(...)` returns on Linux (`amd64` or `aarch64`, kernel 3.17+ with `SECCOMP_FILTER_FLAG_TSYNC`), the kernel denies every configured syscall in the policy (plus `prctl` options outside the 6 safe options `PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM` across **every thread** in the process (pre-existing platform threads via `TSYNC`, future threads, Loom virtual threads, and JNI/FFM native libraries).
+- After `Mazewall.installOnProcess(...)` returns on the supported Linux x86_64 platform with `SECCOMP_FILTER_FLAG_TSYNC`, the kernel denies every configured syscall in the policy (plus `prctl` options outside the 6 safe options `PR_SET_NAME`, `PR_GET_NAME`, `PR_GET_SECCOMP`, `PR_SET_SECCOMP`, `PR_SET_NO_NEW_PRIVS`, `PR_GET_NO_NEW_PRIVS`) with `EPERM` across **every thread** in the process (pre-existing platform threads via `TSYNC`, future threads, Loom virtual threads, and JNI/FFM native libraries).
 - `clone3` returns `ENOSYS` so glibc falls back cleanly to `clone`. `clone(CLONE_THREAD)` stays allowed for JVM thread creation; `fork`/`vfork` are blocked in `ELASTICSEARCH`/`OPENSEARCH`/`MAZEWALL_STRICT` and permitted (inheriting the irreversible filter) in `MAZEWALL` (`denyProcessCreation`).
 - Explicit runtime profile selection without guesswork: `RuntimeProfile.HOTSPOT_JIT` preserves JIT code-cache executable mappings, while `RuntimeProfile.NATIVE_IMAGE` also blocks new executable `mmap`/`mprotect`/`pkey_mprotect` mappings (`PROT_EXEC`).
 - Repeated identical `installOnProcess` calls succeed idempotently without stacking redundant filters; incompatible profile relaxation (`HOTSPOT_JIT` after `NATIVE_IMAGE` or conflicting profiles in one call) fails closed with `MazewallInstallationException`.
@@ -104,9 +51,10 @@ java --enable-native-access=ALL-UNNAMED \
 **Operational constraints & compatibility:**
 - **Irreversible:** Seccomp-BPF filters cannot be removed for the lifetime of the OS process.
 - **Platform thread required:** Calling `installOnProcess` from a virtual thread fails with `MazewallInstallationException`.
-- **Container `no_new_privs` compatibility:** When `prctl(PR_SET_NO_NEW_PRIVS, 1)` is blocked by an outer container seccomp policy, lockdown queries `prctl(PR_GET_NO_NEW_PRIVS)` and proceeds when `no_new_privs == 1` is already locked by the container runtime (failing closed with phase/errno details if it is still `0`).
+- **Container `no_new_privs`:** If the outer profile blocks setting this bit, lockdown can continue only if it confirms the bit is already set; the outer profile must still permit TSYNC installation. This is not a compatibility guarantee for arbitrary container profiles.
 - **Incompatible JVM fatal-error flags:** If a policy blocks process creation (`execve`/`execveat`/`fork`/`vfork`), starting the JVM with `-XX:OnError=...` or `-XX:OnOutOfMemoryError=...` is rejected before installation with `MazewallInstallationException`, because the JVM spawns a shell via fork/exec during crash/OOM handling. Use `-XX:+ExitOnOutOfMemoryError` or `-XX:+CrashOnOutOfMemoryError` instead.
-- **Always fail-closed:** Always throws `MazewallInstallationException` on non-Linux OSes (macOS, Windows), unsupported architectures (non-`amd64`/`aarch64`), missing `--enable-native-access`, missing `TSYNC` kernel support, or incompatible outer seccomp profiles. There is no silent unprotected fallback.
+- **Platform scope:** Linux x86_64 only for `0.1.0`. That support boundary is not a guarantee that every unqualified environment is detected at startup. See [STABILITY.md](STABILITY.md).
+- **Fail-closed installation:** Non-Linux hosts, missing required native access, unavailable `TSYNC`, or an outer policy that prevents installation result in `MazewallInstallationException`, not a silent unprotected fallback.
 - **Library compatibility:** Blocking `io_uring_setup`/`io_uring_enter`, `memfd_create`, and non-allowlisted `prctl` options is incompatible with Netty `IoUringIoHandler` (use standard Epoll or NIO transport) and native libraries calling `memfd_create` or restricted `prctl` subcommands (such as `PR_SET_VMA` / `PR_SET_PDEATHSIG`) after lockdown installation.
 
 ---
@@ -123,7 +71,7 @@ A successful exploit in your YAML importer is a successful exploit of your entir
 
 mazewall lets you wrap trusted code that processes risky input in **kernel-enforced behavioral contracts**. On a contained worker, configured syscalls and filesystem accesses are denied by the Linux kernel. This limits direct data-plane attacks; it does not isolate arbitrary hostile Java code or remove capabilities already present elsewhere in the JVM.
 
-## Try an independent runnable example
+## Try an experimental worker sandbox example
 
 From the repository root, use JDK 25 on Linux with the required Seccomp/Landlock
 support **and Clang with a BPF backend** for the source build, then run:

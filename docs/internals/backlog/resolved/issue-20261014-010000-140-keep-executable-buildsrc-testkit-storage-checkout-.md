@@ -1,7 +1,7 @@
 ---
 title: "Keep executable buildSrc TestKit storage checkout-owned"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"
@@ -35,3 +35,25 @@ record all three observations. Current build reused the Java verifier, not fresh
 <!-- id: issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-  file: issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md -->
 
 **Scoped verification:** `./gradlew -p buildSrc check` passed on the PR531 resolution checkout, including the complete executable Java contract gate and three Kotlin convention/lifecycle JUnit tests. The nested worker JAR is generated under the owning build directory; the shared `/tmp/.gradle-test-kit` cache was not modified. Full merged-tree acceptance remains pending.
+
+## Root gate verification on 2026-11-25
+
+The root bridge selects buildSrc `test`. Its existing dependency on
+`verificationActionsTest` runs the Java verifier and Kotlin JUnit suite in one
+nested invocation. Both suites use the configured Gradle User Home for TestKit
+under the later [cache ownership and reuse work](../issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md).
+
+- The focused `:buildLogicGateTest` fixture failed against the original bridge
+  because it omitted the nested test. With the fix, the fixture passed its
+  execution-count, JUnit failure, recovery, bootstrap, ordering, and strict
+  configuration-cache reuse checks.
+- The CI build-logic command completed in 12m 48s. The Java verifier wrote its
+  `verified` marker and JUnit reported three Kotlin tests with zero failures,
+  errors, or skips.
+- The same command failed in a disposable source copy with a deliberately
+  incorrect `BuildConventionsFunctionalTest` assertion. The Java verifier
+  completed, the Kotlin suite reported the one intended failure, and the root
+  gate exited with status 1.
+- `./gradlew build` exited 0. The baseline build passed in 9m 15s and reused the
+  verified build-logic results. The confined Gradle run passed in 3m 31s and its
+  receipt recorded 42 tests with zero failures, errors, or skips.

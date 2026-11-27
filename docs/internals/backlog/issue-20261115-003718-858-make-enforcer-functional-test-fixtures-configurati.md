@@ -63,3 +63,30 @@ The local full quality gate passed in full-incremental proposal 002. Still requi
 Full-incremental proposal 001 is retained as a RED attempt whose only failure was ktlint formatting in two `enforcer` Kotlin script lines. The whitespace correction passed focused `:enforcer:ktlintKotlinScriptCheck` and `ConfinedHelperLaneFunctionalTest`; proposal 002 then passed the offline full build with configuration-cache problems set to fail. The build ran for 30m25s, completed 248 actionable tasks (135 executed, 8 from cache, 105 up-to-date), and stored the configuration cache. This cached local gate does not establish the cold artifact-closure requirement.
 
 PR run 43669767931 remains red, with the offline failure-triage dependency gap for `org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0`, 19/244 core kernel failures and 2 skipped, and a security update blocked by NVD HTTP 503 after snapshot restoration. No scan result was produced. Keep issue 858 OPEN until cold offline artifact closure and fresh required CI succeed. Full-gate and current-run receipts are recorded in the [focused evidence](../evidence/pr567-ci-fixture-corrections-20261115.md).
+
+## Cold fixture qualification — 2026-11-26
+
+On JDK 25, the new offline settings assertion failed against the original
+failure-triage invocation. Preparation and execution now share an explicit
+TestKit home, and every triage control runs offline. The standalone verifier
+also stores its configuration cache with the success-marker action capturing
+only the file provider.
+
+```bash
+./gradlew -p buildSrc failureTriageTest verificationActionsTest \
+  -Pmazewall.coldFixtureDependencies=true --configuration-cache --configuration-cache-problems=fail
+```
+
+The command passed in 8m40s and stored the configuration cache. The root fixture
+prepared 101 configurations and exercised Java and Kotlin compilation, JUnit,
+Detekt, SpotBugs, ktlint and JaCoCo. Each triage fixture prepared 35
+configurations, including the collector runtime graph with
+`kotlinx-serialization-json:1.9.0`, and passed all 14 offline controls. The
+nested triage build stored and reused its configuration cache. Each fixture
+started with an empty TestKit home and kept dependency verification enabled
+during preparation.
+
+The normal offline full gate also passed with strict configuration-cache
+checking. The host `build` completed in 9m07s and the confined Docker kernel
+lane completed in 3m12s. Fresh hosted CI and a successful security scan remain
+open.

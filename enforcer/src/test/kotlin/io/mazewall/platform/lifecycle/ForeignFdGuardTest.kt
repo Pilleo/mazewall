@@ -53,6 +53,22 @@ class ForeignFdGuardTest {
     }
 
     @Test
+    fun verifiedForeignDescriptorWithChangedTargetIsReported() =
+        withOwnedFile { _, entry, target ->
+            val replacement = Path.of("/replacement-target")
+            var after = false
+            val guard = ForeignFdGuard(ROOT) { path ->
+                if (after && path == entry) replacement else Files.readSymbolicLink(path)
+            }
+            val context = context()
+            guard.beforeEach(context)
+            after = true
+
+            val failure = assertThrows(AssertionError::class.java) { guard.afterEach(context) }
+            assertTrue(failure.message!!.contains("fd ${entry.fileName} changed target from $target to $replacement"), failure.message)
+        }
+
+    @Test
     fun verifiedForeignDescriptorDisappearsAtAfterReadlinkIsDetected() =
         withOwnedFile { owner, entry, target ->
         var after = false
@@ -160,7 +176,7 @@ class ForeignFdGuardTest {
         target: String,
     ) {
         val failure = assertThrows(AssertionError::class.java) { guard.afterEach(context) }
-        assertTrue(failure.message!!.contains("fd ${entry.fileName} -> $target"), failure.message)
+        assertTrue(failure.message!!.contains("fd ${entry.fileName} missing from after snapshot (previous target $target)"), failure.message)
     }
 
     private fun withOwnedFile(action: (FileChannel, Path, String) -> Unit) {

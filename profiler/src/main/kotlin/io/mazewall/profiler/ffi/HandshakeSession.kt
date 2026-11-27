@@ -9,15 +9,11 @@ import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.native.LinuxNative
-import io.mazewall.platform.native.recover
 import io.mazewall.profiler.internal.engine.ACK_BUF_SIZE
-import io.mazewall.profiler.internal.engine.PASS_THROUGH_COMMAND_BYTE
 import io.mazewall.profiler.internal.engine.POLLFD_REVENTS_OFF
 import io.mazewall.profiler.internal.engine.POLL_ACK_TIMEOUT_MS
-import io.mazewall.profiler.internal.engine.PROTOCOL_ACK_BYTE
 import io.mazewall.profiler.internal.engine.ProfilerAckOutcome
 import io.mazewall.profiler.internal.engine.ProfilerHandshakeFailure
-import io.mazewall.profiler.internal.engine.SHUTDOWN_COMMAND_BYTE
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
@@ -67,67 +63,71 @@ internal sealed class HandshakeSession {
         ): HandshakeSession {
             pollFd.set(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF, 0.toShort())
 
+            var passThroughRequested = false
             var attempts = 0
             while (attempts++ < MAX_ATTEMPTS) {
-                val remainingMillis = deadline.remainingMillis()
-                if (remainingMillis <= 0) return failed(ProfilerHandshakeFailure.Timeout)
-                val pollRes = ioOps.raw.poll(ConfinedSegment(pollFd), 1L, remainingMillis)
-                val count = pollRes.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
-                    return@recover INTERNAL_ERROR_SIGNAL
+                when (val outcome = pollAck(socketFd, ioOps, pollFd, ackBuf, deadline) ?: continue) {
+                    ProfilerAckOutcome.PassThroughRequested -> passThroughRequested = true
+                    is ProfilerAckOutcome.Acknowledged -> return when (outcome.action.withPendingPassThrough(passThroughRequested)) {
+                        ProfilerAckOutcome.Action.Continue -> acknowledged()
+                        ProfilerAckOutcome.Action.PassThrough -> passedThrough()
+                        ProfilerAckOutcome.Action.Shutdown -> acknowledged("Parent Command (deferred, ACK took priority)")
+                    }
+                    is ProfilerAckOutcome.Rejected -> {
+                        if (outcome.reason == ProfilerHandshakeFailure.Shutdown) onShutdown("Parent Command during notification")
+                        return failed(outcome.reason)
+                    }
                 }
-                if (count == RETRY_SIGNAL) continue
-                if (count == INTERNAL_ERROR_SIGNAL) return failed()
-                if (count == 0L) return failed(ProfilerHandshakeFailure.Timeout)
-
-                val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
-                if ((revents.toInt() and NativeConstants.POLLIN.toInt()) != 0) {
-                    return readAndProcessAck(socketFd, ioOps, ackBuf, onShutdown, deadline)
-                }
-                return failed()
             }
             return failed(ProfilerHandshakeFailure.Timeout)
         }
 
-        private fun readAndProcessAck(
+        /** Null requests a new poll after EINTR. */
+        private fun pollAck(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ioOps: NativeIoOperations,
+            pollFd: MemorySegment,
             ackBuf: MemorySegment,
-            onShutdown: (String) -> Unit,
             deadline: Deadline,
-        ): HandshakeSession {
-            var attempts = 0
-            while (attempts++ < MAX_ATTEMPTS) {
-                val remainingMillis = deadline.remainingMillis()
-                if (remainingMillis <= 0) return failed(ProfilerHandshakeFailure.Timeout)
-                val readRes = ioOps.read(socketFd, ackBuf, ACK_BUF_SIZE)
-                val value = readRes.recover { errno, _ ->
-                    if (errno == NativeConstants.EINTR) return@recover RETRY_SIGNAL
-                    return@recover INTERNAL_ERROR_SIGNAL
-                }
-                if (value == RETRY_SIGNAL) continue
-                if (value <= 0 || value > ACK_BUF_SIZE) {
-                    return failed()
-                }
-                // Process all bytes received in this read call.
-                // ACK takes priority: if ACK appears before SHUTDOWN in the buffer,
-                // we honour the ACK (let the tracee continue) and trigger shutdown
-                // only after CONTINUE has been sent to the kernel.
-                return when (val outcome = ProfilerAckOutcome.decode(ByteArray(value.toInt()) { ackBuf.get(ValueLayout.JAVA_BYTE, it.toLong()) })) {
-                    is ProfilerAckOutcome.Acknowledged -> acknowledged(if (outcome.shutdown) "Parent Command (deferred, ACK took priority)" else null)
-                    ProfilerAckOutcome.PassThrough -> passedThrough()
-                    is ProfilerAckOutcome.Rejected -> {
-                        if (outcome.reason == ProfilerHandshakeFailure.Shutdown) onShutdown("Parent Command during notification")
-                        failed(outcome.reason)
+        ): ProfilerAckOutcome? {
+            val remainingMillis = deadline.remainingMillis()
+            if (remainingMillis <= 0) return ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Timeout)
+            return when (val ready = ioOps.raw.poll(ConfinedSegment(pollFd), 1L, remainingMillis)) {
+                is LinuxNative.SyscallResult.Error ->
+                    if (ready.errno == NativeConstants.EINTR) null else ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Transport)
+                is LinuxNative.SyscallResult.Success -> {
+                    val revents = pollFd.get(ValueLayout.JAVA_SHORT, POLLFD_REVENTS_OFF)
+                    when {
+                        ready.value == 0L -> ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Timeout)
+                        (revents.toInt() and NativeConstants.POLLIN.toInt()) == 0 -> ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Transport)
+                        else -> readAck(socketFd, ioOps, ackBuf, deadline)
                     }
                 }
             }
-            return failed()
+        }
+
+        private fun readAck(
+            socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            ioOps: NativeIoOperations,
+            ackBuf: MemorySegment,
+            deadline: Deadline,
+        ): ProfilerAckOutcome {
+            var attempts = 0
+            while (attempts++ < MAX_ATTEMPTS) {
+                if (deadline.remainingMillis() <= 0) return ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Timeout)
+                val result = ioOps.read(socketFd, ackBuf, ACK_BUF_SIZE)
+                if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) continue
+                val size = (result as? LinuxNative.SyscallResult.Success)?.value
+                return when {
+                    size == null || size <= 0 || size > ACK_BUF_SIZE -> ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Transport)
+                    deadline.remainingMillis() <= 0 -> ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Timeout)
+                    else -> ProfilerAckOutcome.decode(ByteArray(size.toInt()) { ackBuf.get(ValueLayout.JAVA_BYTE, it.toLong()) })
+                }
+            }
+            return ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Transport)
         }
 
         private companion object {
-            private const val RETRY_SIGNAL = -1L
-            private const val INTERNAL_ERROR_SIGNAL = -2L
             private const val MAX_ATTEMPTS = 8
         }
     }
@@ -146,7 +146,7 @@ internal sealed class HandshakeSession {
         val reason: ProfilerHandshakeFailure = ProfilerHandshakeFailure.Transport,
     ) : HandshakeSession()
 
-    /** Handshake received pass-through command, ready to send SECCOMP_USER_NOTIF_FLAG_CONTINUE. */
+    /** The event was acknowledged and the parent requested pass-through. */
     class PassedThrough(
         override val notifId: Long,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,

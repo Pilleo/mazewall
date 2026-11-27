@@ -133,6 +133,28 @@ class JvmChildProcessTest {
     }
 
     @Test
+    fun `bounded stdout pump discards oversized lines and keeps reading`() {
+        val process = DummyProcess(stdout = "READY_OK${"x".repeat(16_384)}\r\n0123456789\rlast")
+        val lines = mutableListOf<String>()
+        var omitted = 0
+        val pump =
+            JvmChildProcess.startBoundedStdoutPump(
+                process,
+                readySentinel = "READY_OK",
+                maxLineChars = 10,
+                onLine = { lines.add(it) },
+                onOversizedLine = { omitted++ },
+                threadName = "test-bounded-child-stdout",
+                onStreamClosed = {},
+            )
+        assertFalse(JvmChildProcess.awaitReady(pump, 5))
+        pump.thread.join(5_000)
+        assertFalse(pump.thread.isAlive)
+        assertEquals(listOf("0123456789", "last"), lines)
+        assertEquals(1, omitted)
+    }
+
+    @Test
     fun `JacocoOnly keeps only jacoco agents from this JVM`() {
         val selected = JvmChildProcess.selectedJavaAgents(JavaAgentSelection.JacocoOnly)
         assertTrue(selected.all { it.startsWith("-javaagent:") && it.contains("jacoco") })

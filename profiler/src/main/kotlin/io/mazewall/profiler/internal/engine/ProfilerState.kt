@@ -78,15 +78,13 @@ internal sealed interface ProfilerState {
         fun terminate() = Terminated(socketFd, listenerFd)
     }
 
-    /** Event sent, waiting for PROTOCOL_ACK_BYTE or SHUTDOWN from parent. */
+    /** Waiting for the event ACK. A pass-through request keeps this notification pending. */
     data class WaitingForAck(
         override val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         override val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
         val notifId: Long,
+        val passThroughRequested: Boolean = false,
     ) : ProfilerState {
-        /** Transitions back to [ActiveSession] after the JVM acknowledges receipt. */
-        fun acknowledged() = ActiveSession(socketFd, listenerFd)
-
         /** Terminates on timeout or desynchronization. */
         fun terminate() = Terminated(socketFd, listenerFd)
     }

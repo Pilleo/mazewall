@@ -840,7 +840,7 @@ internal class JVMValidationListener(
         val inspection = inspectWithSpawnAuthorization(request.syscall, request.arguments, targetThread, request.parentPid, traceeArch)
         logSlowInspection(startMs, request)
         val isAllowed = inspection.spawnContextAccepted &&
-            authorizeValidation(inspection.state, syscallResolution, request.pid, request.syscall, traceeArch, targetThread)
+            authorizeValidation(inspection.state, syscallResolution, request.pid, request.syscall, traceeArch)
         logSlowValidation(startMs, request.syscall)
         sendValidationResponse(dis, channel, request.id, request.syscall, request.arguments, request.pid, traceeArch, syscallResolution, isAllowed)
     }
@@ -925,20 +925,10 @@ internal class JVMValidationListener(
         pidVal: Int,
         nr: Int,
         traceeArch: Arch,
-        targetThread: Thread?,
     ): Boolean =
         when (validationState) {
             is ScopingValidationState.SafeToValidate -> {
                 val stackTrace = validationState.rawStack.toList()
-
-                val sb = StringBuilder()
-                sb.append("Validation stack for nr=${validationState.nr}, targetThread=$targetThread:\n")
-                if (stackTrace.isEmpty()) {
-                    sb.append("  (empty stack trace)\n")
-                } else {
-                    stackTrace.forEach { sb.append("  $it\n") }
-                }
-                ValidationLog.logs.add(sb.toString())
                 when (syscallResolution) {
                     is SupervisorSyscallResolution.Known -> {
                         val authStartMs = System.currentTimeMillis()
@@ -1103,8 +1093,4 @@ internal class JVMValidationListener(
         } catch (_: SecurityException) {
             null
         }
-}
-
-internal object ValidationLog {
-    public val logs: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue<String>()
 }

@@ -1,24 +1,44 @@
 ---
 title: "Reject non-descriptor BPF commands before creating owned descriptor receipts"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "platform"
-target_modules: [":platform"]
+target_modules: [":platform", ":profiler"]
 target_files:
    - "platform/src/main/kotlin/io/mazewall/platform/native/NativeBpf.kt"
    - "platform/src/main/kotlin/io/mazewall/ffi/internal/RealNativeEngine.kt"
    - "platform/src/main/kotlin/io/mazewall/platform/fd/NativeDescriptorReceipt.kt"
    - "platform/src/test/kotlin/io/mazewall/platform/native/NativeBpfTest.kt"
+   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEBpfMapAllocator.kt"
+   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/engine/BpfProgLoadLayoutTest.kt"
+   - "docs/internals/designs/core/fd-token-ownership.md"
 target_symbols:
    - "openDescriptor"
+   - "BpfDescriptorCommand"
    - "isBpfFdReturningCommand"
    - "recordDescriptorAcquisition"
 open_questions: false
 ---
 
 # 🟡 [Severity: MEDIUM]: Reject non-descriptor BPF commands before creating owned descriptor receipts
+
+## Resolution — 2026-11-26
+
+`NativeBpf.openDescriptor` requires a `BpfDescriptorCommand`. The enum is
+also the source for raw syscall classification. The native adapter issues
+the acquisition receipt and the typed opener consumes it once under the
+BPF descriptor role. The Profiler map allocator uses the typed command.
+[Descriptor ownership contract](../../designs/core/fd-token-ownership.md#native-transfer-checks)
+
+The bare-success regression failed before the fix. On JDK 25, 59 focused
+tests passed, covering command classification, single-use receipt identity,
+missing receipts, native errno, and Profiler rollback. The full Platform suite
+reported 551 passing tests. The strict offline full host build and confined
+Docker lane passed in 17m21s and 3m03s respectively.
+
+## Original finding
 
 **Context:**
 Recursive state-design review A-02: openDescriptor accepts any BPF command and records acquisition for arbitrary successful numeric status. MAP_LOOKUP_ELEM command 1 can return status 0 and manufacture close authority for descriptor 0; the only current production caller correctly uses MAP_CREATE. Source-confirmed internal misuse risk, not runtime-reproduced or a demonstrated valid-caller failure.
@@ -28,7 +48,7 @@ Recursive state-design review A-02: openDescriptor accepts any BPF command and r
 
 ## Evidence and smallest correction
 
-[Recursive review A-02](../reviews/2026-11-05-state-complexity-review.md):
+[Recursive review A-02](../../reviews/2026-11-05-state-complexity-review.md):
 `NativeBpf.kt:24–32` records acquisition for every successful command;
 `:42–57` already distinguishes descriptor-producing commands from command 1.
 `RealNativeEngine.kt:132–144` classifies actual descriptor acquisition, so even
@@ -65,8 +85,8 @@ composed raw/BPF adapter path mints one receipt, then consumes it once.
 ## Existing ownership reconciliation
 
 Active and resolved searches found no exact command-to-ownership owner. The
-[resolved native-transfer correction](resolved/issue-20260910-225751-359-validate-native-transfers-and-descriptor-acquisiti.md)
-remains resolved. The [active descriptor-close issue](issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md)
+[resolved native-transfer correction](issue-20260910-225751-359-validate-native-transfers-and-descriptor-acquisiti.md)
+remains resolved. The [descriptor-close issue](issue-20261103-235244-769-preserve-descriptor-close-errors-and-pre-dispatch-.md)
 owns release of already-acquired resources, not acquisition from a status result.
 No dependency on unrelated Tier E work or public API change is required.
 

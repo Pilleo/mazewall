@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 object CiCachePolicyTest {
     @JvmStatic
     fun run() {
+        verifySharedCodeFilter()
         verifyDecoupledSecurityContract()
         verifyCoreIntegrationCompilationOverlay()
         verifyOptionalJoin()
@@ -82,11 +83,7 @@ object CiCachePolicyTest {
                           id: filter
                           uses: dorny/paths-filter@v3
                           with:
-                              filters: |
-                                  code:
-                                      - '**/*.kt'
-                                      - '.github/workflows/ci.yml'
-                                      - '.github/workflows/security-data.yml'
+                              filters: .github/ci-code-paths.yml
                         - name: Setup Gradle
                           uses: gradle/actions/setup-gradle@v6
                           with:
@@ -147,11 +144,7 @@ object CiCachePolicyTest {
                           id: filter
                           uses: dorny/paths-filter@v3
                           with:
-                              filters: |
-                                  code:
-                                      - '**/*.kt'
-                                      - '.github/workflows/ci.yml'
-                                      - '.github/workflows/security-data.yml'
+                              filters: .github/ci-code-paths.yml
                         - name: Setup Gradle
                           uses: gradle/actions/setup-gradle@v6
                           with:
@@ -187,7 +180,7 @@ object CiCachePolicyTest {
                         - name: Require Core and Mutation Success
                           run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success
                 publish:
-                    needs: [core-quality, mutation-tests, security-check, build-logic-validation]
+                    needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]
                     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
                     permissions:
                         contents: read
@@ -221,8 +214,9 @@ object CiCachePolicyTest {
                 .replace("    optional-integrations:\n", securityFixture.trimEnd() + "\n" + actualBuildLogic.trimEnd() + "\n" + actualGo.trimEnd() + "\n    optional-integrations:\n")
                 .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]")
                 .replace(
-                    "test \"\${{ needs.mutation-tests.result }}\" = success",
-                    "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success && (test \"\${{ needs.go-validation.result }}\" = success || (test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && test \"\${{ inputs.enable_go_validation }}\" != true && test \"\${{ needs.go-validation.result }}\" = skipped)) && test \"\${{ needs.optional-integrations.result }}\" = success && test \"\${{ needs.confined-helper-kernel.result }}\" = success",
+                    "            - name: Require Core and Mutation Success\n" + step(job(legacy, "build-test-publish"), "Require Core and Mutation Success").trimEnd(),
+                    "            - name: Checkout Code\n              uses: actions/checkout@v6\n" +
+                        "            - name: Require Core and Mutation Success\n" + step(job(actualWorkflow, "build-test-publish"), "Require Core and Mutation Success").trimEnd(),
                 )
         }
         val failures = mutableListOf<String>()
@@ -255,7 +249,7 @@ object CiCachePolicyTest {
         mutations.forEachIndexed { index, mutation ->
             if (ciCachePolicyViolations(mutation).isEmpty()) failures += "Mutable/missing container cache identity mutation $index must fail"
         }
-        val publishPrerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation")
+        val publishPrerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "confined-helper-kernel")
         val graphMutations =
             listOf(
                 valid.replace("    core-quality:\n", "    core-quality:\n        needs: [optional-integrations]\n"),
@@ -263,12 +257,16 @@ object CiCachePolicyTest {
                 valid.replace("    optional-integrations:\n", "    optional-integrations:\n        if: false\n"),
                 valid.replace("name: Koog and Spring Integration Acceptance", "name: Renamed required check"),
                 valid.replace(
-                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
-                    "needs: [optional-integrations, core-quality, mutation-tests, security-check, build-logic-validation]",
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]",
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel, optional-integrations]",
                 ),
                 valid.replace(
-                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]",
                     "needs: [build-test-publish]",
+                ),
+                valid.replace(
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]",
+                    "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel, go-validation]",
                 ),
                 valid.replace("    publish:\n", "    publish:\n        continue-on-error: true\n"),
                 valid.replace("if: github.event_name == 'push'", "if: always() && github.event_name == 'push'"),
@@ -314,7 +312,7 @@ object CiCachePolicyTest {
             ) +
                 publishPrerequisites.map { omitted ->
                     valid.replace(
-                        "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                        "needs: [core-quality, mutation-tests, security-check, build-logic-validation, confined-helper-kernel]",
                         "needs: [${publishPrerequisites.filter { it != omitted }.joinToString(", ")}]",
                     )
                 }
@@ -383,10 +381,10 @@ object CiCachePolicyTest {
         )
         for (lane in listOf("core-quality", "mutation-tests")) {
             val start = valid.indexOf("    $lane:\n")
-            val removedFilter = valid.substring(0, start) + valid.substring(start).replaceFirst("- '.github/workflows/ci.yml'", "- 'README.md'")
+            val removedFilter = valid.substring(0, start) + valid.substring(start).replaceFirst("filters: .github/ci-code-paths.yml", "filters: README.md")
             expectViolations("$lane workflow change must run gates", removedFilter, "CODE_CHANGE_FILTER")
-            val malformedFilter = valid.substring(0, start) + valid.substring(start).replaceFirst("- '.github/workflows/ci.yml'", " - '.github/workflows/ci.yml'")
-            expectViolations("$lane malformed embedded filter", malformedFilter, "CODE_CHANGE_FILTER")
+            val malformedFilter = valid.substring(0, start) + valid.substring(start).replaceFirst("filters: .github/ci-code-paths.yml", "filters: |\n                      code: []")
+            expectViolations("$lane empty embedded filter", malformedFilter, "CODE_CHANGE_FILTER")
             val withoutPrRead = valid.substring(0, start) + valid.substring(start).replaceFirst(Regex("pull-requests: (read|write)"), "pull-requests: none")
             expectViolations("$lane PR filter API permission", withoutPrRead, "CODE_CHANGE_FILTER")
             for (unsafeHeader in listOf("if: false", "continue-on-error: true")) {
@@ -408,11 +406,11 @@ object CiCachePolicyTest {
             "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]" to "needs: [core-quality]",
             "if: always()" to "if: success()",
             "if: always()" to "if: always() && !cancelled()",
-            "&& test" to "|| test",
+            "python3 scripts/ci_required_gate.py" to "true",
             "needs.mutation-tests.result" to "needs.core-quality.result",
-            "test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && " to "",
-            "test \"\${{ inputs.enable_go_validation }}\" != true && " to "",
-            "test \"\${{ needs.go-validation.result }}\" = skipped" to "true",
+            "vars.ENABLE_GO_VALIDATION" to "vars.WRONG_GO_FLAG",
+            "inputs.enable_go_validation" to "inputs.wrong_go_flag",
+            "--go-validation" to "--missing-go-validation",
             "    build-test-publish:\n" to "    build-test-publish:\n        continue-on-error: true\n",
             "- name: Require Core and Mutation Success" to "- name: Require Core and Mutation Success\n              continue-on-error: true",
         )) {
@@ -430,7 +428,7 @@ object CiCachePolicyTest {
         expectViolations("no workflow-wide write-all", "permissions: write-all\n$valid", "PACKAGE_WRITE_SCOPE")
         expectViolations("no flow-style package write", "permissions: {packages: write}\n$valid", "PACKAGE_WRITE_SCOPE")
 
-        val joinCommand = joinJob.substringAfter("              run: ").trim()
+        val joinCommand = step(joinJob, "Require Core and Mutation Success")
         for (core in listOf("success", "failure", "cancelled", "skipped", null)) {
             for (mutation in listOf("success", "failure", "cancelled", "skipped", null)) {
                 val command = joinCommand.replace("${'$'}{{ needs.core-quality.result }}", core.orEmpty())
@@ -443,7 +441,7 @@ object CiCachePolicyTest {
                     .replace("${'$'}{{ needs.optional-integrations.result }}", "success")
                     .replace("${'$'}{{ needs.confined-helper-kernel.result }}", "success")
                 check("\${{" !in command) { "Unresolved legacy join expression" }
-                check(shellSucceeds(command) == (core == "success" && mutation == "success")) {
+                check(gateSucceeds(command) == (core == "success" && mutation == "success")) {
                     "Actual required-check shell join must fail closed for core=$core mutation=$mutation"
                 }
             }
@@ -502,10 +500,42 @@ object CiCachePolicyTest {
         }
     }
 
+    private fun verifySharedCodeFilter() {
+        val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
+        val filter = repository.resolve(".github/ci-code-paths.yml").readText()
+        check(ciCodeFilterValid(filter)) { "Shared code filter must cover the reviewed build inputs" }
+        for (rule in filter.lines().filter { it.startsWith("    - ") }) {
+            check(!ciCodeFilterValid(filter.replace(rule, ""))) { "Missing code path accepted: $rule" }
+        }
+        check(!ciCodeFilterValid(filter + "    - 'docs/**'\n")) { "Docs-only changes must stay outside code gates" }
+        val patterns = filter.lines().filter { it.startsWith("    - ") }.map { it.substringAfter("'").substringBefore("'") }
+        fun matches(path: String): Boolean = patterns.any { pattern ->
+            // paths-filter's **/ also matches zero directories; Java's glob requires that explicit alternative.
+            listOf(pattern, pattern.removePrefix("**/")).any { glob ->
+                java.nio.file.FileSystems.getDefault().getPathMatcher("glob:$glob").matches(java.nio.file.Path.of(path))
+            }
+        }
+        for (path in listOf(
+            "gradlew", "gradlew.bat", "nested/gradlew", "nested/gradlew.bat",
+            "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties",
+            "nested/gradle/wrapper/gradle-wrapper.jar", "nested/gradle/wrapper/gradle-wrapper.properties",
+            "gradle.lockfile", "nested/gradle.lockfile", "settings-gradle.lockfile", "nested/settings-gradle.lockfile",
+            "verification-metadata.xml", "gradle/verification-metadata.xml", "nested/gradle/verification-metadata.xml",
+            "src/Main.kt", "Main.java", "build.gradle.kts", "build.gradle", "gradle/libs.versions.toml",
+            "config/spotbugs/exclude.xml", "gradle.properties", "infra/dev/Containerfile", "scripts/check.sh",
+            ".github/workflows/ci.yml", ".github/workflows/security-data.yml", ".github/ci-code-paths.yml",
+        )) check(matches(path)) { "Code/build change missed: $path" }
+        for (path in listOf("README.md", "AGENTS.md", "docs/guide.md", "docs/images/overview.svg")) {
+            check(!matches(path)) { "Docs-only change unexpectedly selects code gates: $path" }
+        }
+        check(shellSucceeds("python3 scripts/test_ci_required_gate.py", timeoutSeconds = 30)) { "Typed required-gate diagnostics failed" }
+        println("Shared filter inventory and typed lane diagnostics passed.")
+    }
+
     private fun verifyOptionalJoin() {
         val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
         val workflow = repository.resolve(".github/workflows/ci.yml").readText()
-        val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
+        val join = step(job(workflow, "build-test-publish"), "Require Core and Mutation Success")
         for (result in listOf("success", "failure", "cancelled", "skipped", "")) {
             var command = join
             for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "confined-helper-kernel")) {
@@ -514,7 +544,7 @@ object CiCachePolicyTest {
             command = command.replace("\${{ vars.ENABLE_GO_VALIDATION }}", "")
                 .replace("\${{ inputs.enable_go_validation }}", "")
                 .replace("\${{ needs.optional-integrations.result }}", result)
-            check("\${{" !in command && shellSucceeds(command) == (result == "success")) {
+            check("\${{" !in command && gateSucceeds(command) == (result == "success")) {
                 "Integration result must be required by the actual final gate: '$result'"
             }
         }
@@ -585,7 +615,7 @@ object CiCachePolicyTest {
                 "Unsafe build-logic lane accepted: $from"
             }
         }
-        val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
+        val join = step(job(workflow, "build-test-publish"), "Require Core and Mutation Success")
         val results = listOf("success", "failure", "cancelled", "skipped", "")
         var checked = 0
         for (core in results) for (mutation in results) for (security in results) for (buildLogic in results) {
@@ -599,27 +629,21 @@ object CiCachePolicyTest {
                 .replace("\${{ needs.optional-integrations.result }}", "success")
                 .replace("\${{ needs.confined-helper-kernel.result }}", "success")
             check("\${{" !in command) { "Unresolved four-way join expression" }
-            check(shellSucceeds(command) == (core == "success" && mutation == "success" && security == "success" && buildLogic == "success")) {
+            check(gateSucceeds(command) == (core == "success" && mutation == "success" && security == "success" && buildLogic == "success")) {
                 "Actual 625-way join failed: $core/$mutation/$security/$buildLogic"
             }
             checked++
         }
         check(checked == 625)
         val prerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "optional-integrations", "confined-helper-kernel")
-        val goGuardedClause = " && (test \"\${{ needs.go-validation.result }}\" = success || (test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && test \"\${{ inputs.enable_go_validation }}\" != true && test \"\${{ needs.go-validation.result }}\" = skipped))"
         for (prerequisite in prerequisites) {
             val removedNeed = workflow.replace(
                 "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]",
                 "needs: [${prerequisites.filter { it != prerequisite }.joinToString(", ")}]",
             )
             check(removedNeed != workflow && ciCachePolicyViolations(removedNeed).isNotEmpty()) { "Missing join prerequisite accepted: $prerequisite" }
-            val removedResult = if (prerequisite == "go-validation") {
-                workflow.replace(goGuardedClause, "")
-            } else {
-                workflow.replace(" && test \"\${{ needs.$prerequisite.result }}\" = success", "")
-                    .replace("test \"\${{ needs.$prerequisite.result }}\" = success && ", "")
-            }
-            check(removedResult != workflow && ciCachePolicyViolations(removedResult).isNotEmpty()) { "Missing literal success accepted: $prerequisite" }
+            val removedResult = workflow.replace("needs.$prerequisite.result", "needs.missing.result")
+            check(removedResult != workflow && ciCachePolicyViolations(removedResult).isNotEmpty()) { "Missing result argument accepted: $prerequisite" }
         }
         for (result in results) {
             var command = join
@@ -629,7 +653,7 @@ object CiCachePolicyTest {
             command = command.replace("\${{ vars.ENABLE_GO_VALIDATION }}", "")
                 .replace("\${{ inputs.enable_go_validation }}", "")
                 .replace("\${{ needs.confined-helper-kernel.result }}", result)
-            check("\${{" !in command && shellSucceeds(command) == (result == "success")) { "Private lane result must be required: $result" }
+            check("\${{" !in command && gateSucceeds(command) == (result == "success")) { "Private lane result must be required: $result" }
         }
         println("Actual four-result projection: 625 tuples with Go/integration success; unsafe build-logic lanes rejected.")
     }
@@ -690,7 +714,7 @@ object CiCachePolicyTest {
         } finally {
             scratch.deleteRecursively()
         }
-        val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
+        val join = step(job(workflow, "build-test-publish"), "Require Core and Mutation Success")
         val flagMatrix = listOf(
             "" to "",
             "false" to "",
@@ -701,6 +725,10 @@ object CiCachePolicyTest {
             "" to "true",
             "false" to "true",
             "true" to "true",
+            " true " to "",
+            "--help" to "",
+            "\$(printf true)" to "",
+            "true\"; exit 23; #" to "",
         )
         for ((repoVar, dispatchInput) in flagMatrix) {
             val enabled = repoVar == "true" || dispatchInput == "true"
@@ -713,7 +741,7 @@ object CiCachePolicyTest {
                     .replace("\${{ vars.ENABLE_GO_VALIDATION }}", repoVar)
                     .replace("\${{ inputs.enable_go_validation }}", dispatchInput)
                 val expectedPass = result == "success" || (!enabled && result == "skipped")
-                check("\${{" !in actual && shellSucceeds(actual) == expectedPass) {
+                check("\${{" !in actual && gateSucceeds(actual) == expectedPass) {
                     "Go join mismatch for var='$repoVar' input='$dispatchInput' result='$result' (expectedPass=$expectedPass)"
                 }
             }
@@ -721,11 +749,19 @@ object CiCachePolicyTest {
         println("Actual Go workload runs both modules, preserves every failure, stays opt-in by default, and fails closed when enabled.")
     }
 
-    private fun shellSucceeds(command: String, environment: Map<String, String> = emptyMap()): Boolean {
+    private fun gateSucceeds(resolvedStep: String): Boolean {
+        val environment = resolvedStep.substringAfter("env:\n").substringBefore("              run:").lineSequence()
+            .filter(String::isNotBlank).associate { line ->
+                line.trimStart().substringBefore(":") to line.trimStart().substringAfter(": ")
+            }
+        return shellSucceeds(shell(resolvedStep), environment)
+    }
+
+    private fun shellSucceeds(command: String, environment: Map<String, String> = emptyMap(), timeoutSeconds: Long = 5): Boolean {
         val process = ProcessBuilder("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command).apply {
             environment().putAll(environment)
-        }.inheritIO().start()
-        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+        }.directory(File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }).inheritIO().start()
+        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly().waitFor()
             error("CI condition shell timed out: $command")
         }
@@ -747,10 +783,11 @@ object CiCachePolicyTest {
         check("!cancelled()" in updater && "actions/upload-artifact@" in updater)
         check("actions/cache/save@" in updater && "lookup-only: true" in updater)
         val filter = step(security, "Check file changes")
-        check("- '.github/workflows/security-data.yml'" in filter) { "Updater changes must trigger security validation" }
+        val sharedFilter = repository.resolve(".github/ci-code-paths.yml").readText()
+        check("filters: .github/ci-code-paths.yml" in filter && "- '.github/workflows/security-data.yml'" in sharedFilter) { "Updater changes must trigger security validation" }
         val controls = step(security, "Test Security Snapshot Controls")
         check("python3 scripts/test_security_snapshot.py" in controls && "steps.filter.outputs.code == 'true'" in controls)
-        check(ciCachePolicyViolations(ci.replace("- '.github/workflows/security-data.yml'", "- 'README.md'")).isNotEmpty())
+        check(!ciCodeFilterValid(sharedFilter.replace("- '.github/workflows/security-data.yml'", "- 'README.md'")))
         check(ciCachePolicyViolations(ci.replace("python3 scripts/test_security_snapshot.py", "true")).isNotEmpty())
         check("dependencyCheckUpdate" !in security && "NVD_API_KEY" !in security)
         check("verifySecuritySnapshot" in security && "-Pmazewall.securitySnapshotScan=true" in security)
@@ -794,8 +831,13 @@ object CiCachePolicyTest {
 
     private fun step(job: String, name: String): String = job.substringAfter("- name: $name\n", "").substringBefore("\n            - name: ")
 
-    private fun shell(step: String): String = step.substringAfter("run: |\n", "").let { block ->
-        if (block.isEmpty()) step.substringAfter("run: ").substringBefore('\n').trim()
-        else block.lineSequence().takeWhile { it.isBlank() || it.startsWith("                  ") }.joinToString("\n") { it.removePrefix("                  ") }
+    private fun shell(step: String): String {
+        val literal = step.substringAfter("run: |\n", "")
+        val folded = step.substringAfter("run: >-\n", "")
+        val block = literal.ifEmpty { folded }
+        if (block.isEmpty()) return step.substringAfter("run: ").substringBefore('\n').trim()
+        val separator = if (literal.isNotEmpty()) "\n" else " "
+        return block.lineSequence().takeWhile { it.isBlank() || it.startsWith("                  ") }
+            .joinToString(separator) { it.removePrefix("                  ") }
     }
 }

@@ -1,13 +1,16 @@
 ---
 title: "Distinguish failed dmesg probes from successful empty triage evidence"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
 target_modules: [":profiler"]
 target_files:
   - "profiler/src/main/kotlin/io/mazewall/profiler/triage/DiagnosticTriageRunner.kt"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/triage/ManagedProcessCapture.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/triage/DiagnosticTriageRunnerTest.kt"
+  - "docs/internals/designs/profiler/profiler-design.md"
 target_symbols:
   - "DiagnosticTriageRunner"
 open_questions: false
@@ -15,8 +18,18 @@ open_questions: false
 
 # 🟡 [Severity: MEDIUM]: Distinguish failed dmesg probes from successful empty triage evidence
 
+## Resolution — 2026-11-25
+
+The owned helper drains both streams, checks the exit code, and filters stdout only after a successful probe. A denied probe records its exit code and bounded stderr in the existing JSON field. Read and exit timeouts and ordinary I/O errors remain visible. [Triage guidance](../../designs/profiler/profiler-design.md#self-only-diagnostic-report-scope)
+
+- The pre-fix tests reproduced empty denial and timeout results. The fixed collector passed 18 focused triage and process-capture tests, including successful empty and matching output, a denied exit, oversized stderr, launch failure, read timeout, and exit timeout.
+- A real Gradle `runTriage` report on this host recorded `dmesg` exit status 1 and `Operation not permitted`.
+- Profiler ktlint, Detekt, and SpotBugs passed. `./gradlew build` passed with the host and confined Docker kernel lanes.
+
+## Original finding
+
 **Context:**
-Repository-wide review, 2026-11-04: [EVID-09](../reviews/2026-11-04-repository-review-findings.md#evid-09). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [EVID-09](../../reviews/2026-11-04-repository-review-findings.md#evid-09). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/boundary:** reproduced diagnostics/error-contract defect; optional failure triage. **Tracking:** **NEW**; related resolved bounded-capture issues and active ambient-attachment issue do not track this loss of error evidence.
 

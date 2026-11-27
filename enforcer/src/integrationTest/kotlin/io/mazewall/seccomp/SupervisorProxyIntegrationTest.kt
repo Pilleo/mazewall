@@ -596,13 +596,6 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             )
         }, cleanup = {
             shutdownForDiagnostics(ownedExecutor, tempFile)
-            System.err.println("--- VALIDATION LOGS ---")
-            while (true) {
-                val log = io.mazewall.enforcer.internal.supervisor.ValidationLog.logs
-                    .poll() ?: break
-                System.err.print(log)
-            }
-            System.err.println("-----------------------")
             System.err.println("--- DAEMON LOGS ---")
             System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager::class.java.classLoader}")
             readDaemonLog {
@@ -661,13 +654,6 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             assertTrue(result, "Reading JDK home files must succeed via daemon fast-path bypass")
         }, cleanup = {
             shutdownForDiagnostics(ownedExecutor)
-            System.err.println("--- VALIDATION LOGS ---")
-            while (true) {
-                val log = io.mazewall.enforcer.internal.supervisor.ValidationLog.logs
-                    .poll() ?: break
-                System.err.print(log)
-            }
-            System.err.println("-----------------------")
             System.err.println("--- DAEMON LOGS ---")
             System.err.println("DEBUG: SupervisorDaemonManager classLoader: ${io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager::class.java.classLoader}")
             readDaemonLog {

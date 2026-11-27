@@ -51,8 +51,15 @@ Rendering limits cap the number of rendered threads, frames per thread, and tota
 characters, with visible truncation markers and deterministic thread-ID order.
 They bound **output**, not the acquisition/allocation of `getAllStackTraces()`,
 its safepoint progress, or a hard collection deadline. Ordinary optional snapshot
-exceptions are recorded visibly; fatal JVM errors propagate. The external
-`dmesg` helper's bounded stdout capture is not a timeout for this self snapshot.
+exceptions are recorded visibly. Fatal JVM errors propagate. The external
+`dmesg` helper has timeouts for reading its output and waiting for exit. These
+timeouts apply to the helper only.
+
+In the triage JSON, `dmesg_seccomp_logs` contains matching stdout records from a
+successful probe. An empty string means the probe succeeded and found no matching
+records. On failure, the same field describes the error. A nonzero exit includes
+the exit status and up to 2,048 characters of stderr. Longer stderr is marked as
+truncated.
 
 ---
 
@@ -299,8 +306,9 @@ Normal stream termination has its own nine-byte record: reserved `Int.MIN_VALUE`
 header, terminal version 1, and one-byte reason (1: producer exit, 2: requested
 pass-through). A lone seccomp-listener `POLLHUP` proves that no filter users remain
 (`seccomp_notify_poll`); error or mixed flags do not certify producer retirement.
-Requested pass-through is confirmed only after any in-flight notification reply
-has settled, and is accepted only when locally requested. Terminal publication is
+Requested pass-through is confirmed only after any in-flight event has been
+acknowledged and its kernel CONTINUE succeeds. The reader accepts it only when
+locally requested. Terminal publication is
 a bounded nonblocking write. Missing, partial, malformed or failed publication
 leaves the profile incomplete. A complete record ends the logical stream;
 transport EOF/reset alone never certifies it. This avoids relying on a subsequent
@@ -355,7 +363,7 @@ To ensure a stable and leak-free profiling experience, the `:profiler` module ad
 *   **Concurrent JVM shutdown:** Each session leases its captured daemon until installation and listener cleanup settle. The daemon shutdown hook closes new admission and waits at most 30 seconds for application-owned sessions to retire, allowing concurrent Spring shutdown to drain and snapshot them first. Expiry, interruption or callback failure still attempts forced child reaping and every other resource release with fatal-first aggregation; it does not certify a profile. The original no-argument child-hook registration remains available. Explicit manager stop remains an explicit destructive retirement, not a completeness proof.
 *   **Interrupted or timed-out joins:** Native descriptor retirement and thread retirement are separate cleanup outcomes. A close cannot clear live reader/collector references or release its session lease as complete merely because the socket integer was closed: another thread's blocked native read may still own the open-file description. Live threads yield typed incomplete cleanup and remain joinable on retry; consumed descriptor generations are never closed twice. Physical cleanup retry cannot manufacture a normal terminal record or erase lost-event evidence.
 *   **Close During Installation:** BPF allocation and coordinator/handshake waits run outside the session's short lifecycle gate. Immediately before each irreversible NEW_LISTENER or TSYNC syscall, the captured installer acquires that gate, verifies the session is still open, and holds it only through the native install operation. Close marks the session closed under the same gate: if close wins, no subsequent install syscall can start; if installation wins, close waits only for that committed native operation before draining listeners. The service retains the session until outstanding installations settle. A socket arriving after close is drained through an isolated, non-publishing listener and disposed; its cleanup outcome remains reachable from the service. An installation interrupted by session close fails instead of running the workload. Close does not claim to cancel a native syscall already in progress or remove a permanent kernel filter.
-*   **Compatibility Shutdown:** `Profiler.shutdown()` drains current sessions of the default service. Later `profile` or `wrap` calls may open new sessions. The daemon remains alive to issue CONTINUE for permanently filtered worker, descendant, or background threads until the parent JVM exits. Executor-wrapper `shutdown` and `shutdownNow` continue to control their delegate executor; service shutdown drains the associated profiling sessions. Closed wrapper sessions remain in pass-through without creating further listeners.
+*   **Compatibility Shutdown:** `Profiler.shutdown()` drains current sessions of the default service. Later `profile` or `wrap` calls may open new sessions. The daemon remains alive to issue CONTINUE for permanently filtered worker, descendant, or background threads until the parent JVM exits. Executor-wrapper `shutdown` and `shutdownNow` control their delegate and leave collection active until the delegate actually terminates. `awaitTermination` spends the remaining caller budget on collector retirement after the delegate terminates. Service shutdown can close those listeners early, which leaves sticky incomplete coverage. Closed wrapper sessions remain in pass-through without creating further listeners.
 *   **FFM payload lifetime:** The shared daemon reactor owns one `SegmentLease` for each pooled notification/response buffer. Sessions return leases during cleanup; a stale lease cannot return a later rental of the same address. Domain events must materialize their data before the lease ends. `ManagedSegment` wraps the FFM lifetime but does not itself prove a payload's struct layout. See the [SegmentPool migration guide](../api/segment-pool-migration.md).
 *   **Registry Cleanup & Thread Poisoning:** Session cleanup removes that session's TID mappings only after its listeners have drained. However, because the JVM reuses threads in a pool, any `ProfilerExecutorWrapper` must be used with caution; while the session registry is cleared, the OS-level seccomp filter on the worker thread is permanent (see §1: Loom Virtual Thread Carrier Poisoning).
 

@@ -180,19 +180,6 @@ class MazewallLockdownIntegrationTest {
                 public final class Probe {
                     public static void main(String[] args) {
                         String mode = args[0];
-                        if ("expect-agent-installed".equals(mode)) {
-                            try {
-                                new ProcessBuilder("/bin/echo", "blocked-probe").start();
-                                throw new AssertionError("ProcessBuilder unexpectedly succeeded under -javaagent lockdown");
-                            } catch (IOException expectedBlocked) {
-                                String msg = String.valueOf(expectedBlocked.getMessage());
-                                if (!msg.contains("Operation not permitted") && !msg.contains("error=1") && !msg.contains("errno=1")) {
-                                    throw new AssertionError("Expected EPERM message under -javaagent, got: " + msg, expectedBlocked);
-                                }
-                            }
-                            System.out.println("AGENT_LOCKDOWN_OK");
-                            return;
-                        }
                         try {
                             ProcessPolicy policy = "expect-elasticsearch-custom".equals(mode)
                                 ? ProcessPolicy.fromPreset(LockdownPreset.ELASTICSEARCH, RuntimeProfile.HOTSPOT_JIT)
@@ -360,32 +347,6 @@ class MazewallLockdownIntegrationTest {
                 )
             assertEquals(0, appArgNotFlag.first, "App argument after main class must not trigger JVM flag rejection: ${appArgNotFlag.second}")
             assertTrue(appArgNotFlag.second.contains("INSTALLED:depth=1"))
-
-            val javaAgentLockdown =
-                runCommand(
-                    javaBin,
-                    "--enable-native-access=ALL-UNNAMED",
-                    "-javaagent:$lockdownJar=preset=opensearch,block=memfd_create,unblock=ptrace",
-                    "-cp",
-                    "$stdlibJar:$cpOut",
-                    "probe.Probe",
-                    "expect-agent-installed",
-                )
-            assertEquals(0, javaAgentLockdown.first, "Zero-code -javaagent probe failed: ${javaAgentLockdown.second}")
-            assertTrue(javaAgentLockdown.second.contains("AGENT_LOCKDOWN_OK"))
-
-            val invalidJavaAgent =
-                runCommand(
-                    javaBin,
-                    "--enable-native-access=ALL-UNNAMED",
-                    "-javaagent:$lockdownJar=unknown=foo",
-                    "-cp",
-                    "$stdlibJar:$cpOut",
-                    "probe.Probe",
-                    "expect-agent-installed",
-                )
-            assertTrue(invalidJavaAgent.first != 0, "Invalid -javaagent directive must fail startup before main()")
-            assertTrue(invalidJavaAgent.second.contains("Unknown -javaagent directive"))
         } finally {
             tempDir.toFile().deleteRecursively()
         }

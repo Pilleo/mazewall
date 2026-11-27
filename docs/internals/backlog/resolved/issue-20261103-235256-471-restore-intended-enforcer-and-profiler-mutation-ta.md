@@ -1,13 +1,15 @@
 ---
 title: "Restore intended enforcer and profiler mutation target inventories"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "build"
 target_modules: [":enforcer", ":profiler"]
 target_files:
   - "enforcer/build.gradle.kts"
+  - "profiler/build.gradle.kts"
+  - "gradle/pitest-limits.gradle"
 target_symbols:
   - "pitest"
 open_questions: false
@@ -16,7 +18,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Restore intended enforcer and profiler mutation target inventories
 
 **Context:**
-Repository-wide review, 2026-11-04: [TEST-01](../reviews/2026-11-04-repository-review-findings.md#test-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TEST-01](../../reviews/2026-11-04-repository-review-findings.md#test-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Consolidated priority:** P2/medium. BUILD-03 is an alias of TEST-01, not a second task. This is a check-selection/assurance gap: omitted targets invalidate the claimed mutation denominator, but do not independently prove a runtime bypass. Repair alongside the concrete product defects without weakening thresholds.
 
@@ -45,6 +47,37 @@ The corresponding test selectors also drift: enforcer `PolicyTest`/`SbobParserTe
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Local verification on 2026-11-25
+
+- The compiled baseline contained eight unmatched production selectors and six
+  unmatched test selectors. A Gradle fixture with a valid and a stale target
+  reached PIT before the guard was installed. The guard now rejects that case,
+  reports the missing selector, and catches renamed bytecode on configuration
+  cache replay. The fixture also passed exclusion, source-set, glob, and override
+  cases.
+- Enforcer targets the current policy and composition owners (`Policy`, its
+  generated classes, and `PolicyDefinition`), the BPF compiler, and the SBOB
+  parser. Profiler targets the current session and path resolver packages and
+  the public coverage and bill-of-behavior classes. The named host tests use
+  their compiled package names.
+- The three PIT runs passed with the inventory guard enabled. The existing
+  thresholds passed for each module.
+
+| Module | Line coverage | Mutants killed / generated | Mutation score | Test strength |
+| --- | ---: | ---: | ---: | ---: |
+| Enforcer | 90% | 259 / 395 | 66% | 76% |
+| Platform | 98% | 59 / 84 | 70% | 98% |
+| Profiler | 95% | 340 / 429 | 79% | 82% |
+
+PIT reports include 147 mutants in `BpfFilter.kt`, 125 in
+`PolicyDefinition.kt`, 151 in `ProfilingCoverage.kt`, and 159 in
+`BillOfBehavior.kt`. The final CI task sequence ran all three inventory checks
+again and reused the current PIT reports.
+
+`./gradlew build` exited 0. Its required build-logic verifier ran both PIT
+fixtures. The baseline build passed in 9m 8s, and the confined lane passed in
+3m 19s with 42 tests and zero failures, errors, or skips.
 
 ---
 <!-- id: issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta  file: issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md -->

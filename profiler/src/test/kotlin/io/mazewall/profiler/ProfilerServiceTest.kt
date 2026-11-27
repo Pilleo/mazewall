@@ -2,6 +2,8 @@ package io.mazewall.profiler.api
 import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.networking.ListenerStartupReporter
+import io.mazewall.ffi.networking.SeccompListenerStartup
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -33,6 +35,7 @@ import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.util.concurrent.Callable
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -377,7 +380,7 @@ class ProfilerServiceTest {
                 MutableList<TraceEvent>,
                 MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                 MutableMap<String, Long>,
-                CountDownLatch,
+                ListenerStartupReporter,
             ) -> Unit,
         ) {
             beforeInstall()
@@ -408,9 +411,9 @@ class ProfilerServiceTest {
                 isDaemon = true
                 start()
             }
-            val ready = CountDownLatch(1)
-            startTraceListener(fd, accumulatedLogs, stackTracesMap, pathCache, ready)
-            check(ready.await(5, TimeUnit.SECONDS))
+            val startup = CompletableFuture<SeccompListenerStartup>()
+            startTraceListener(fd, accumulatedLogs, stackTracesMap, pathCache) { startup.complete(it) }
+            check(startup.get(5, TimeUnit.SECONDS) == SeccompListenerStartup.Ready)
         }
 
         fun emit(path: String) {
