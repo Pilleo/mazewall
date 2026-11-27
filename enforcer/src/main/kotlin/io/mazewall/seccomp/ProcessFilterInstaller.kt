@@ -5,6 +5,7 @@ import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.api.frozenCopy
+import io.mazewall.enforcer.api.hasWorkerFilesystemIntent
 import io.mazewall.enforcer.engine.FilterInstallationPlanner
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentRegistryEffect
@@ -133,11 +134,7 @@ internal object ProcessFilterInstaller {
                 "call Mazewall.installOnProcess from a platform thread (for example, main())."
         }
         ContainerState.resolveCurrentState().installationFailure?.let { throw it }
-        require(
-            !policy.enforceLandlock &&
-                policy.allowedFsReadPaths.isEmpty() &&
-                policy.allowedFsWritePaths.isEmpty(),
-        ) {
+        require(!policy.hasWorkerFilesystemIntent()) {
             "ProcessFilterInstaller does not support Landlock filesystem rules"
         }
         require(!policy.hasSupervisedSyscalls) {

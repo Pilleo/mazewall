@@ -105,7 +105,7 @@ class PolicyBuilderContractTest {
 
     @Test
     fun `PolicyDefinition copy snapshots mutable collection inputs`() {
-        val base = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
+        val base = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
         val copyActions = mutableMapOf<Syscall, SeccompAction>(Syscall.GETPID to SeccompAction.ACT_ERRNO())
         val copyReads = mutableSetOf(SandboxedPath.of("/tmp", allowNonExistent = true))
         val copyWrites = mutableSetOf(SandboxedPath.of("/var/tmp", allowNonExistent = true))
@@ -156,6 +156,66 @@ class PolicyBuilderContractTest {
         } finally {
             PolicyCompilationCache.clear()
         }
+    }
+
+    @Test
+    fun `process builder rejects raw filesystem intent before adopting it`() {
+        val path = SandboxedPath.of("/tmp/forged", allowNonExistent = true)
+        val withPaths = PolicyDefinition<PolicyScope.ProcessWideSafe>(allowedFsReadPaths = setOf(path))
+        val activeEmpty = PolicyDefinition<PolicyScope.ProcessWideSafe>(enforceLandlock = true)
+        val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+        val pathFailure = assertThrows(IllegalArgumentException::class.java) { builder.base(withPaths) }
+        val emptyFailure = assertThrows(IllegalArgumentException::class.java) { builder.base(activeEmpty) }
+
+        assertTrue(pathFailure.message.orEmpty().contains("worker filesystem intent"))
+        assertTrue(emptyFailure.message.orEmpty().contains("worker filesystem intent"))
+        assertFalse(builder.build().definition.enforceLandlock)
+        assertTrue(
+            builder
+                .build()
+                .definition
+                .allowedFsReadPaths
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun `process preset copy rejects filesystem intent`() {
+        val path = SandboxedPath.of("/tmp/forged", allowNonExistent = true)
+        val presetFailure =
+            assertThrows(IllegalArgumentException::class.java) {
+                PolicyPresets.NO_EXEC.copy(allowedFsReadPaths = setOf(path))
+            }
+        val combined = PolicyDefinition.intersection(PolicyPresets.NO_EXEC, PolicyPresets.NO_NETWORK)
+        val combinedFailure =
+            assertThrows(IllegalArgumentException::class.java) {
+                combined.copy(enforceLandlock = true)
+            }
+        assertTrue(presetFailure.message.orEmpty().contains("worker filesystem intent"))
+        assertTrue(combinedFailure.message.orEmpty().contains("worker filesystem intent"))
+        assertFalse(PolicyPresets.NO_EXEC.enforceLandlock)
+    }
+
+    @Test
+    fun `process copy and install reject filesystem intent that worker construction keeps`() {
+        val process = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
+        val path = SandboxedPath.of("/tmp/forged", allowNonExistent = true)
+        val copyFailure =
+            assertThrows(IllegalArgumentException::class.java) {
+                process.copy(allowedFsReadPaths = setOf(path))
+            }
+        val installFailure =
+            assertThrows(IllegalArgumentException::class.java) {
+                ContainedExecutors.installOnProcess(
+                    Policy(PolicyDefinition<PolicyScope.ProcessWideSafe>(enforceLandlock = true)),
+                )
+            }
+        assertTrue(copyFailure.message.orEmpty().contains("worker filesystem intent"))
+        assertTrue(installFailure.message.orEmpty().contains("worker filesystem intent"))
+
+        val worker = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).filesystem(FileSystemPolicy.DenyAll).build()
+        assertTrue(worker.definition.enforceLandlock)
+        assertEquals(SeccompAction.ACT_ERRNO(), process.copy(syscallActions = mapOf(Syscall.GETPID to SeccompAction.ACT_ERRNO())).syscallActions[Syscall.GETPID])
     }
 
     @Test

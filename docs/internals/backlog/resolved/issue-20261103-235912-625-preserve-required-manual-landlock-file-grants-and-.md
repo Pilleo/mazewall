@@ -1,7 +1,7 @@
 ---
 title: "Preserve required manual Landlock file grants and acquisition failures"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Preserve required manual Landlock file grants and acquisition failures
 
 **Context:**
-Repository-wide review, 2026-11-04: [BPF-06](../reviews/2026-11-04-repository-review-findings.md#bpf-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [BPF-06](../../reviews/2026-11-04-repository-review-findings.md#bpf-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · source-confirmed correctness/fail-closed-reporting defect; mask computation corroborated, kernel operation not run · high confidence · manual Landlock installation. NEW bounded gap, not the prepared-resource path.**
 
@@ -30,6 +30,14 @@ The same manual path also logs and returns on explicit path-open errors, includi
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution Evidence (2026-11-27)
+
+- An existing-file rule keeps only Linux `ACCESS_FILE` bits, so a write grant no longer includes `MAKE_REG` or `REMOVE_FILE`.
+- A symlink or other `landlock_add_rule` failure fails the install with the original errno. A missing path (`ENOENT`) still skips, because the iterative profiler reinstalls learned paths that do not exist yet. The parent-directory fallback for a not-yet-created write grant remains a real rule.
+- `LandlockFailureModeTest` covers the file-write mask and open `EACCES` / add-rule `EPERM` rejection under `FAIL`, `WARN_AND_BYPASS`, and `SILENT_BYPASS`. Prepared grants were not changed.
+- `LandlockTest.exact file write grant denies sibling` passed on this kernel: the granted file was written and the sibling stayed `keep`.
+- `./gradlew build` passed in 14m 46s, then the confined kernel lane verified confined-helper mounts, identity, namespace, and ownership.
 
 ---
 <!-- id: issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-  file: issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md -->

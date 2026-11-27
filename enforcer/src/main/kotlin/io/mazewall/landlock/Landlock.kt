@@ -191,6 +191,14 @@ internal object Landlock {
     /** Allow `ioctl` on device files. ABI v5+ (Linux 6.10). */
     const val LANDLOCK_ACCESS_FS_IOCTL_DEV = (1L shl 15)
 
+    /** Linux `ACCESS_FILE`. Other bits make `landlock_add_rule` return EINVAL on a non-directory. */
+    private const val FILE_RULE_ACCESS =
+        LANDLOCK_ACCESS_FS_EXECUTE or
+            LANDLOCK_ACCESS_FS_WRITE_FILE or
+            LANDLOCK_ACCESS_FS_READ_FILE or
+            LANDLOCK_ACCESS_FS_TRUNCATE or
+            LANDLOCK_ACCESS_FS_IOCTL_DEV
+
     // ── Network access flags ───────────────────────────────────────────
     // These flags correspond to a bit in the kernel's `handled_access_net` /
     // `allowed_access` bitmask. Added in ABI v4 (Linux 6.7).
@@ -425,7 +433,10 @@ internal object Landlock {
         val (pathFd, isFallback) = when (openRes) {
             is OpenResult.Success -> openRes.fd to openRes.isFallback
             is OpenResult.Error -> {
-                logOpenFailure(resolvedPath, openRes.errno)
+                if (openRes.errno != NativeConstants.ENOENT) {
+                    error("Could not open path $resolvedPath for landlock rule: errno ${openRes.errno}")
+                }
+                logger.warning("Could not open path $resolvedPath for landlock rule: errno ${openRes.errno}")
                 return
             }
         }
@@ -477,26 +488,17 @@ internal object Landlock {
         }
     }
 
-    private fun logOpenFailure(
-        path: String,
-        errno: Int,
-    ) {
-        if (errno == NativeConstants.ELOOP) {
-            logger.warning("Path $path is a symlink and was rejected (O_NOFOLLOW). Use the resolved real path instead.")
-        } else {
-            logger.warning("Could not open path $path for landlock rule: errno $errno")
-        }
-    }
-
     private fun calculateFinalAccess(
         allowedAccess: Long,
         isFallback: Boolean,
         resolvedPath: String,
     ): Long {
-        if (isFallback || File(resolvedPath).isFile) {
-            val dirOnlyFlags = LANDLOCK_ACCESS_FS_READ_DIR or LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_DIR
-            return allowedAccess and dirOnlyFlags.inv()
+        if (isFallback) {
+            val parentNarrowing = LANDLOCK_ACCESS_FS_READ_DIR or LANDLOCK_ACCESS_FS_MAKE_DIR or LANDLOCK_ACCESS_FS_REMOVE_DIR
+            return allowedAccess and parentNarrowing.inv()
         }
+        // Linux rejects any bit outside ACCESS_FILE on a non-directory.
+        if (File(resolvedPath).isFile) return allowedAccess and FILE_RULE_ACCESS
         return allowedAccess
     }
 
@@ -508,13 +510,7 @@ internal object Landlock {
     ) {
         when (val res = addRuleToRuleset(ruleset, pathFd, access)) {
             is AddRuleResult.Success -> {}
-            is AddRuleResult.Error -> {
-                if (res.errno == NativeConstants.EINVAL) {
-                    logger.warning("landlock_add_rule rejected $path (EINVAL) — path may be a symlink or unsupported inode type.")
-                } else {
-                    throw IllegalStateException("landlock_add_rule failed for $path with errno ${res.errno}")
-                }
-            }
+            is AddRuleResult.Error -> error("landlock_add_rule failed for $path with errno ${res.errno}")
         }
     }
 

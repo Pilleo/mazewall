@@ -45,6 +45,10 @@ public class PolicyDefinition<out S : PolicyScope>(
     public val customViolationPhrases: List<String> = java.util.List.copyOf(customViolationPhrases)
     public val customViolationRegexes: List<Regex> = java.util.List.copyOf(customViolationRegexes)
 
+    /** Set only by process construction. Not part of equality: the type argument is not a runtime witness. */
+    @Volatile
+    private var scopeClaim: ScopeClaim = ScopeClaim.UNSTATED
+
     public operator fun component1(): SeccompAction = defaultAction
 
     public operator fun component2(): Map<Syscall, SeccompAction> = syscallActions
@@ -79,20 +83,37 @@ public class PolicyDefinition<out S : PolicyScope>(
         enforceLandlock: Boolean = this.enforceLandlock,
         customViolationPhrases: List<String> = this.customViolationPhrases,
         customViolationRegexes: List<Regex> = this.customViolationRegexes,
-    ): PolicyDefinition<S> =
-        PolicyDefinition(
-            defaultAction = defaultAction,
-            syscallActions = syscallActions,
-            allowMmapExec = allowMmapExec,
-            allowNonThreadClone = allowNonThreadClone,
-            allowUnsafePrctl = allowUnsafePrctl,
-            lockIntelCet = lockIntelCet,
-            allowedFsReadPaths = allowedFsReadPaths,
-            allowedFsWritePaths = allowedFsWritePaths,
-            enforceLandlock = enforceLandlock,
-            customViolationPhrases = customViolationPhrases,
-            customViolationRegexes = customViolationRegexes,
-        )
+    ): PolicyDefinition<S> {
+        val copied =
+            PolicyDefinition<S>(
+                defaultAction = defaultAction,
+                syscallActions = syscallActions,
+                allowMmapExec = allowMmapExec,
+                allowNonThreadClone = allowNonThreadClone,
+                allowUnsafePrctl = allowUnsafePrctl,
+                lockIntelCet = lockIntelCet,
+                allowedFsReadPaths = allowedFsReadPaths,
+                allowedFsWritePaths = allowedFsWritePaths,
+                enforceLandlock = enforceLandlock,
+                customViolationPhrases = customViolationPhrases,
+                customViolationRegexes = customViolationRegexes,
+            )
+        copied.adoptProcessClaimFrom(this)
+        return copied
+    }
+
+    internal fun claimProcessScope() {
+        requireNoWorkerFilesystemIntent()
+        scopeClaim = ScopeClaim.PROCESS
+    }
+
+    internal fun isProcessClaimed(): Boolean = scopeClaim == ScopeClaim.PROCESS
+
+    private fun adoptProcessClaimFrom(source: PolicyDefinition<*>) {
+        if (source.scopeClaim == ScopeClaim.PROCESS) claimProcessScope()
+    }
+
+    private enum class ScopeClaim { UNSTATED, PROCESS }
 
     override fun equals(other: Any?): Boolean = this === other || (other is PolicyDefinition<*> && hasSameScalarRules(other) && hasSameCollections(other))
 
@@ -168,7 +189,11 @@ public class PolicyDefinition<out S : PolicyScope>(
          * Composes multiple policies into a single one.
          * Prefer [intersection] when the intent is "strictest wins".
          */
-        public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> = combineAll(policies.asList())
+        public fun <S : PolicyScope> combine(vararg policies: PolicyDefinition<out S>): PolicyDefinition<S> {
+            val combined = combineAll(policies.asList())
+            if (policies.all { it.isProcessClaimed() }) combined.claimProcessScope()
+            return combined
+        }
 
         internal fun <S : PolicyScope> combineAll(policies: List<PolicyDefinition<S>>): PolicyDefinition<S> {
             require(policies.isNotEmpty()) { "At least one policy is required" }
@@ -280,6 +305,19 @@ public class PolicyDefinition<out S : PolicyScope>(
  * Returns a defensively snapshotted copy of all collection properties (O(1) no-op for already-frozen
  * Java unmodifiable collections, while re-snapshotting if an internal collection field was replaced).
  */
+internal fun PolicyDefinition<*>.hasWorkerFilesystemIntent(): Boolean = enforceLandlock || allowedFsReadPaths.isNotEmpty() || allowedFsWritePaths.isNotEmpty()
+
+internal fun PolicyDefinition<*>.requireNoWorkerFilesystemIntent() {
+    require(!hasWorkerFilesystemIntent()) { "Process policies cannot contain worker filesystem intent" }
+}
+
+/** Process installation must call this before Landlock or any other effect. */
+internal fun acceptedProcessDefinition(definitions: List<PolicyDefinition<PolicyScope.ProcessWideSafe>>): PolicyDefinition<PolicyScope.ProcessWideSafe> {
+    val combined = PolicyDefinition.combineAll(definitions)
+    combined.claimProcessScope()
+    return combined
+}
+
 internal fun <S : PolicyScope> PolicyDefinition<S>.frozenCopy(): PolicyDefinition<S> =
     copy(
         syscallActions = java.util.Map.copyOf(syscallActions),

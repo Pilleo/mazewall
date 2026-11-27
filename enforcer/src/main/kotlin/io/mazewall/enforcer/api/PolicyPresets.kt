@@ -14,7 +14,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val PURE_COMPUTE_UNSAFE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
@@ -42,7 +43,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val NO_EXEC: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .block(Syscall.IO_URING_SETUP, Syscall.IO_URING_ENTER)
             .build()
@@ -53,7 +55,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val NO_EXEC_HOTSPOT: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .base(NO_EXEC)
             .forRuntime(RuntimeProfile.HOTSPOT_JIT)
             .build()
@@ -69,7 +72,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val NO_NETWORK: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.RECVMMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)
             .build()
@@ -82,7 +86,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val NO_EXEC_NO_FS_WRITE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .base(NO_EXEC)
             .block(Syscall.RENAME, Syscall.RENAMEAT, Syscall.RENAMEAT2)
             .block(Syscall.LINK, Syscall.LINKAT, Syscall.UNLINK, Syscall.UNLINKAT)
@@ -99,7 +104,8 @@ public object PolicyPresets {
      */
     @JvmField
     public val DEFAULT_SAFE: PolicyDefinition<PolicyScope.ProcessWideSafe> =
-        PolicyBuilder<PolicyScope.ProcessWideSafe>()
+        PolicyBuilder
+            .process()
             .base(NO_EXEC_HOTSPOT)
             .block(Syscall.CONNECT, Syscall.SENDTO, Syscall.SENDMSG, Syscall.SENDMMSG, Syscall.SOCKET)
             .block(Syscall.BIND, Syscall.LISTEN, Syscall.ACCEPT, Syscall.ACCEPT4)

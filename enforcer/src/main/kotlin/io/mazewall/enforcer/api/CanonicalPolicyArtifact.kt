@@ -26,7 +26,8 @@ public sealed class CanonicalPolicyArtifact(
         public val policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled> get() = Policy(definition)
 
         init {
-            require(!definition.enforceLandlock && definition.allowedFsReadPaths.isEmpty() && definition.allowedFsWritePaths.isEmpty()) { "Process artifacts cannot contain worker filesystem intent" }
+            this.definition.requireNoWorkerFilesystemIntent()
+            this.definition.claimProcessScope()
         }
     }
 
