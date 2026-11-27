@@ -1,7 +1,7 @@
 ---
 title: "Preserve typed ADDFD notification-gone and native-error outcomes"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: LOW]: Preserve typed ADDFD notification-gone and native-error outcomes
 
 **Context:**
-Repository-wide review, 2026-11-04: [SUP-06](../reviews/2026-11-04-repository-review-findings.md#sup-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [SUP-06](../../reviews/2026-11-04-repository-review-findings.md#sup-06). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P3 · source-confirmed · high confidence · terminal outcome diagnostics.**
 
@@ -32,6 +32,17 @@ Repository-wide review, 2026-11-04: [SUP-06](../reviews/2026-11-04-repository-re
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution — 2026-11-26
+
+SEND and ADDFD use the same ENOENT classification. Other kernel failures
+carry their exact errno and operation. Unconfirmed supervisor failures use
+an explicit supervisor outcome, and a failed reply cannot carry a sent outcome.
+
+JDK 25 tests fault-inject ENOENT, EACCES and repeated EINTR. They assert the
+typed result, the bounded attempt count, no fallback reply, and one source
+descriptor close.
+[Reply authority contract](../../designs/core/notification-liveness-contract.md#reactor-deadline-and-reply-authority)
 
 ---
 <!-- id: issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-  file: issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md -->

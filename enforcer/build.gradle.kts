@@ -258,11 +258,13 @@ pitest {
     // Core security logic must have high mutation coverage
     targetClasses.set(
         setOf(
-            "io.mazewall.Policy*",
-            "io.mazewall.BpfFilter*",
-            "io.mazewall.SbobParser*",
+            "io.mazewall.enforcer.api.Policy",
+            "io.mazewall.enforcer.api.Policy\$*",
+            "io.mazewall.enforcer.api.PolicyKt",
+            "io.mazewall.enforcer.internal.seccomp.BpfFilter*",
+            "io.mazewall.enforcer.api.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
-            "io.mazewall.enforcer.PolicyCombining*",
+            "io.mazewall.enforcer.api.PolicyDefinition*",
             "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine*",
             "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
@@ -283,9 +285,9 @@ pitest {
     // PBTs run hundreds of iterations per mutant, causing combinatorial explosion and minion timeouts.
     targetTests.set(
         setOf(
-            "io.mazewall.PolicyTest",
+            "io.mazewall.enforcer.api.PolicyTest",
             "io.mazewall.seccomp.BpfFilterTest",
-            "io.mazewall.SbobParserTest",
+            "io.mazewall.enforcer.api.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
             "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachineTest",
             "io.mazewall.enforcer.ContainmentStateRegistryTest",

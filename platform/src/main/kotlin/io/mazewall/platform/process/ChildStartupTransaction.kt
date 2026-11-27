@@ -57,9 +57,34 @@ internal class ChildStartupTransaction private constructor(
         onLine: (String) -> Unit,
         threadName: String,
         onStreamClosed: () -> Unit = {},
-    ) {
+    ): Unit =
+        acquireOutputPump {
+            JvmChildProcess.startStdoutPump(resources.process, sentinel, onLine, threadName, onStreamClosed)
+        }
+
+    internal fun startBoundedOutputPump(
+        sentinel: String,
+        maxLineChars: Int,
+        onLine: (String) -> Unit,
+        onOversizedLine: () -> Unit,
+        threadName: String,
+        onStreamClosed: () -> Unit,
+    ): Unit =
+        acquireOutputPump {
+            JvmChildProcess.startBoundedStdoutPump(
+                resources.process,
+                sentinel,
+                maxLineChars,
+                onLine,
+                onOversizedLine,
+                threadName,
+                onStreamClosed,
+            )
+        }
+
+    private fun acquireOutputPump(startPump: () -> ChildStdoutPump) {
         check(!committed && !resources.isClosed && resources.pump == null) { "Startup closed or output pump already acquired" }
-        resources.pump = JvmChildProcess.startStdoutPump(resources.process, sentinel, onLine, threadName, onStreamClosed)
+        resources.pump = startPump()
     }
 
     public fun registerShutdownHook() = registerShutdownHook {}

@@ -37,7 +37,6 @@ class LockdownJavaApiTest {
 
         List<Class<?>> apiTypes = List.of(
             Mazewall.class,
-            MazewallAgent.class,
             ProcessPolicy.class,
             ProcessInstallation.class,
             RuntimeProfile.class,
@@ -95,15 +94,6 @@ class LockdownJavaApiTest {
         assertThrows(NullPointerException.class, () -> elastic.block(Arrays.asList(LockdownSyscall.BPF, null)));
         assertThrows(NullPointerException.class, () -> elastic.unblock((LockdownSyscall) null));
         assertThrows(NullPointerException.class, () -> elastic.unblock(Arrays.asList(LockdownSyscall.FORK, null)));
-
-        ProcessPolicy agentPolicy = MazewallAgent.parsePolicy("preset=elasticsearch,block=memfd_create");
-        assertEquals(Set.of(
-            LockdownSyscall.EXECVE,
-            LockdownSyscall.EXECVEAT,
-            LockdownSyscall.FORK,
-            LockdownSyscall.VFORK,
-            LockdownSyscall.MEMFD_CREATE
-        ), agentPolicy.blockedSyscalls());
     }
 
     @Test

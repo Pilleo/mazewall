@@ -3,10 +3,23 @@ package io.mazewall.profiler.internal.engine
 /** Private profiler protocol, independent of supervisor authorization verdicts. */
 internal sealed interface ProfilerAckOutcome {
     data class Acknowledged(
-        val shutdown: Boolean,
+        val action: Action,
     ) : ProfilerAckOutcome
 
-    data object PassThrough : ProfilerAckOutcome
+    enum class Action {
+        Continue,
+        PassThrough,
+        Shutdown,
+        ;
+
+        fun withPendingPassThrough(requested: Boolean): Action =
+            when (this) {
+                Continue -> if (requested) PassThrough else Continue
+                PassThrough, Shutdown -> this
+            }
+    }
+
+    data object PassThroughRequested : ProfilerAckOutcome
 
     data class Rejected(
         val reason: ProfilerHandshakeFailure,
@@ -20,13 +33,18 @@ internal sealed interface ProfilerAckOutcome {
                     it != PROTOCOL_ACK_BYTE && it != PASS_THROUGH_COMMAND_BYTE && it != SHUTDOWN_COMMAND_BYTE
                 }
             ) {
-                    return Rejected(ProfilerHandshakeFailure.MalformedReply)
-                }
-            return when {
-                PASS_THROUGH_COMMAND_BYTE in bytes -> PassThrough
-                PROTOCOL_ACK_BYTE in bytes -> Acknowledged(SHUTDOWN_COMMAND_BYTE in bytes)
-                else -> Rejected(ProfilerHandshakeFailure.Shutdown)
+                return Rejected(ProfilerHandshakeFailure.MalformedReply)
             }
+            if (PROTOCOL_ACK_BYTE in bytes) {
+                return Acknowledged(
+                    when {
+                        SHUTDOWN_COMMAND_BYTE in bytes -> Action.Shutdown
+                        PASS_THROUGH_COMMAND_BYTE in bytes -> Action.PassThrough
+                        else -> Action.Continue
+                    },
+                )
+            }
+            return if (SHUTDOWN_COMMAND_BYTE in bytes) Rejected(ProfilerHandshakeFailure.Shutdown) else PassThroughRequested
         }
     }
 }

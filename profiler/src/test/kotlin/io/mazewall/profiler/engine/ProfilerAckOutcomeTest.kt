@@ -12,9 +12,13 @@ class ProfilerAckOutcomeTest {
     @Test
     fun `ACK parser preserves valid command precedence and rejects mixed unknown bytes`() {
         val cases = listOf(
-            byteArrayOf(0xAC.toByte()) to ProfilerAckOutcome.Acknowledged(false),
-            byteArrayOf(0xAC.toByte(), 0x53) to ProfilerAckOutcome.Acknowledged(true),
-            byteArrayOf(0x54) to ProfilerAckOutcome.PassThrough,
+            byteArrayOf(0xAC.toByte()) to ProfilerAckOutcome.Acknowledged(ProfilerAckOutcome.Action.Continue),
+            byteArrayOf(0xAC.toByte(), 0x53) to ProfilerAckOutcome.Acknowledged(ProfilerAckOutcome.Action.Shutdown),
+            byteArrayOf(0x54) to ProfilerAckOutcome.PassThroughRequested,
+            byteArrayOf(0x54, 0xAC.toByte()) to ProfilerAckOutcome.Acknowledged(ProfilerAckOutcome.Action.PassThrough),
+            byteArrayOf(0xAC.toByte(), 0x54) to ProfilerAckOutcome.Acknowledged(ProfilerAckOutcome.Action.PassThrough),
+            byteArrayOf(0x54, 0x53, 0xAC.toByte()) to ProfilerAckOutcome.Acknowledged(ProfilerAckOutcome.Action.Shutdown),
+            byteArrayOf(0x54, 0x53) to ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Shutdown),
             byteArrayOf(0x53) to ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.Shutdown),
             byteArrayOf() to ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.MalformedReply),
             byteArrayOf(0xAC.toByte(), 0x00) to ProfilerAckOutcome.Rejected(ProfilerHandshakeFailure.MalformedReply),

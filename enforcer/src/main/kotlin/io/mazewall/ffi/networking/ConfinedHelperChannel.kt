@@ -167,7 +167,7 @@ internal class ConfinedHelperChannel(
                 return result
             }
         }
-        val sent = SupervisorSocketUtils.sendDescriptor(socket.value, owner.handle.value, checked) {
+        val sent = SupervisorSocketUtils.sendDescriptor(socket, owner.handle, checked) {
             await(NativeConstants.POLLOUT, deadline)
             guard(deadline)
         }

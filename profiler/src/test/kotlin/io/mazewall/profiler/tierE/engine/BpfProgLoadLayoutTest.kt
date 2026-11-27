@@ -2,6 +2,7 @@ package io.mazewall.profiler.tierE.engine
 import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.ffi.memory.native
+import io.mazewall.platform.lifecycle.testAcquisition
 import io.mazewall.platform.native.*
 import io.mazewall.platform.native.LinuxNative.SyscallHandledState
 import io.mazewall.platform.native.LinuxNative.SyscallResult
@@ -296,7 +297,8 @@ class BpfProgLoadLayoutTest {
                     0L, 5L, 17L, 18L -> (71L + acquired.size).also(acquired::add)
                     else -> 0L
                 }
-                SyscallResult.Success(value)
+                val result = SyscallResult.Success<Long, SyscallHandledState.Unhandled>(value)
+                if (a1.asLong == 0L) result.testAcquisition() else result
             }
             Syscall.MMAP.numberFor(Arch.current()).toLong() -> SyscallResult.Success(arena.allocate(a2.asLong, 4096).address())
             Syscall.MUNMAP.numberFor(Arch.current()).toLong() -> {
@@ -338,7 +340,7 @@ class BpfProgLoadLayoutTest {
                     val number = args[0] as Long
                     when (number) {
                         Syscall.BPF.numberFor(Arch.current()).toLong() -> when (++bpfCalls) {
-                            1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
+                            1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L).testAcquisition()
                             else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1)
                         }
                         Arch.current().close.toLong() -> {
@@ -367,7 +369,7 @@ class BpfProgLoadLayoutTest {
             when (method.name) {
                 "syscall" -> when (args[0] as Long) {
                     Syscall.BPF.numberFor(Arch.current()).toLong() -> when (++bpfCalls) {
-                        1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L)
+                        1 -> SyscallResult.Success<Long, SyscallHandledState.Unhandled>(71L).testAcquisition()
                         else -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)
                     }
                     Arch.current().close.toLong() -> SyscallResult.Error<SyscallHandledState.Unhandled>(5, -1L)

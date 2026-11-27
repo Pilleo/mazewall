@@ -6,6 +6,16 @@ import java.util.concurrent.TimeUnit
 
 internal enum class SeccompInstallStage { Prepared, Applied, Transferred, Ready }
 
+internal sealed interface SeccompListenerStartup {
+    data object Ready : SeccompListenerStartup
+
+    data class Failed(
+        val cause: Throwable,
+    ) : SeccompListenerStartup
+}
+
+internal typealias ListenerStartupReporter = (SeccompListenerStartup) -> Unit
+
 internal sealed interface SeccompInstallState {
     val stage: SeccompInstallStage
 
@@ -131,7 +141,7 @@ internal class SeccompInstallHandshake(
     fun checkActive() {
         when (val current = state) {
             is SeccompInstallState.Failed -> throw current.cause
-            is SeccompInstallState.Pending -> if (deadline.nanoTime - nanoTime() <= 0) {
+            is SeccompInstallState.Pending -> if (deadline.isExpired(nanoTime())) {
                 fail(timeout)
                 throw timeout
             }
@@ -144,8 +154,8 @@ internal class SeccompInstallHandshake(
         try {
             while (true) {
                 checkActive()
-                val remaining = deadline.nanoTime - nanoTime()
-                if (remaining <= 0) {
+                val remaining = deadline.remainingNanos(nanoTime())
+                if (remaining == 0L) {
                     fail(timeout)
                     throw timeout
                 }

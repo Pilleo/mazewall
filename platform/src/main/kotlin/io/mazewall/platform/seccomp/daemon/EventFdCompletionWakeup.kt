@@ -9,6 +9,7 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.ResourceRetirement
 import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
@@ -50,11 +51,10 @@ internal interface SessionCompletionWakeup :
 internal class EventFdCompletionWakeup private constructor(
     private val engine: NativeEngine,
     private val fd: FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned>,
+    private val arena: NativeArena,
+    private val writeBuffer: ManagedSegment,
+    private val readBuffer: ManagedSegment,
 ) : SessionCompletionWakeup {
-    private val arena = NativeArena.ofShared()
-    private val writeBuffer: ManagedSegment = arena.allocate(COUNTER_BYTES)
-    private val readBuffer: ManagedSegment = arena.allocate(COUNTER_BYTES)
-
     private enum class Phase { OPEN, CLOSING, IN_FLIGHT, COMPLETE, UNKNOWN }
 
     private val gate = Any()
@@ -146,10 +146,7 @@ internal class EventFdCompletionWakeup private constructor(
         }
         if (prior != null) return prior
         return try {
-            when (val result = engine.fileSystem.close(fd)) {
-                is LinuxNative.SyscallResult.Success -> fd.markClosed()
-                is LinuxNative.SyscallResult.Error -> result.throwErrno("close eventfd completion wakeup")
-            }
+            closeDescriptor(engine, fd)
             arena.close()
             synchronized(gate) { phase = Phase.COMPLETE }
             SessionRetirement.Complete
@@ -167,7 +164,10 @@ internal class EventFdCompletionWakeup private constructor(
         private const val EFD_NONBLOCK = NativeConstants.O_NONBLOCK
         private const val EFD_CLOEXEC = NativeConstants.O_CLOEXEC
 
-        fun create(engine: NativeEngine): EventFdCompletionWakeup {
+        fun create(
+            engine: NativeEngine,
+            allocateBuffer: (NativeArena) -> ManagedSegment = { it.allocate(COUNTER_BYTES) },
+        ): EventFdCompletionWakeup {
             val syscallNumber = when (Arch.current().name) {
                 "amd64" -> 290L
                 "aarch64" -> 19L
@@ -180,7 +180,27 @@ internal class EventFdCompletionWakeup private constructor(
                 NativeArg.LongArg(0L),
                 NativeArg.LongArg(flags),
             ).recordDescriptorAcquisition()
-            return EventFdCompletionWakeup(engine, result.getFdOrThrow("eventfd2 completion wakeup", FileDescriptorRole.Generic))
+            val fd = result.getFdOrThrow("eventfd2 completion wakeup", FileDescriptorRole.Generic)
+            return ResourceRetirement.runWithRollback(
+                action = {
+                    val arena = NativeArena.ofShared()
+                    ResourceRetirement.runWithRollback(
+                        action = { EventFdCompletionWakeup(engine, fd, arena, allocateBuffer(arena), allocateBuffer(arena)) },
+                        rollback = arena::close,
+                    )
+                },
+                rollback = { closeDescriptor(engine, fd) },
+            )
+        }
+
+        private fun closeDescriptor(
+            engine: NativeEngine,
+            fd: FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned>,
+        ) {
+            when (val result = engine.fileSystem.close(fd)) {
+                is LinuxNative.SyscallResult.Success -> fd.markClosed()
+                is LinuxNative.SyscallResult.Error -> result.throwErrno("close eventfd completion wakeup")
+            }
         }
     }
 }

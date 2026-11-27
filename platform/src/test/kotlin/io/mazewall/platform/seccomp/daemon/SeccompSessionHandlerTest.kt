@@ -9,6 +9,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.ffi.memory.SeccompSessionBuffers
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
@@ -27,8 +28,88 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class SeccompSessionHandlerTest {
+    @ParameterizedTest
+    @ValueSource(ints = [NativeConstants.F_GETFL, NativeConstants.F_SETFL])
+    fun `failed listener setup closes the wakeup and preserves the setup error`(failingCommand: Int) {
+        val engine = object : MockNativeEngine() {
+            override fun fcntl(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                cmd: Int,
+                arg: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                if (cmd == failingCommand) LinuxNative.SyscallResult.Error(NativeConstants.EACCES, -1) else super.fcntl(fd, cmd, arg)
+        }
+        val cleanup = IllegalStateException("injected wakeup close failure")
+        val wakeup = StartupWakeup(cleanup)
+
+        val error = assertThrows<IllegalStateException> { startSession(engine, wakeup) }
+
+        assertTrue(error.message.orEmpty().contains("errno=${NativeConstants.EACCES}"))
+        assertEquals(1, wakeup.closes)
+        assertEquals(listOf(cleanup), error.suppressed.toList())
+    }
+
+    @Test
+    fun `failed session buffer acquisition closes the wakeup and preserves the allocation error`() {
+        val allocation = IllegalStateException("injected buffer acquisition failure")
+        val cleanup = IllegalStateException("injected wakeup close failure")
+        val wakeup = StartupWakeup(cleanup)
+        val engine = MockNativeEngine().apply {
+            fileSystem.onClose = { error("the enclosing connection owns the socket and listener") }
+        }
+
+        val error = assertThrows<IllegalStateException> { startSession(engine, wakeup) { throw allocation } }
+
+        kotlin.test.assertSame(allocation, error)
+        assertEquals(1, wakeup.closes)
+        assertEquals(listOf(cleanup), error.suppressed.toList())
+    }
+
+    private class StartupWakeup(
+        private val cleanup: IllegalStateException,
+    ) : SessionCompletionWakeup {
+        override val pollFd: Int = -1
+        var closes = 0
+            private set
+
+        override fun signal() = error("unused")
+
+        override fun drain() = error("unused")
+
+        override fun close() {
+            closes++
+            throw cleanup
+        }
+    }
+
+    private fun startSession(
+        engine: NativeEngine,
+        wakeup: SessionCompletionWakeup,
+        acquireBuffers: () -> SeccompSessionBuffers = { SeccompSessionBuffers.acquire() },
+    ): SeccompSessionHandler =
+        SeccompSessionHandler(
+            TestFileDescriptors.replace(10),
+            TestFileDescriptors.replace(11),
+            object : SeccompNotifHandler {
+                context(arena: NativeArena) override fun beginNotification(
+                    notif: ManagedSegment,
+                    resp: ManagedSegment,
+                    listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                    socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+                    deadline: Deadline,
+                ): NotificationWork = error("unused")
+            },
+            engine = engine,
+            socketManager = recordingSocketManager {},
+            providedCompletionWakeup = wakeup,
+            acquireBuffers = acquireBuffers,
+        )
+
     @Test
     fun `fake wakeup unknown is retained and not closed again`() {
         val failure = IllegalStateException("controlled wakeup close failure")

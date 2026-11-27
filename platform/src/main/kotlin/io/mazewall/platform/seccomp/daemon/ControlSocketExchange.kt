@@ -42,6 +42,12 @@ internal class ControlSocketExchange(
 
     public val requestSent: Boolean get() = sent == request.size
 
+    /** Consumes an intermediate response without retransmitting or renewing the deadline. */
+    public fun awaitNextResponse() {
+        check(requestSent && received > 0 && received >= minimumResponseSize)
+        received = 0
+    }
+
     init {
         require(responseSize >= 0)
         require(minimumResponseSize in 0..responseSize)
@@ -58,7 +64,7 @@ internal class ControlSocketExchange(
 
     /** SUPPRESSION-RATIONALE: Null means Await; each partial transfer yields immediately to preserve one I/O attempt per poll. */
     context(arena: NativeArena) public fun poll(): ByteArray? {
-        if (nanoTime() - deadline.nanoTime >= 0) throw ControlSocketFailure(NativeConstants.ETIMEDOUT)
+        if (deadline.isExpired(nanoTime())) throw ControlSocketFailure(NativeConstants.ETIMEDOUT)
         val event = if (sent < request.size) NativeConstants.POLLOUT else NativeConstants.POLLIN
         if (!ready(event)) return null
         if (sent < request.size) {

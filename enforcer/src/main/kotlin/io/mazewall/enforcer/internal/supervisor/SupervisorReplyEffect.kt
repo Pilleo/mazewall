@@ -3,6 +3,7 @@ package io.mazewall.enforcer.internal.supervisor
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.platform.lifecycle.NewFdFlags
+import io.mazewall.platform.seccomp.UserNotifReplyResult
 
 /** Terminal intent. Only the reply interpreter may turn one of these values into a kernel reply. */
 internal sealed interface SupervisorReplyEffect {
@@ -65,7 +66,13 @@ internal sealed interface ReplyExecutionResult {
 
     data class ReplyFailed(
         val cause: Throwable,
-        val outcome: io.mazewall.platform.seccomp.UserNotifReplyResult = io.mazewall.platform.seccomp.UserNotifReplyResult
-            .Failed(NativeConstants.EIO),
-    ) : ReplyExecutionResult
+        val outcome: UserNotifReplyResult.NotSent,
+    ) : ReplyExecutionResult {
+        companion object {
+            fun unconfirmed(cause: Throwable): ReplyFailed {
+                val outcome = UserNotifReplyResult.Failed(NativeConstants.EIO, UserNotifReplyResult.Operation.SUPERVISOR)
+                return ReplyFailed(cause, outcome)
+            }
+        }
+    }
 }

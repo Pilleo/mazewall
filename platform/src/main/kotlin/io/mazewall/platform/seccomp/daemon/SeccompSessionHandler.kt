@@ -15,6 +15,7 @@ import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.NativeCloseFailure
+import io.mazewall.platform.fd.ResourceRetirement
 import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
@@ -41,6 +42,7 @@ internal class SeccompSessionHandler(
     private val socketManager: SocketManager = RealSocketManager,
     private val nanoTime: () -> Long = System::nanoTime,
     providedCompletionWakeup: SessionCompletionWakeup? = null,
+    acquireBuffers: () -> SeccompSessionBuffers = { SeccompSessionBuffers.acquire() },
 ) : AutoCloseable {
     private val buffers: SeccompSessionBuffers
     private val completionWakeup: SessionCompletionWakeup = providedCompletionWakeup ?: EventFdCompletionWakeup.create(engine)
@@ -83,8 +85,13 @@ internal class SeccompSessionHandler(
     }
 
     init {
-        configureListenerNonblocking()
-        buffers = SeccompSessionBuffers.acquire()
+        buffers = ResourceRetirement.runWithRollback(
+            action = {
+                configureListenerNonblocking()
+                acquireBuffers()
+            },
+            rollback = completionWakeup::close,
+        )
     }
 
     private val ackBuf: ManagedSegment get() = buffers.ack
@@ -273,14 +280,14 @@ internal class SeccompSessionHandler(
     context(arena: NativeArena) private fun advancePending(pollFds: ManagedSegment): LoopAction {
         val current = checkNotNull(pending)
         observePending(current)
-        if (nanoTime() - current.deadline.nanoTime >= 0) return denyAndTerminate(current, expired = true)
+        if (current.deadline.isExpired(nanoTime())) return denyAndTerminate(current, expired = true)
         val progress = try {
             checkNotNull(current.work).poll()
         } catch (expectedNotificationFailure: Throwable) {
             terminateAfterFailure(current, expectedNotificationFailure)
         }
         // Local preparation may consume the last deadline tick. A late completion never wins.
-        if (nanoTime() - current.deadline.nanoTime >= 0) {
+        if (current.deadline.isExpired(nanoTime())) {
             return denyAndTerminate(current, expired = true, lateCompletion = progress is NotificationProgress.Ready)
         }
         return when (progress) {

@@ -1,7 +1,7 @@
 ---
 title: "Bound supervisor validation and daemon diagnostic retention"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Bound supervisor validation and daemon diagnostic retention
 
 **Context:**
-Repository-wide review, 2026-11-04: [SUP-05](../reviews/2026-11-04-repository-review-findings.md#sup-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [SUP-05](../../reviews/2026-11-04-repository-review-findings.md#sup-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · source-confirmed · high confidence · long-running supervised applications.**
 
@@ -37,6 +37,18 @@ Repository-wide review, 2026-11-04: [SUP-05](../reviews/2026-11-04-repository-re
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution — 2026-11-26
+
+The supervisor keeps the latest 64 complete output lines per daemon. The output
+pump discards lines beyond 2,048 UTF-16 code units while reading them. The
+unexpected-exit event and logger report the same tail and count both oversized
+and evicted lines. Validation passes stack frames to the scoping policy without
+retaining a diagnostic history.
+
+JDK 25 tests cover oversized input, readiness, a full tail, event delivery and
+a replacement daemon with separate history.
+[Diagnostic retention contract](../../designs/core/notification-liveness-contract.md#locks-stalls-and-the-watchdog-boundary)
 
 ---
 <!-- id: issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-  file: issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md -->

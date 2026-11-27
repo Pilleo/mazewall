@@ -1,7 +1,7 @@
 ---
 title: "Route every profiler executor admission through collector installation"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Route every profiler executor admission through collector installation
 
 **Context:**
-Repository-wide review, 2026-11-04: [PN05-02](../reviews/2026-11-04-repository-review-findings.md#pn05-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [PN05-02](../../reviews/2026-11-04-repository-review-findings.md#pn05-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/confidence/boundary:** reproduced dispatch defect plus source-confirmed evidence consequence; high confidence; public optional profiler executor API. Coordinate the consequence with the profiler evidence/compiler lead.
 
@@ -30,6 +30,18 @@ Repository-wide review, 2026-11-04: [PN05-02](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+## Resolution — 2026-11-26
+
+All eight ExecutorService admission methods install collection before entering
+user code. Callable and Runnable adapters preserve the delegate's overloads.
+Timed methods wrap tasks lazily so the delegate controls iteration and timeout.
+
+JDK 25 tests count one installation per fresh worker, reject user code when the
+installer fails, and observe real I/O submitted through timed bulk admission.
+
+The complete offline host build and confined Docker kernel lane passed on JDK 25.
+[Profiler executor lifecycle](../../designs/api/profiler-public-api.md#session-ownership)
 
 ---
 <!-- id: issue-20261103-235246-772-route-every-profiler-executor-admission-through-co  file: issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md -->

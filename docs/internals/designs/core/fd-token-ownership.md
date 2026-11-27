@@ -81,6 +81,19 @@ thread-local ownership recovery is provided.
 
 ### Native transfer checks
 
+Typed SCM_RIGHTS sends carry the original socket and payload tokens to the
+native boundary. Both tracked generations must be live before each send
+attempt. The attempt holds their generation locks in a consistent order so
+managed close waits for dispatch to finish. Readiness polling and retry
+callbacks run outside those locks. The raw integer send entrypoints still
+require callers to protect the descriptor lifetimes themselves.
+
+The BPF descriptor-opening API accepts only a `BpfDescriptorCommand`.
+The raw native adapter uses the same command classification to attach a
+single-use acquisition receipt. The typed helper consumes that receipt to
+produce a descriptor with the BPF role. Status-returning BPF commands use
+the raw result path.
+
 The real native boundary centrally checks managed segment/count pairs before
 passing them to FFM: nonnegative counts within segment capacity, live and
 accessible native memory, and writable output buffers. Array counts for poll

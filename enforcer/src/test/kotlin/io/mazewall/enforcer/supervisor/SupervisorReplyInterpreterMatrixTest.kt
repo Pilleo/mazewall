@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.internal.supervisor
 
 import io.mazewall.enforcer.api.*
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.writeByte
 import io.mazewall.platform.fd.*
@@ -11,6 +12,7 @@ import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.lifecycle.testAcquisition
 import io.mazewall.platform.native.*
 import io.mazewall.platform.process.*
+import io.mazewall.platform.seccomp.UserNotifReplyResult
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -112,7 +114,7 @@ class SupervisorReplyInterpreterMatrixTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = [0, 1, 13])
+    @ValueSource(ints = [0, NativeConstants.ENOENT, NativeConstants.EACCES, NativeConstants.EINTR])
     fun `atomic ADDFD SEND failure never becomes a second reply and always closes its source`(errno: Int) {
         val fixture = SupervisorBoundaryFixture()
         if (errno != 0) fixture.injectionResult = SupervisorBoundaryFixture.failure(errno)
@@ -120,9 +122,16 @@ class SupervisorReplyInterpreterMatrixTest {
         if (errno == 0) {
             assertEquals(ReplyExecutionResult.ReplySucceeded, result)
         } else {
-            assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, result)
+            val failure = assertInstanceOf(ReplyExecutionResult.ReplyFailed::class.java, result)
+            val expected = if (errno == NativeConstants.ENOENT) {
+                UserNotifReplyResult.NotificationGone
+            } else {
+                UserNotifReplyResult.Failed(errno, UserNotifReplyResult.Operation.ADDFD)
+            }
+            assertEquals(expected, failure.outcome)
         }
-        assertEquals(listOf(KernelReply(42, 0, 0, true)), fixture.replies)
+        val attempts = if (errno == NativeConstants.EINTR) 8 else 1
+        assertEquals(List(attempts) { KernelReply(42, 0, 0, true) }, fixture.replies)
         assertEquals(listOf(51002), fixture.closed)
     }
 

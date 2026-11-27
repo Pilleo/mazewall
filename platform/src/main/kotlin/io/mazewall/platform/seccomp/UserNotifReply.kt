@@ -18,16 +18,32 @@ import io.mazewall.platform.lifecycle.MazewallInternal
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.RawSyscallOperations
 
-/** The terminal outcome of one SECCOMP_IOCTL_NOTIF_SEND attempt. */
+/** The terminal outcome of a USER_NOTIF reply. */
 @MazewallInternal
 internal sealed interface UserNotifReplyResult {
     public data object Sent : UserNotifReplyResult
 
-    public data object NotificationGone : UserNotifReplyResult
+    public sealed interface NotSent : UserNotifReplyResult
+
+    public data object NotificationGone : NotSent
 
     public data class Failed(
         public val errno: Int,
-    ) : UserNotifReplyResult
+        public val operation: Operation,
+    ) : NotSent
+
+    public enum class Operation {
+        SEND,
+        ADDFD,
+        SUPERVISOR,
+    }
+
+    public companion object {
+        public fun fromErrno(
+            errno: Int,
+            operation: Operation,
+        ): NotSent = if (errno == NativeConstants.ENOENT) NotificationGone else Failed(errno, operation)
+    }
 }
 
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
@@ -89,10 +105,9 @@ internal object UserNotifReply {
             }
             return when (res) {
                 is LinuxNative.SyscallResult.Success -> UserNotifReplyResult.Sent
-                is LinuxNative.SyscallResult.Error ->
-                    if (res.errno == NativeConstants.ENOENT) UserNotifReplyResult.NotificationGone else UserNotifReplyResult.Failed(res.errno)
+                is LinuxNative.SyscallResult.Error -> UserNotifReplyResult.fromErrno(res.errno, UserNotifReplyResult.Operation.SEND)
             }
         }
-        return UserNotifReplyResult.Failed(NativeConstants.EINTR)
+        return UserNotifReplyResult.Failed(NativeConstants.EINTR, UserNotifReplyResult.Operation.SEND)
     }
 }

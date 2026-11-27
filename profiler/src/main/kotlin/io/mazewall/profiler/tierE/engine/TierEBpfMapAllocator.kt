@@ -5,6 +5,7 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.BpfDescriptorCommand
 import io.mazewall.platform.native.RawSyscallOperations
 import io.mazewall.platform.native.asBpf
 import io.mazewall.platform.native.openDescriptor
@@ -13,7 +14,6 @@ import java.lang.foreign.ValueLayout
 
 /** Owns only kernel-validated BPF map descriptors; the engine retains and closes them. */
 internal object TierEBpfMapAllocator {
-    private const val BPF_MAP_CREATE = 0L
     private const val ATTR_SIZE = 72L
     private const val TYPE_OFFSET = 0L
     private const val KEY_SIZE_OFFSET = 4L
@@ -41,6 +41,6 @@ internal object TierEBpfMapAllocator {
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_FD, btfFd)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_KEY_TYPE_ID, btfKeyTypeId)
             attr.set(ValueLayout.JAVA_INT, BpfMapCreateLayout.BTF_VALUE_TYPE_ID, btfValueTypeId)
-            native.asBpf().openDescriptor(BPF_MAP_CREATE, ConfinedSegment(attr), ATTR_SIZE, "bpf(BPF_MAP_CREATE)")
+            native.asBpf().openDescriptor(BpfDescriptorCommand.MAP_CREATE, ConfinedSegment(attr), ATTR_SIZE, "bpf(BPF_MAP_CREATE)")
         }
 }

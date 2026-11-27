@@ -115,13 +115,19 @@ public value class CloneFlags(
     override fun toString(): String = "cloneFlags($value)"
 }
 
+/** A monotonic deadline comparable by signed difference within [Long.MAX_VALUE] nanoseconds. */
 @JvmInline
 public value class Deadline(
     public val nanoTime: Long,
 ) {
-    public fun remainingMillis(nowNanoTime: Long = System.nanoTime()): Int = ((nanoTime - nowNanoTime).coerceAtLeast(0L) / 1_000_000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    internal fun remainingNanos(nowNanoTime: Long): Long = (nanoTime - nowNanoTime).coerceAtLeast(0L)
 
-    public fun isExpired(nowNanoTime: Long = System.nanoTime()): Boolean = nowNanoTime >= nanoTime
+    public fun remainingMillis(nowNanoTime: Long = System.nanoTime()): Int {
+        val millis = remainingNanos(nowNanoTime) / 1_000_000L
+        return millis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    public fun isExpired(nowNanoTime: Long = System.nanoTime()): Boolean = remainingNanos(nowNanoTime) == 0L
 
     public companion object {
         public fun afterMillis(
@@ -130,8 +136,7 @@ public value class Deadline(
         ): Deadline {
             require(ms >= 0L) { "deadline duration must be non-negative" }
             val durationNanos = if (ms > Long.MAX_VALUE / 1_000_000L) Long.MAX_VALUE else ms * 1_000_000L
-            val target = if (Long.MAX_VALUE - nowNanoTime < durationNanos) Long.MAX_VALUE else nowNanoTime + durationNanos
-            return Deadline(target)
+            return Deadline(nowNanoTime + durationNanos)
         }
     }
 }

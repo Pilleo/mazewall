@@ -2,6 +2,7 @@ package io.mazewall.profiler.api
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.ffi.networking.ListenerStartupReporter
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FileDescriptor
@@ -30,7 +31,6 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -166,7 +166,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) {
                 installCalled = true
@@ -216,7 +216,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) = Unit
         }
@@ -255,7 +255,7 @@ class ProfilerTest {
                     MutableList<TraceEvent>,
                     MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
                     MutableMap<String, Long>,
-                    CountDownLatch,
+                    ListenerStartupReporter,
                 ) -> Unit,
             ) {
                 installCount++
@@ -264,7 +264,7 @@ class ProfilerTest {
 
         val service = ProfilerService(ProfilerRuntime({ mockDaemonManager }, mockInstaller, { Tid(73) }))
 
-        val delegate = Executors.newSingleThreadExecutor()
+        val delegate = Executors.newThreadPerTaskExecutor(Thread.ofPlatform().factory())
         try {
             val wrapper = service.wrap(delegate, true, Policy.PURE_COMPUTE_UNSAFE)
 
@@ -277,8 +277,19 @@ class ProfilerTest {
             val future3 = wrapper.submit(Runnable { /* noop */ })
             future3.get()
 
+            val executed = java.util.concurrent.CountDownLatch(1)
+            val timeout = java.util.concurrent.TimeUnit.SECONDS
+            wrapper.execute { executed.countDown() }
+            assertTrue(executed.await(5, timeout))
+            val tasks = listOf(java.util.concurrent.Callable { "bulk" })
+            assertEquals("bulk", wrapper.invokeAll(tasks).single().get())
+            assertEquals("bulk", wrapper.invokeAll(tasks, 5, timeout).single().get())
+            assertEquals("bulk", wrapper.invokeAny(tasks))
+            assertEquals("bulk", wrapper.invokeAny(tasks, 5, timeout))
+
             wrapper.shutdown()
-            assertTrue(mockInstaller.installCount > 0)
+            assertTrue(wrapper.awaitTermination(5, timeout))
+            assertEquals(8, mockInstaller.installCount)
         } finally {
             delegate.shutdownNow()
         }
