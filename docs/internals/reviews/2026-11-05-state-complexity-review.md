@@ -347,7 +347,7 @@ so another restatement was deliberately not appended.
 | Surface | Technique worth implementing/preserving | Existing owner |
 |---|---|---|
 | Policy raw construction/copy | Owned immutable collections, stable equality/cache keys | [Policy snapshots](../backlog/resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
-| Process scope/filesystem intent | Validated construction, not a caller-selected phantom marker | [Validated process scope](../backlog/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
+| Process scope/filesystem intent | Validated construction, not a caller-selected phantom marker | [Validated process scope](../backlog/resolved/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
 | Installation result | Failure-first rejection; controlled outcome independent of irreversible progress | [Receipt outcomes](../backlog/resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
 | In-process and Portal invocation | `Running(worker)` payload; keep lock and result/physical-end separation | [Phase-owned worker](../backlog/issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) |
 | Broker close preparation | `AlreadyClosed | Wait(operation) | Execute(operation,…)` | [Exclusive close outcomes](../backlog/issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md) |

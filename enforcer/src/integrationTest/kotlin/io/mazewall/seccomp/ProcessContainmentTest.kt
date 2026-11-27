@@ -542,21 +542,11 @@ class ProcessContainmentTest : BaseIntegrationTest() {
             .allowMmapExec()
             .allowFsRead("/etc")
             .build()
-        val features = Platform.featureMatrix
-
-        println("LANDLOCK_SUPPORT_LIMITS nativeCaller=true landlockTsyncSupported=${features.landlockTsyncSupported}")
-
-        if (features.landlockTsyncSupported) {
-            // On modern kernels, this should at least pass our internal guard
-            // (might still fail with EACCES if sibling threads aren't ready, but that's a different error)
-            verifySupportedLandlockInstallation {
-                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
-            }
-        } else {
-            org.junit.jupiter.api.assertThrows<io.mazewall.enforcer.api.UnsupportedKernelFeatureException> {
-                ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
-            }
+        val failure = assertFailsWith<IllegalArgumentException> {
+            @Suppress("UNCHECKED_CAST")
+            ContainedExecutors.installOnProcess(policyWithFs as Policy<PolicyScope.ProcessWideSafe, Uncompiled>)
         }
+        check(failure.message.orEmpty().contains("worker filesystem intent"))
     }
 
     private fun verifySupportedLandlockInstallation(install: () -> Unit) {
@@ -672,7 +662,7 @@ class ProcessContainmentTest : BaseIntegrationTest() {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `installOnProcess respects Landlock support limits`() {
+    fun `installOnProcess rejects cast worker filesystem intent before Landlock`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testLandlockSupportLimits")
     }
 }

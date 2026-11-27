@@ -29,7 +29,11 @@ public class ProcessPolicyBuilder private constructor(
     /** Selects/merges a template; use policy intersection for restrictive composition. */
     public fun base(policy: Policy<PolicyScope.ProcessWideSafe, *>): ProcessPolicyBuilder = base(policy.definition)
 
-    public fun base(definition: PolicyDefinition<PolicyScope.ProcessWideSafe>): ProcessPolicyBuilder = apply { configuration.base(definition) }
+    public fun base(definition: PolicyDefinition<PolicyScope.ProcessWideSafe>): ProcessPolicyBuilder =
+        apply {
+            definition.requireNoWorkerFilesystemIntent()
+            configuration.base(definition)
+        }
 
     public fun forRuntime(runtime: RuntimeProfile): ProcessPolicyBuilder = apply { configuration.forRuntime(runtime) }
 
@@ -49,7 +53,11 @@ public class ProcessPolicyBuilder private constructor(
 
     public fun customViolationRegex(regex: Regex): ProcessPolicyBuilder = apply { configuration.customViolationRegex(regex) }
 
-    public fun build(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> = Policy(configuration.build())
+    public fun build(): Policy<PolicyScope.ProcessWideSafe, Uncompiled> {
+        val definition = configuration.build()
+        definition.claimProcessScope()
+        return Policy(definition)
+    }
 
     public companion object {
         @JvmStatic

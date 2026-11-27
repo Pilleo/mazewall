@@ -152,6 +152,40 @@ class LandlockTest : BaseIntegrationTest() {
         }
     }
 
+    fun testExactFileWriteDeniesSibling(
+        file: String,
+        sibling: String,
+    ) {
+        val policy =
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .base(Policy.NO_EXEC)
+                .allowMmapExec()
+                .allowJvmClasspath()
+                .allowFsWrite(file)
+                .build()
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            executor
+                .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        Files.writeString(Path.of(file), "hello")
+                        val denied =
+                            runCatching { Files.writeString(Path.of(sibling), "nope") }.exceptionOrNull()
+                                ?: throw IllegalStateException("Sibling write should have failed")
+                        val cause = denied as? AccessDeniedException ?: containmentFailureForCaller(denied)
+                        if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw cause
+                    }
+                }.get(10, TimeUnit.SECONDS)
+            assertEquals("hello", Files.readString(Path.of(file)))
+            assertEquals("keep", Files.readString(Path.of(sibling)))
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
     fun testUnconstrained() {
         val policy = WorkerPolicyBuilder
             .denyList(RuntimeProfile.NATIVE_IMAGE)
@@ -272,22 +306,19 @@ class LandlockTest : BaseIntegrationTest() {
             .build()
         val executor = Executors.newSingleThreadExecutor()
 
-        // The policy allows 'symlink', but Landlock rejects symlinks in rulesets (O_NOFOLLOW).
-        // Therefore, access to the real file should be denied.
+        // A requested symlink cannot be installed. Success must not mean the grant was dropped.
         try {
-            executor
-                .submit(
-                java.util.concurrent.Callable {
-                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
-                    receipt.requireInstalled()
-                    runCatching { Files.readString(Path.of(realFile)) }.getOrElse { throw containmentFailureForCaller(it) }
+            val failure =
+                assertFailsWith<ExecutionException> {
+                    executor
+                        .submit {
+                            ContainedExecutors.installOnCurrentThread(policy)
+                        }.get(10, TimeUnit.SECONDS)
                 }
-            },
-            ).get(10, TimeUnit.SECONDS)
-            throw IllegalStateException("Access should have been denied because the symlink rule was rejected")
-        } catch (e: ExecutionException) {
-            val cause = e.cause
-            if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
+            val cause = failure.cause
+            check(cause is IllegalStateException && cause.message.orEmpty().contains("errno 22")) {
+                "Expected symlink grant rejection for $symlink, not access to $realFile: ${cause?.message}"
+            }
         } finally {
             executor.shutdown()
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
@@ -385,23 +416,17 @@ class LandlockTest : BaseIntegrationTest() {
             .build()
         val executor = Executors.newSingleThreadExecutor()
         try {
-        val res = executor
-            .submit(
-                java.util.concurrent.Callable {
-                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
-                    receipt.requireInstalled()
-                    try {
-                        Files.readString(Path.of(linkA))
-                        "success"
-                    } catch (
-                         _: java.io.IOException,
-                    ) {
-                        "eloop"
-                    }
-                    }
-                },
-            ).get(10, TimeUnit.SECONDS)
-        if (res != "eloop") throw IllegalStateException("Expected eloop, got $res")
+            val failure =
+                assertFailsWith<ExecutionException> {
+                    executor
+                        .submit {
+                            ContainedExecutors.installOnCurrentThread(policy)
+                        }.get(10, TimeUnit.SECONDS)
+                }
+            val cause = failure.cause
+            check(cause is IllegalStateException && cause.message.orEmpty().contains("errno 22")) {
+                "Expected circular symlink grant rejection for $linkA: ${cause?.message}"
+            }
         } finally {
             executor.shutdown()
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
@@ -451,6 +476,26 @@ class LandlockTest : BaseIntegrationTest() {
         val testFile = tempDir.resolve("test.txt")
         try {
             IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testWriteBlocked", tempDir.toString(), testFile.toString())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `exact file write grant denies sibling`() {
+        val tempDir = createTempDirectory("landlock_exact_file_write")
+        val file = tempDir.resolve("granted.txt")
+        val sibling = tempDir.resolve("sibling.txt")
+        file.writeText("old")
+        sibling.writeText("keep")
+        try {
+            IsolatedProcessTester.runIsolatedMethod(
+                this::class.java.name,
+                "testExactFileWriteDeniesSibling",
+                file.toString(),
+                sibling.toString(),
+            )
         } finally {
             tempDir.toFile().deleteRecursively()
         }
@@ -599,7 +644,7 @@ class LandlockTest : BaseIntegrationTest() {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `testLandlockCircularSymlinksFailGracefully`() {
+    fun `testLandlockCircularSymlinksRejectInstall`() {
         if (!Landlock.isSupported()) return
         val dir = createTempDirectory("landlock_circular")
         val linkA = dir.resolve("linkA")

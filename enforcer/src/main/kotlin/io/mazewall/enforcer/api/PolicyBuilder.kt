@@ -43,6 +43,7 @@ internal class PolicyBuilder<S : PolicyScope> internal constructor(
     private val customViolationRegexes: MutableList<Regex> = mutableListOf(),
 ) {
     private var filesystemRestricted: Boolean = false
+    private var claimsProcessScope: Boolean = false
 
     public fun defaultAction(action: SeccompAction): PolicyBuilder<S> {
         this.defaultAction = action
@@ -239,6 +240,10 @@ internal class PolicyBuilder<S : PolicyScope> internal constructor(
             enforceLandlock = enforceLandlock,
             customViolationPhrases = customViolationPhrases.toList(),
             customViolationRegexes = customViolationRegexes.toList(),
-        ).frozenCopy()
+        ).frozenCopy().also { if (claimsProcessScope) it.claimProcessScope() }
+    }
+
+    internal companion object {
+        fun process(): PolicyBuilder<PolicyScope.ProcessWideSafe> = PolicyBuilder<PolicyScope.ProcessWideSafe>().also { it.claimsProcessScope = true }
     }
 }

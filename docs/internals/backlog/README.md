@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 403 | *Total Resolved Issues:* 782
+*Total Active Issues:* 401 | *Total Resolved Issues:* 784
 
-Active status detail: 401 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 399 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -73,7 +73,7 @@ authoritative-state issue.
 1. [Validate profile completeness against its evidence](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md).
 2. [Validate seccomp action payloads and unify their encoding](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md).
 3. [Own immutable policy collections at every construction boundary](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md).
-4. [Bind policy scope to validated filesystem intent](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md).
+4. [Bind policy scope to validated filesystem intent](resolved/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md).
 5. [Separate installation outcome from irreversible progress](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md).
 6. [Bind measured coverage to its observed behavior](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md).
 7. [Make orchestrator task state authoritative for persistence](issue-20261103-083002-763-make-orchestrator-task-state-the-authoritative-per.md).
@@ -233,7 +233,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261103-235911-795](resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) | Preserve Linux USER_NOTIF precedence over TRACE in policy intersection (resolved 2026-11-21) | high | core |
 | Archived [issue-20261103-235912-106](resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) | Install effective allow-list narrowing and restrictive default escalation (resolved 2026-11-21) | high | core |
 | Archived [issue-20261103-235912-401](resolved/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) | Use canonical action ordering throughout installed policy planning and state (resolved 2026-11-21) | high | core |
-| [issue-20261103-235912-625](issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) | Preserve required manual Landlock file grants and acquisition failures | medium | core |
+| Archived [issue-20261103-235912-625](resolved/issue-20261103-235912-625-preserve-required-manual-landlock-file-grants-and-.md) | Preserve required manual Landlock file grants and acquisition failures (resolved 2026-11-27) | medium | core |
 | [issue-20261103-235912-820](issue-20261103-235912-820-qualify-bootstrap-directory-loading-before-synchro.md) | Qualify bootstrap-directory loading before synchronous profiler stack capture | medium | profiler |
 | [issue-20261103-235434-538](issue-20261103-235434-538-diagnose-supervisor-helper-prewarm-failure-in-the-.md) | Diagnose supervisor helper prewarm failure in the full native gate | high | core |
 | [issue-20261103-222740-448](issue-20261103-222740-448-reject-oversized-native-trace-custom-label-counts-.md) | Reject oversized native trace custom-label counts before allocation and indexing | high | profiler |
@@ -429,7 +429,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
 | [issue-20261028-232809-819](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) | Reject contradictory completeness in imported profile documents | high | core |
 | Archived [issue-20261028-232810-282](resolved/issue-20261028-232810-282-validate-seccomp-action-payloads-before-constructi.md) | Validate seccomp action payloads before construction and compilation (resolved 2026-11-21) | high | core |
-| [issue-20261028-232810-687](issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) | Prevent raw policy definitions from asserting invalid process scope | high | core |
+| Archived [issue-20261028-232810-687](resolved/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) | Prevent raw policy definitions from asserting invalid process scope (resolved 2026-11-27) | high | core |
 | Archived [issue-20261028-232811-132](resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) | Freeze policy definition collections at every construction boundary (resolved 2026-11-21) | high | core |
 | [issue-20261028-232811-578](issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) | Bind measured profile coverage to its observed behavior | medium | core |
 | Archived [issue-20261028-232811-964](resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) | Reject installation receipts containing both success and failure (resolved 2026-11-21) | medium | core |

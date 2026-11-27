@@ -106,6 +106,10 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     fun testHierarchicalLandlockStackingSuccess() {
+        val parent = java.nio.file.Files
+            .createTempDirectory("landlock-stack")
+        val child = java.nio.file.Files
+            .createDirectory(parent.resolve("child"))
         val executor = Executors.newSingleThreadExecutor()
         try {
             val future = executor.submit(
@@ -113,18 +117,14 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
                 ContainedExecutors.installOnCurrentThread(
                     WorkerPolicyBuilder
                         .denyList(RuntimeProfile.NATIVE_IMAGE)
-                        .allowFsRead(
-                        io.mazewall.platform.lifecycle.SandboxedPath
-                    .of("/tmp", true),
-                    ).build(),
+                        .allowFsRead(parent.toString())
+                        .build(),
                 )
                 ContainedExecutors.installOnCurrentThread(
                     WorkerPolicyBuilder
                         .denyList(RuntimeProfile.NATIVE_IMAGE)
-                        .allowFsRead(
-                        io.mazewall.platform.lifecycle.SandboxedPath
-                    .of("/tmp/foo", true),
-                    ).build(),
+                        .allowFsRead(child.toString())
+                        .build(),
                 )
                 "success"
             },
@@ -132,6 +132,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             if (future.get() != "success") throw IllegalStateException("Failed")
         } finally {
             executor.shutdown()
+            parent.toFile().deleteRecursively()
         }
     }
 
@@ -306,16 +307,11 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/tmp")
             .build()
-        val features = Platform.featureMatrix
-        if (features.landlockTsyncSupported) {
-            verifySupportedInstallation {
-                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
-            }
-        } else {
-            assertFailsWith<io.mazewall.enforcer.api.UnsupportedKernelFeatureException> {
-                ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
-            }
+        val failure = kotlin.test.assertFailsWith<IllegalArgumentException> {
+            @Suppress("UNCHECKED_CAST")
+            ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, Uncompiled>)
         }
+        check(failure.message.orEmpty().contains("worker filesystem intent"))
     }
 
     private fun verifySupportedInstallation(install: () -> Unit) {
@@ -366,7 +362,7 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `installOnProcess rejects policies with Landlock requirement on unsupported kernels`() {
+    fun `installOnProcess rejects cast worker filesystem intent before Landlock`() {
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInstallOnProcessRejectsPoliciesWithLandlockRequirement")
     }
 

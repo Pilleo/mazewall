@@ -289,6 +289,123 @@ class LandlockFailureModeTest {
     }
 
     @Test
+    fun `existing file write grant omits directory-only rights`() {
+        val file = java.io.File.createTempFile("landlock-file-grant", ".txt")
+        val masks = mutableListOf<Long>()
+        val mock =
+            object : SupportedLandlockMock() {
+                override fun syscall(
+                    nr: Long,
+                    a1: io.mazewall.platform.syscall.NativeArg,
+                    a2: io.mazewall.platform.syscall.NativeArg,
+                    a3: io.mazewall.platform.syscall.NativeArg,
+                    a4: io.mazewall.platform.syscall.NativeArg,
+                    a5: io.mazewall.platform.syscall.NativeArg,
+                    a6: io.mazewall.platform.syscall.NativeArg,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR &&
+                        a3 is io.mazewall.platform.syscall.NativeArg.MemoryArg
+                    ) {
+                        masks.add(a3.value.readLong(0))
+                        return LinuxNative.SyscallResult.Success(0)
+                    }
+                    return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+                }
+            }
+        mock.fileSystem.openResult =
+            LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
+        LinuxNative.setEngine(mock)
+        try {
+            val policy =
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
+                    .allowFsWrite(file.absolutePath)
+                    .build()
+                    .definition
+            NativeArena.ofConfined().use { arena ->
+                with(arena) {
+                    Landlock.applyUserRules(
+                        LandlockRuleset(
+                            TestFileDescriptors.replace<FileDescriptorRole.Ruleset>(42),
+                            mock,
+                        ),
+                        policy,
+                        5,
+                        Landlock.LANDLOCK_ACCESS_FS_READ_FILE or Landlock.LANDLOCK_ACCESS_FS_READ_DIR,
+                    )
+                }
+            }
+            val write = masks.single { it and Landlock.LANDLOCK_ACCESS_FS_WRITE_FILE != 0L }
+            val fileRights = Landlock.LANDLOCK_ACCESS_FS_WRITE_FILE or Landlock.LANDLOCK_ACCESS_FS_TRUNCATE
+            assertEquals(fileRights, write)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `user path open and add failures reject under every fallback`() {
+        for (mode in listOf("FAIL", "WARN_AND_BYPASS", "SILENT_BYPASS")) {
+            System.setProperty("io.mazewall.fallback", mode)
+            val openFailure = assertFailsWith<IllegalStateException> { userRule(openErrno = io.mazewall.ffi.NativeConstants.EACCES) }
+            assertTrue(openFailure.message.orEmpty().contains("errno ${io.mazewall.ffi.NativeConstants.EACCES}"), mode)
+            val addFailure = assertFailsWith<IllegalStateException> { userRule(addErrno = io.mazewall.ffi.NativeConstants.EPERM) }
+            assertTrue(addFailure.message.orEmpty().contains("errno ${io.mazewall.ffi.NativeConstants.EPERM}"), mode)
+            val symlinkFailure = assertFailsWith<IllegalStateException> { userRule(addErrno = io.mazewall.ffi.NativeConstants.EINVAL) }
+            assertTrue(symlinkFailure.message.orEmpty().contains("errno ${io.mazewall.ffi.NativeConstants.EINVAL}"), mode)
+        }
+    }
+
+    private fun userRule(
+        openErrno: Int? = null,
+        addErrno: Int? = null,
+    ) {
+        val mock =
+            object : SupportedLandlockMock() {
+                override fun syscall(
+                    nr: Long,
+                    a1: io.mazewall.platform.syscall.NativeArg,
+                    a2: io.mazewall.platform.syscall.NativeArg,
+                    a3: io.mazewall.platform.syscall.NativeArg,
+                    a4: io.mazewall.platform.syscall.NativeArg,
+                    a5: io.mazewall.platform.syscall.NativeArg,
+                    a6: io.mazewall.platform.syscall.NativeArg,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (addErrno != null && nr == io.mazewall.ffi.NativeConstants.LANDLOCK_ADD_RULE_NR) {
+                        return LinuxNative.SyscallResult.Error(addErrno, -1)
+                    }
+                    return super.syscall(nr, a1, a2, a3, a4, a5, a6)
+                }
+            }
+        mock.fileSystem.openResult =
+            if (openErrno == null) {
+                LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
+            } else {
+                LinuxNative.SyscallResult.Error(openErrno, -1)
+            }
+        LinuxNative.setEngine(mock)
+        val policy =
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .allowFsRead("/tmp/required-grant")
+                .build()
+                .definition
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                Landlock.applyUserRules(
+                    LandlockRuleset(
+                        TestFileDescriptors.replace<FileDescriptorRole.Ruleset>(42),
+                        mock,
+                    ),
+                    policy,
+                    3,
+                    Landlock.LANDLOCK_ACCESS_FS_READ_FILE,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `test handleInitialOpenFailure with deleted file`() {
         val deletedPathAttempts = java.util.concurrent.atomic
             .AtomicInteger(0)

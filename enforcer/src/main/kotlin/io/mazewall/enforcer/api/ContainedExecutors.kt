@@ -166,7 +166,10 @@ public object ContainedExecutors {
     }
 
     /** Read-only preflight. Does not install filters. */
-    public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = true)
+    public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment {
+        policy.definition.requireNoWorkerFilesystemIntent()
+        return InstallationAssessor.assess(policy.definition, processWide = true)
+    }
 
     /** Read-only preflight for the current thread. Does not install filters. */
     public fun assessOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = false)
@@ -175,14 +178,17 @@ public object ContainedExecutors {
      * Installs the given policies onto the entire process (all threads) immediately.
      */
     public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
-        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        val combined = acceptedProcessDefinition(policies.map { it.definition })
         return installInternal(true, combined)
     }
 
     internal fun installOnProcess(
         policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
         environment: InstallationEnvironment,
-    ): InstallationReceipt = installInternal(true, policy, environment = environment)
+    ): InstallationReceipt {
+        policy.claimProcessScope()
+        return installInternal(true, policy, environment = environment)
+    }
 
     /**
      * Installs a permanent baseline in a dedicated child process, including existing JVM threads.
