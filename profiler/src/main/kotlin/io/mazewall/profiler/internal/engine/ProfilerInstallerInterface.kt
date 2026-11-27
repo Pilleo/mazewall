@@ -2,6 +2,7 @@ package io.mazewall.profiler.internal.engine
 
 import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.ffi.networking.ListenerStartupReporter
 import io.mazewall.ffi.networking.SeccompInstallationGate
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
@@ -12,7 +13,6 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.internal.ProfilerSocket
-import java.util.concurrent.CountDownLatch
 
 internal interface ProfilerInstallerInterface {
     /** The real coordinator rechecks the owning session after its blocking handshake. */
@@ -33,7 +33,7 @@ internal interface ProfilerInstallerInterface {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            CountDownLatch,
+            ListenerStartupReporter,
         ) -> Unit,
     )
 }
@@ -66,7 +66,7 @@ internal class RealProfilerInstaller private constructor(
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            CountDownLatch,
+            ListenerStartupReporter,
         ) -> Unit,
     ) {
         ProfilerInstaller.installProfilingFilterForThread(

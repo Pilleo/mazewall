@@ -1,5 +1,7 @@
 package io.mazewall.ffi.memory
 
+import io.mazewall.platform.fd.ResourceRetirement
+
 /** Acquires the two daemon rentals and ACK storage together, rolling back partial acquisition. */
 internal class SeccompSessionBuffers private constructor(
     private val arena: NativeArena,
@@ -56,22 +58,22 @@ internal class SeccompSessionBuffers private constructor(
         ): SeccompSessionBuffers {
             val arena = NativeArena.ofShared()
             var notif: SegmentLease? = null
-            var transferred = false
-            try {
-                val ack = arena.allocate(1L)
-                notif = notifPool.rent()
-                val buffers = SeccompSessionBuffers(arena, ack, notif, respPool.rent())
-                transferred = true
-                return buffers
-            } finally {
-                if (!transferred) {
-                    try {
-                        notif?.close()
-                    } finally {
-                        arena.close()
-                    }
-                }
-            }
+            var resp: SegmentLease? = null
+            return ResourceRetirement.runWithRollback(
+                action = {
+                    val ack = arena.allocate(1L)
+                    val notifLease = notifPool.rent().also { notif = it }
+                    val respLease = respPool.rent().also { resp = it }
+                    SeccompSessionBuffers(arena, ack, notifLease, respLease)
+                },
+                rollback = {
+                    val cleanup = ResourceRetirement()
+                    cleanup.attempt { resp?.close() }
+                    cleanup.attempt { notif?.close() }
+                    cleanup.attempt(arena::close)
+                    cleanup.finish()
+                },
+            )
         }
     }
 }

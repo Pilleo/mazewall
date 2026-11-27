@@ -13,7 +13,7 @@ import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.lifecycle.*
-import io.mazewall.platform.lifecycle.ForeignFdGuard
+import io.mazewall.platform.lifecycle.GuardProcessDescriptors
 import io.mazewall.platform.lifecycle.OpenFlags
 import io.mazewall.platform.lifecycle.TestFileDescriptors
 import io.mazewall.platform.native.*
@@ -29,9 +29,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.extension.ExtendWith
 
-@ExtendWith(ForeignFdGuard::class)
+@GuardProcessDescriptors
 class NativeBoundaryRepairTest {
     private val real = RealNativeEngine
 

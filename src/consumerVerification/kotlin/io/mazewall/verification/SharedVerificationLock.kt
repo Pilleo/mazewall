@@ -28,12 +28,17 @@ internal object SharedVerificationLock {
         return Path.of(common).resolve("mazewall/verification.lock")
     }
 
-    fun acquire(path: Path): AutoCloseable {
+    fun acquire(
+        path: Path,
+        waitSeconds: Long = 900,
+    ): AutoCloseable {
+        require(waitSeconds > 0) { "Verification lock wait must be positive" }
+        val signalTimeout = Math.addExact(waitSeconds, 5)
         Files.createDirectories(path.toAbsolutePath().parent)
-        val owner = ProcessBuilder("flock", "-x", "-w", "900", path.toString(), "sh", "-c", "printf 'locked\\n'; cat >/dev/null").start()
+        val owner = ProcessBuilder("flock", "-x", "-w", waitSeconds.toString(), path.toString(), "sh", "-c", "printf 'locked\\n'; cat >/dev/null").start()
         val ready = CompletableFuture.supplyAsync { owner.inputStream.bufferedReader().readLine() }
         try {
-            check(ready.get(905, TimeUnit.SECONDS) == "locked") { "Verification lock acquisition failed: $path" }
+            check(ready.get(signalTimeout, TimeUnit.SECONDS) == "locked") { "Verification lock acquisition failed: $path" }
         } catch (failure: Throwable) {
             owner.outputStream.close()
             if (owner.isAlive) owner.destroyForcibly()

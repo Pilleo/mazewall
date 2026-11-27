@@ -19,7 +19,7 @@ import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.profiler.internal.ProfilerSocket
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import io.mazewall.ffi.networking.SeccompInstallationGate
-import java.util.concurrent.CountDownLatch
+import io.mazewall.ffi.networking.ListenerStartupReporter
 
 /**
  * Internal orchestrator for installing profiling filters and initializing the listener.
@@ -40,7 +40,7 @@ internal object ProfilerInstaller {
             MutableList<TraceEvent>,
             MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
             MutableMap<String, Long>,
-            CountDownLatch,
+            ListenerStartupReporter,
         ) -> Unit,
     ) {
         val session = ProfilerInstallerSession(
@@ -70,7 +70,7 @@ internal class ProfilerInstallerSession(
         MutableList<TraceEvent>,
         MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
         MutableMap<String, Long>,
-        CountDownLatch
+        ListenerStartupReporter
     ) -> Unit,
     private val processWide: Boolean = false,
     private val context: ProfilerInstallationContext,
@@ -82,33 +82,17 @@ internal class ProfilerInstallerSession(
         val arch = Arch.current()
         val filter = BpfFilter.build(arch, policy, profilingMode = true)
 
-        val connected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit = { socketFd, readyLatch ->
-            startTraceListener(socketFd, accumulatedLogs, stackTracesMap, pathCache, readyLatch)
-        }
-        val connector = connectWithRetry
-        if (connector == null) {
-            SupervisorSeccompNotifInstaller.installOwned(
-                native = context.native,
-                userNotifSupported = context.userNotifSupported,
-                socketPath = socketPath,
-                filter = filter,
-                processWide = processWide,
-                onFilterApplied = context.onFilterApplied,
-                installationGate = installationGate,
-                onSocketConnected = connected,
-            )
-        } else {
-            SupervisorSeccompNotifInstaller.installOwned(
-                native = context.native,
-                userNotifSupported = context.userNotifSupported,
-                socketPath = socketPath,
-                filter = filter,
-                processWide = processWide,
-                connectWithRetry = connector,
-                onFilterApplied = context.onFilterApplied,
-                installationGate = installationGate,
-                onSocketConnected = connected,
-            )
+        SupervisorSeccompNotifInstaller.installOwnedWithStartup(
+            native = context.native,
+            userNotifSupported = context.userNotifSupported,
+            socketPath = socketPath,
+            filter = filter,
+            processWide = processWide,
+            connectWithRetry = connectWithRetry,
+            onFilterApplied = context.onFilterApplied,
+            installationGate = installationGate,
+        ) { socket, reportStartup ->
+            startTraceListener(socket, accumulatedLogs, stackTracesMap, pathCache, reportStartup)
         }
     }
 }

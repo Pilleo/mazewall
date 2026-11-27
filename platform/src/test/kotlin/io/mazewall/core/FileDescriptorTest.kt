@@ -28,7 +28,7 @@ import java.util.stream.Stream
  * close(int) on a guessed number destroys unrelated JVM resources).
  */
 @Isolated
-@org.junit.jupiter.api.extension.ExtendWith(ForeignFdGuard::class)
+@GuardProcessDescriptors
 class FileDescriptorTest {
     companion object {
         context(arena: NativeArena) private fun realFd(): Int =

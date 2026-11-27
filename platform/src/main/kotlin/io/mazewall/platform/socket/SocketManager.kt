@@ -94,6 +94,6 @@ private class NativeSocketManager(
         fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
     ): Boolean {
         return io.mazewall.ffi.networking.SupervisorSocketUtils
-            .sendDescriptor(socketFd.value, fdToSend.value, native.networking)
+            .sendDescriptor(socketFd, fdToSend, native.networking)
     }
 }

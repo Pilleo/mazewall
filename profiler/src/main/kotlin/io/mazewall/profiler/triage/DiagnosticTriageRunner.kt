@@ -16,7 +16,7 @@ internal object DiagnosticTriageRunner {
         val targetFile = options.output
 
         // 1. Capture local kernel audit logs for blocked syscalls (SECCOMP/Landlock)
-        val dmesgLogs = captureDmesg()
+        val dmesgLogs = captureDmesg(ProcessBuilder("dmesg"), Duration.ofSeconds(CAPTURE_TIMEOUT_SECONDS))
 
         // 2. Snapshot this collector JVM only, not a failed workload or a Gradle daemon.
         val jvmThreadDump = SelfThreadSnapshot().capture()
@@ -77,34 +77,37 @@ internal object DiagnosticTriageRunner {
         targetFile.writeText(diagnosticReportJson(timestamp, diagnostics, failedTask))
     }
 
-    /** Timeout for reading an owned external helper's stdout, not for self-snapshot acquisition. */
+    /** Per-operation timeout for reading and awaiting the owned dmesg helper. */
     private const val CAPTURE_TIMEOUT_SECONDS = 10L
 
-    /**
-     * Reads an owned dmesg helper's stdout with a timeout. This does not bound the acquisition,
-     * allocation, or safepoint progress of the direct current-JVM thread snapshot.
-     */
-    private fun readProcessOutputBounded(capture: ManagedProcessCapture): String =
-        runCatching { capture.readStdout(Duration.ofSeconds(CAPTURE_TIMEOUT_SECONDS)) }
-            .getOrElse { "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s." }
-
-    private fun captureDmesg(): String {
-        return captureOptional(
-            onFailure = { "Unable to capture dmesg: ${it.message}" },
+    internal fun captureDmesg(
+        builder: ProcessBuilder,
+        timeout: Duration,
+    ): String =
+        captureOptional(
+            onFailure = {
+                if (it is InterruptedException) Thread.currentThread().interrupt()
+                "Unable to capture dmesg: ${it.message ?: it.javaClass.simpleName}"
+            },
         ) {
-            ManagedProcessCapture
-                .start(ProcessBuilder("dmesg"))
-                .use { capture ->
-                readProcessOutputBounded(capture)
-            }.lineSequence()
-                .filter { line ->
-                    line.contains("seccomp", ignoreCase = true) ||
-                        line.contains("landlock", ignoreCase = true) ||
-                        line.contains("audit", ignoreCase = true)
-                }.take(100)
-                .joinToString("\n")
+            ManagedProcessCapture.start(builder).use { capture ->
+                val output = capture.readOutput(timeout)
+                val exitCode = capture.awaitExit(timeout)
+                if (exitCode != 0) {
+                    val stderr = output.stderr.trim()
+                    val detail = if (stderr.isEmpty()) "" else ": $stderr"
+                    return@use "Unable to capture dmesg: exited with status $exitCode$detail"
+                }
+                output.stdout
+                    .lineSequence()
+                    .filter { line ->
+                        line.contains("seccomp", ignoreCase = true) ||
+                            line.contains("landlock", ignoreCase = true) ||
+                            line.contains("audit", ignoreCase = true)
+                    }.take(100)
+                    .joinToString("\n")
+            }
         }
-    }
 
     private fun collectHsErrLogs(): String {
         val sb = StringBuilder()

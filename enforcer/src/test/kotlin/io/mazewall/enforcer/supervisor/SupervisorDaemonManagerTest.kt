@@ -8,6 +8,8 @@ import io.mazewall.enforcer.api.MockSocketManager
 import io.mazewall.enforcer.api.execution.DrainReport
 import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus
+import io.mazewall.enforcer.diagnostics.DiagnosticEventListener
+import io.mazewall.enforcer.diagnostics.MazewallEvents
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
@@ -1197,7 +1199,7 @@ class SupervisorDaemonManagerTest {
     }
 
     @Test
-    fun `detects unexpected daemon exit and invokes handler`() {
+    fun `unexpected daemon exit reports only the bounded output tail and invokes handler`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
         val output = java.io.PipedInputStream()
@@ -1227,20 +1229,41 @@ class SupervisorDaemonManagerTest {
             exitLatch.countDown()
         }
 
-        val context = manager.getOrSpawnSharedDaemon()
-        assertNotNull(context)
-        writer.close()
-        try {
-            assertTrue(exitWaitEntered.await(2, TimeUnit.SECONDS), "Output EOF must still observe later process death")
-        } finally {
-            mockProcess.setAlive(false)
-            exited.countDown()
+        val reports = mutableListOf<MazewallEvents.DaemonExited>()
+        val listener = DiagnosticEventListener { event ->
+            if (event is MazewallEvents.DaemonExited && event.pid == 9999L && event.exitCode == 42) reports.add(event)
         }
-
-        val completed = exitLatch.await(5, TimeUnit.SECONDS)
-        assertTrue(completed, "Expected unexpected exit handler to be invoked")
-        assertEquals(42, exitCodeReceived.get())
-        manager.stop()
+        MazewallEvents.register(listener)
+        try {
+            val context = manager.getOrSpawnSharedDaemon()
+            writer.use {
+                repeat(80) { index -> it.write("diagnostic-$index\n".toByteArray()) }
+                it.write(("x".repeat(32_768) + "\n").toByteArray())
+                it.write(("z".repeat(2_048) + "\n").toByteArray())
+                it.write("last diagnostic\n".toByteArray())
+            }
+            try {
+                assertTrue(exitWaitEntered.await(2, TimeUnit.SECONDS), "Output EOF must still observe later process death")
+            } finally {
+                mockProcess.setAlive(false)
+                exited.countDown()
+            }
+            assertTrue(exitLatch.await(5, TimeUnit.SECONDS), "Expected unexpected exit handler to be invoked")
+            assertEquals(42, exitCodeReceived.get())
+            val expected = buildList {
+                add("[20 daemon log lines omitted]")
+                (18..79).forEach { add("diagnostic-$it") }
+                add("z".repeat(2_048))
+                add("last diagnostic")
+            }
+            assertEquals(expected, reports.single().lastLogLines)
+            assertEquals(expected, context.logTail.reportLines())
+        } finally {
+            MazewallEvents.unregister(listener)
+            writer.close()
+            exited.countDown()
+            manager.stop()
+        }
     }
 
     @Test
@@ -1273,6 +1296,9 @@ class SupervisorDaemonManagerTest {
         assertEquals(10000L, replacement.daemonProcess.pid())
         assertEquals(2, mockLauncher.starts)
         assertEquals(1, exits.get(), "a dead daemon must transition to Defunct exactly once")
+        initial.logTail.record("late output from original daemon")
+        assertFalse(replacement.logTail.reportLines().contains("late output from original daemon"))
+        manager.stop()
     }
 
     @Test

@@ -190,7 +190,11 @@ reuse. The regression also runs in mandatory `verificationActionsTest`; both
 tasks declare the shared script and root properties as inputs.
 
 PIT runs only named host unit tests and enforces line reach, mutation score, and
-test strength independently. The current floors are:
+test strength independently. Before mutation analysis, `verifyPitestTargetInventory`
+checks each production and test selector against its compiled class inventory
+after the applicable exclusions. A stale selector fails the task even when
+other selectors still match. Run `./gradlew -p buildSrc pitestTargetInventoryTest`
+to check the inventory gate in isolation. The current floors are:
 
 | Module | Line reach | Mutation score | Test strength |
 | --- | ---: | ---: | ---: |
@@ -212,11 +216,12 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 Root `buildLogicCheck` is the explicit complete build-tool regression gate. It uses
 public GradleBuild APIs, a distinct nested build name `build-logic-verification`,
-the existing buildSrc `verificationActionsTest`, one nested worker and no project
-parallelism. Root `check` requires it, preserving existing root build/mergeCheck
-coverage; buildSrc's own test/check dependencies also remain mandatory. The bridge
-has no outer cached-success output or skip predicate: actual nested inputs and
-marker invalidation remain authoritative.
+one nested worker, and no project parallelism. The bridge selects buildSrc `test`,
+which depends on `verificationActionsTest`. This runs the Kotlin convention and
+lifecycle tests and the Java regression driver in one nested invocation. Root
+`check` requires the bridge, as do `build` and `mergeCheck` through `check`.
+The nested tasks determine cache reuse and invalidate the verifier's success
+marker when its inputs change.
 
 JAR bootstrap/help/compile/assemble do not implicitly select the verifier, though
 ordinary buildSrc compilation can still run. Lazy `mustRunAfter` edges put other
@@ -350,16 +355,20 @@ skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. The 625-result projection varies core, mutation, security and build-logic outcomes
 with Go, optional integration and confined-helper results fixed to success. Separate
 controls vary Go, optional-integration and confined-helper results with the other
-prerequisites successful. The literal required join accepts only seven `success`
-results; these bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
+prerequisites successful. The typed evaluator in `scripts/ci_required_gate.py` requires
+success from every lane, except that Go may be skipped when both opt-in flags are
+disabled. It prints the result and decision for each lane before returning an
+aggregate exit status. Missing, failed, cancelled and unexpected results fail
+closed. These bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
 required native freshness and publication gates are unchanged.
 
 The marker-producing build-tool verifier declares the actual CI workflow as a
-named relative-path-sensitive input. An applied-registration fixture checks that
-a workflow-only edit reruns executable policy checks and an invalid edit removes
+named relative-path-sensitive input, alongside `.github/ci-code-paths.yml`,
+the required-gate evaluator and its diagnostic tests. An applied-registration
+fixture checks that edits to each input rerun executable policy checks and an invalid edit removes
 the old success marker. Ownership fixtures verify a different numeric UID rather
 than assuming a system file is foreign; production ownership checks are unchanged.
 
@@ -370,8 +379,12 @@ never backgrounded together in one checkout. Core retains host quality,
 kernel/fresh-JVM and exploitation gates; independent security retains the real
 vulnerability scan. Mutation uses host Gradle without Podman
 or another container-cache archive. Core, mutation and security independently filter code
-changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
-while its job succeeds; the required join is never job-level skipped.
+changes through the same external `.github/ci-code-paths.yml` filter. It covers
+source, scripts, CI workflows, Gradle declarations and properties, root/nested
+`gradle.lockfile` and `settings-gradle.lockfile`, dependency verification metadata,
+`gradlew`/`gradlew.bat`, wrapper JAR/properties, container definitions and SpotBugs
+configuration. Changes to the shared filter also trigger these gates. Docs-only
+steps may skip while their jobs succeed; the required join is never job-level skipped.
 
 Core invokes the root `:unitCheck` explicitly, avoiding Gradle's recursive bare
 task-name selection of demo gates. Slow Gradle-backed consumer regressions are
@@ -518,13 +531,17 @@ collection. The workflow-policy regression rejects removal of failure-time uploa
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
 join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]`
-and `if: always()`; its shell requires all seven results to equal `success`.
-Failure, cancellation, skipping or a
-missing result cannot turn the join green. It forwards
+and `if: always()`. The fixed shell command passes results and Go opt-in flags
+through quoted environment variables to the typed evaluator. All required lanes
+must succeed; skipped Go is accepted only when both opt-in flags are disabled.
+Failure, cancellation, a skipped required lane or a missing result cannot turn
+the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
 
 Publication remains a separate default-branch-push-only job with `needs` edges to
-optional acceptance and that required join. Its normal success condition prevents
+`core-quality`, `mutation-tests`, `security-check`, `build-logic-validation` and
+`confined-helper-kernel`. Optional integrations and Go remain excluded from
+publication prerequisites. Its normal success condition prevents
 publication after a failed, skipped or cancelled prerequisite; PRs cannot publish.
 Only publication has package-write permission. It consumes the forwarded core
 cache identity and retains the same container runner, publication command and
@@ -599,6 +616,20 @@ delivery. Failed cases must produce actual `DiagnosticTriageRunner` JSON while
 retaining the original failed Test/build. The collector's JVM snapshot remains
 [self-only](../profiler/profiler-design.md#self-only-diagnostic-report-scope).
 
+Run the dependency provisioning check on JDK 25 with:
+
+```bash
+./gradlew -p buildSrc verificationActionsTest -Pmazewall.coldFixtureDependencies=true
+```
+
+The root verification and failure-triage fixtures each start with an empty
+TestKit home in their temporary project. Preparation resolves their declared
+classpath and analysis inputs against the configured repositories using the
+copied dependency verification metadata. The fixture controls then run with
+`--offline` in those same homes. The cold mode ignores any ambient read-only
+dependency cache. The standalone `failureTriageTest` supports the same option.
+Ordinary runs continue to use the persistent TestKit cache.
+
 Use the owning module's named host tests while changing a contract:
 
 ```bash
@@ -624,6 +655,20 @@ neither up-to-date reused nor restored from the build cache. Named ordinary host
 tests retain reuse. An executable Gradle fixture checks unchanged repeat execution,
 deleted-output/cache behavior and host-test reuse; a successful container command
 with cached kernel task outputs is not current container protection evidence.
+
+Platform's C ABI oracle recompiles against the current host compiler and headers
+whenever `:platform:test` or `:platform:verifyCAbi` requests it. The compile task
+publishes the probe only after success and keeps its executable out of the build
+cache. Platform tests include that executable's contents in their task inputs.
+Gradle can reuse the test result when the executable and the other test inputs
+match. Run `./gradlew :platform:verifyCAbi` to execute the current probe and print
+its observations. Run independent Gradle invocations that share the Platform
+output directory serially. Concurrent invocations need separate checkout copies.
+
+The Core CI job runs `bash scripts/tests/c_abi_oracle_cache_test.sh`. The script
+uses the real Platform tasks in a checkout copy and checks unchanged test reuse
+under Configuration Cache replay, header invalidation, compiler and probe
+failure, and the two Kotlin ABI test entry points.
 
 The CET C fixture uses local up-to-date compilation reuse with source/script and
 effective compiler/header/linker/environment inputs. The native library is not stored
@@ -695,8 +740,10 @@ completion gate for included modules: formatting, lint/static analysis, tests,
 and configured coverage thresholds. Its task graph already selects kernel and
 fresh-JVM integration suites. On a Linux host without `CAP_CHECKPOINT_RESTORE`,
 run `./gradlew build` from the checkout root to run the baseline on the host and
-the confined tests through the project's rootful Docker runner. Both must pass.
-An explicit `-PmazewallKernelLane` selects just that Gradle lane. Select
+the confined tests through the project's rootful Docker runner. Flags may precede
+`build`. Both must pass. An explicit `-PmazewallKernelLane` selects just that
+Gradle lane. An unset lane is `ALL`; if this host cannot open `/proc/self/map_files`,
+that lane fails before the confined-helper classes run. Select
 owning-module integration tasks for focused iteration, or use
 `./scripts/run_containerized_tests.sh kernelCheck` as the containerized test runner;
 equivalent test commands are alternatives, not additional gates after a successful
@@ -762,3 +809,9 @@ state they mutate; module-specific mutable globals stay with their owning
 module. Do not add tests named `*CoverageTest`: coverage is a result, not a behavior. Replace a
 coverage-only probe with a behavior-level specification when its production
 seam is available.
+
+Use `@GuardProcessDescriptors` for tests that check the worker JVM's descriptor
+table. Concurrent child-process probes use `@UsesProcessDescriptors` and declare
+that access for the whole test, including child retirement. JUnit schedules the
+probes together and keeps them out of guarded snapshots. A guarded test can
+launch its own child from a separate timeout thread without taking a second lock.

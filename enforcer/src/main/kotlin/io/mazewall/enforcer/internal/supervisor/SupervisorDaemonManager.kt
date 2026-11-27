@@ -34,6 +34,7 @@ internal data class SupervisorContext(
     val shutdownHook: Thread,
     val confinedBootstrap: SocketHelperProcess.ConfinedStartup? = null,
     val confinedHelper: HelperSecurityObservation.Observation? = null,
+    val logTail: SupervisorLogTail = SupervisorLogTail(),
 )
 
 /**
@@ -104,8 +105,6 @@ internal class SupervisorDaemonManager(
         @JvmStatic
         public fun getInstance(): SupervisorDaemonManager = INSTANCE_DEFAULT
     }
-
-    public val daemonLogLines: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
     internal fun prepareConfinedReadBootstrap(): SupervisorContext {
         requirePlatformThread()
@@ -180,12 +179,13 @@ internal class SupervisorDaemonManager(
         if (!handleRef.compareAndSet(current, DaemonHandle.Defunct(context))) return
         logger.severe("SupervisorDaemon (PID=${context.daemonProcess.pid()}) exited unexpectedly with exit code $exitCode!")
         logger.severe("Last daemon log lines:")
-        daemonLogLines.forEach { line -> logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line") }
+        val reportLines = context.logTail.reportLines()
+        reportLines.forEach { line -> logger.severe("[SUPERVISOR-DAEMON-CRASH-LOG] $line") }
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.DaemonExited(
                 pid = context.daemonProcess.pid(),
                 exitCode = exitCode,
-                lastLogLines = daemonLogLines.toList(),
+                lastLogLines = reportLines,
             ),
         )
         onUnexpectedExit(exitCode)
@@ -315,16 +315,19 @@ internal class SupervisorDaemonManager(
 
         DaemonPtracer.authorize(engine, daemonProcess)
 
-        startup.startOutputPump(
-                sentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
-                onLine = { line ->
-                    daemonLogLines.add(line)
-                    System.err.println("[SUPERVISOR-DAEMON] $line")
-                    System.err.flush()
-                },
-                threadName = "supervisor-daemon-output",
-                onStreamClosed = { observeDaemonExit(daemonProcess) },
-            )
+        val logTail = SupervisorLogTail()
+        startup.startBoundedOutputPump(
+            sentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
+            maxLineChars = SupervisorLogTail.MAX_LINE_CHARS,
+            onLine = { line ->
+                logTail.record(line)
+                System.err.println("[SUPERVISOR-DAEMON] $line")
+                System.err.flush()
+            },
+            onOversizedLine = logTail::recordOversizedLine,
+            threadName = "supervisor-daemon-output",
+            onStreamClosed = { observeDaemonExit(daemonProcess) },
+        )
 
         startup.registerShutdownHook()
         startup.awaitReady(LATCH_TIMEOUT_SECONDS)
@@ -335,7 +338,7 @@ internal class SupervisorDaemonManager(
             current.requireLineage(it.child, HelperSecurityObservation.Lineage.Bootstrap)
         }
         val confinedHelper = confinedBootstrap?.let { observations.observeOnlyChild(it.child) }
-        val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, confinedBootstrap, confinedHelper)
+        val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, confinedBootstrap, confinedHelper, logTail)
         val running = DaemonHandle.Running(context)
         val resources = startup.commit()
         if (provisioning == PoolProvisioning.PrestartedConfined) {

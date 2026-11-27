@@ -152,6 +152,9 @@ tasks.register<JavaExec>("ciCachePolicyTest") {
     inputs.files(
         layout.projectDirectory.file("../.github/workflows/ci.yml"),
         layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../.github/ci-code-paths.yml"),
+        layout.projectDirectory.file("../scripts/ci_required_gate.py"),
+        layout.projectDirectory.file("../scripts/test_ci_required_gate.py"),
         layout.projectDirectory.file("../scripts/security_snapshot.py"),
         layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
     ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)
@@ -165,6 +168,11 @@ tasks.register<JavaExec>("securitySnapshotVerificationTest") {
 
 tasks.register<JavaExec>("pitestLimitsTest") {
     mainClass.set("io.mazewall.build.PitestLimitsFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+
+tasks.register<JavaExec>("pitestTargetInventoryTest") {
+    mainClass.set("io.mazewall.build.PitestTargetInventoryFunctionalTest")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
 }
 
@@ -189,6 +197,9 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(
         layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../.github/ci-code-paths.yml"),
+        layout.projectDirectory.file("../scripts/ci_required_gate.py"),
+        layout.projectDirectory.file("../scripts/test_ci_required_gate.py"),
         layout.projectDirectory.file("../scripts/security_snapshot.py"),
         layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
     ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)
@@ -197,7 +208,7 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
     doFirst { successMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "pitestLimitsTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "pitestLimitsTest", "pitestTargetInventoryTest") }.configureEach {
     inputs.file(layout.projectDirectory.file("../gradle/pitest-limits.gradle"))
         .withPropertyName("sharedPitestLimits")
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -206,22 +217,26 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
-val failureTriageMarker = layout.buildDirectory.file("verification/failure-triage.success")
 tasks.register<JavaExec>("failureTriageTest") {
+    val successMarker = layout.buildDirectory.file("verification/failure-triage.success")
     mainClass.set("io.mazewall.build.VerificationActionsTest")
     systemProperty("mazewall.test.outerOffline", gradle.startParameter.isOffline.toString())
     inputs.property("outerOffline", gradle.startParameter.isOffline)
     inputs.file(layout.projectDirectory.file("../gradle/verification-metadata.xml"))
         .withPropertyName("fixtureDependencyVerificationMetadata")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    outputs.file(failureTriageMarker)
-    args(failureTriageMarker.get().asFile.absolutePath, "--failure-triage")
-    doFirst { failureTriageMarker.get().asFile.delete() }
+    outputs.file(successMarker)
+    args(successMarker.get().asFile.absolutePath, "--failure-triage")
+    doFirst { successMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "confinedHelperLaneTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
+val coldFixtureDependencies = providers.gradleProperty("mazewall.coldFixtureDependencies").map(String::toBooleanStrict).orElse(false)
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "confinedHelperLaneTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "pitestTargetInventoryTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
+    if (name == "verificationActionsTest" || name == "failureTriageTest") {
+        systemProperty("mazewall.test.coldFixtureDependencies", coldFixtureDependencies.get())
+    }
     if (name == "verificationActionsTest") {
         val metadata = tasks.named("pluginUnderTestMetadata")
         dependsOn(metadata)

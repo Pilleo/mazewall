@@ -1,6 +1,7 @@
 package io.mazewall.profiler.internal.engine
 import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.ffi.networking.SeccompListenerStartup
 import io.mazewall.platform.lifecycle.TestFileDescriptors
 import io.mazewall.platform.native.*
 import io.mazewall.platform.native.LinuxNative
@@ -53,7 +54,7 @@ class ProfilerInstallerTest {
                     connectWithRetry = { _ ->
                         throw IllegalStateException("Simulated connection retry failure")
                     },
-                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, reportStartup -> reportStartup(SeccompListenerStartup.Ready) },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -91,7 +92,7 @@ class ProfilerInstallerTest {
                         releaseCoordinator.awaitOrFail("test releases coordinator connection failure")
                         throw IllegalStateException("Delayed error")
                     },
-                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, reportStartup -> reportStartup(SeccompListenerStartup.Ready) },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)
@@ -138,7 +139,7 @@ class ProfilerInstallerTest {
                         TestFileDescriptors
                             .replace<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket>(999)
                     },
-                    startTraceListener = { _, _, _, _, latch -> latch.countDown() },
+                    startTraceListener = { _, _, _, _, reportStartup -> reportStartup(SeccompListenerStartup.Ready) },
                 )
             } catch (t: Throwable) {
                 errorRef.set(t)

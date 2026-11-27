@@ -124,6 +124,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             assertTrue(raw.awaitTermination(5, TimeUnit.SECONDS), "The actual traced worker must end")
             assertTrue(closed.await(5, TimeUnit.SECONDS), "Observe the actual listener retiring before explicit close")
             wrapped.shutdown()
+            assertTrue(wrapped.awaitTermination(5, TimeUnit.SECONDS))
             val snapshot = wrapped.snapshot()
             assertTrue(snapshot.behavior.opens.contains("/etc/hostname"))
             assertTrue(snapshot.coverage.complete, "A retired producer must retain complete native evidence: ${snapshot.coverage.warnings}")
@@ -416,36 +417,65 @@ LinuxNative.raw.syscall(
     }
 
     @Test
-    fun `test wrap() executor shutdown waits for pending tasks and avoids ENOSYS`() {
+    fun `wrapped executor records running and queued tail work after shutdown`() {
         val pool = Executors.newSingleThreadExecutor()
         val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val releaseWork = java.util.concurrent.CountDownLatch(1)
-        val finished =
-            java.util.concurrent.atomic
-                .AtomicBoolean(false)
-
-        val future =
-            wrapped.submit(
+        val running = CountDownLatch(1)
+        val releaseWork = CountDownLatch(1)
+        val tailFiles = listOf("running", "queued").map { name ->
+            kotlin.io.path
+                .createTempFile("profiler-$name-")
+                .toFile()
+                .apply { writeText(name) }
+        }
+        try {
+            val first = wrapped.submit(
                 Callable {
-                    latch.countDown()
-                    releaseWork.awaitOrFail("pending profiler task released after shutdown")
-                    val text = File("/etc/hostname").readText()
-                    finished.set(true)
-                    text
+                    running.countDown()
+                    releaseWork.awaitOrFail("profiled task released after shutdown")
+                    tailFiles[0].readText()
                 },
             )
-
-        try {
-            latch.awaitOrFail("profiled task started before shutdown")
-            wrapped.shutdown() // Should not kill daemon immediately
+            running.awaitOrFail("profiled task started before shutdown")
+            val queued = wrapped.submit(Runnable { assertEquals("queued", tailFiles[1].readText()) }, "queued result")
+            wrapped.shutdown()
+            assertTrue(!wrapped.snapshot().coverage.complete)
+            releaseWork.countDown()
+            assertEquals("running", first.get(5, TimeUnit.SECONDS))
+            assertEquals("queued result", queued.get(5, TimeUnit.SECONDS))
+            assertTrue(wrapped.awaitTermination(5, TimeUnit.SECONDS))
+            val result = wrapped.snapshot()
+            assertTrue(result.coverage.complete, result.coverage.warnings.toString())
+            for (file in tailFiles) {
+                assertTrue(wrapped.recentLogs.any { file.absolutePath in it.paths }, "Missing tail observation for ${file.name}")
+            }
         } finally {
             releaseWork.countDown()
+            wrapped.shutdownNow()
+            wrapped.awaitTermination(5, TimeUnit.SECONDS)
+            tailFiles.forEach(File::delete)
         }
+    }
 
-        val result = future.get(5, TimeUnit.SECONDS)
-        assertTrue(result.isNotEmpty())
-        assertTrue(finished.get(), "Task should have finished even after shutdown() was called")
+    @Test
+    fun `timed bulk executor admission captures a real operation`() {
+        val input = kotlin.io.path
+            .createTempFile("profiler-bulk-")
+            .toFile()
+            .apply { writeText("bulk work") }
+        val wrapped = Profiler.wrap(Executors.newSingleThreadExecutor(), false, Policy.PURE_COMPUTE_UNSAFE)
+        try {
+            val tasks = listOf(Callable { input.readText() })
+            assertEquals("bulk work", wrapped.invokeAll(tasks, 5, TimeUnit.SECONDS).single().get())
+            wrapped.shutdown()
+            assertTrue(wrapped.awaitTermination(5, TimeUnit.SECONDS))
+            assertTrue(wrapped.snapshot().coverage.complete)
+            assertTrue(wrapped.recentLogs.any { input.absolutePath in it.paths })
+        } finally {
+            wrapped.shutdownNow()
+            wrapped.awaitTermination(5, TimeUnit.SECONDS)
+            input.delete()
+        }
     }
 
     @Test

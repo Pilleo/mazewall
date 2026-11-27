@@ -5,14 +5,13 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
-import io.mazewall.platform.fd.recordDescriptorAcquisition
 import io.mazewall.platform.native.LinuxNative.SyscallHandledState
 import io.mazewall.platform.native.LinuxNative.SyscallResult
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.Syscall
 
-/** bpf(2) command path. Fd-returning commands are adopted as [FileDescriptorRole.Bpf]. */
+/** bpf(2) command path. The native adapter attaches a receipt to descriptor-producing results. */
 internal interface NativeBpf {
     fun command(
         cmd: Long,
@@ -22,14 +21,11 @@ internal interface NativeBpf {
 }
 
 internal fun NativeBpf.openDescriptor(
-    cmd: Long,
+    cmd: BpfDescriptorCommand,
     attr: ManagedSegment,
     size: Long,
     context: String,
-): FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned> =
-    command(cmd, attr, size)
-        .recordDescriptorAcquisition()
-        .getFdOrThrow(context, FileDescriptorRole.Bpf)
+): FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, FdOwnership.Owned> = command(cmd.code, attr, size).getFdOrThrow(context, FileDescriptorRole.Bpf)
 
 internal fun RawSyscallOperations.asBpf(): NativeBpf = RawBackedBpf(this)
 
@@ -40,21 +36,30 @@ internal fun RawSyscallOperations.bpf(
 ): SyscallResult<Long, SyscallHandledState.Unhandled> = asBpf().command(cmd, attr, size)
 
 /** bpf(2) commands whose success value is a new file descriptor. */
-internal fun isBpfFdReturningCommand(cmd: Long): Boolean = cmd in BPF_FD_RETURNING_COMMANDS
+internal enum class BpfDescriptorCommand(
+    val code: Long,
+) {
+    MAP_CREATE(0L),
+    PROG_LOAD(5L),
+    OBJ_GET(7L),
+    PROG_GET_FD_BY_ID(13L),
+    MAP_GET_FD_BY_ID(14L),
+    RAW_TRACEPOINT_OPEN(17L),
+    BTF_LOAD(18L),
+    BTF_GET_FD_BY_ID(19L),
+    LINK_CREATE(28L),
+    LINK_GET_FD_BY_ID(30L),
+    ITER_CREATE(33L),
+    ;
 
-private val BPF_FD_RETURNING_COMMANDS = setOf(
-    0L, // BPF_MAP_CREATE
-    5L, // BPF_PROG_LOAD
-    7L, // BPF_OBJ_GET
-    13L, // BPF_PROG_GET_FD_BY_ID
-    14L, // BPF_MAP_GET_FD_BY_ID
-    17L, // BPF_RAW_TRACEPOINT_OPEN
-    18L, // BPF_BTF_LOAD
-    19L, // BPF_BTF_GET_FD_BY_ID
-    28L, // BPF_LINK_CREATE
-    30L, // BPF_LINK_GET_FD_BY_ID
-    33L, // BPF_ITER_CREATE
-)
+    companion object {
+        private val byCode = entries.associateBy { it.code }
+
+        fun fromCode(code: Long): BpfDescriptorCommand? = byCode[code]
+    }
+}
+
+internal fun isBpfFdReturningCommand(cmd: Long): Boolean = BpfDescriptorCommand.fromCode(cmd) != null
 
 private class RawBackedBpf(
     private val raw: RawSyscallOperations,

@@ -48,7 +48,6 @@ internal object ValidationListenerPreload {
             io.mazewall.platform.seccomp.SupervisedKind.Exec::class.java.name,
             io.mazewall.platform.seccomp.SupervisedKind.Spawn::class.java.name,
             io.mazewall.platform.seccomp.SupervisedKind.Unknown::class.java.name,
-            ValidationLog::class.java.name,
         )
 
     fun ensureLoaded() {

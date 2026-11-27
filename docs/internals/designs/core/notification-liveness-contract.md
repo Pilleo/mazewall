@@ -21,6 +21,10 @@ bounded local work or a nonblocking I/O attempt and returns `Await` or `Ready`.
 The reactor advances work on readiness, idle polls and interrupted polls, choosing
 a timeout no later than the pending deadline. It checks expiry both before and
 after polling work; completion at the boundary loses to expiry.
+The shared `Deadline` uses signed differences for expiration and remaining
+time. Its absolute timestamp may wrap, and durations are capped at the signed
+nanosecond comparison horizon. A positive sub-millisecond budget rounds down
+to zero milliseconds for polling and remains active until its deadline.
 
 Only the reactor claims `NotificationReplyLease` and invokes a terminal reply.
 The lease is consumed even if native delivery fails or the effect throws. Every
@@ -30,6 +34,9 @@ SEND/RECV attempts have a ceiling of eight. Deadline expiry claims the lease,
 attempts EPERM once and terminates the session, including on EINTR or ENOENT.
 There is no fallback reply after a claimed terminal effect. FD injection retains
 the atomic ADDFD-with-SEND operation where a syscall returns a new descriptor.
+ADDFD classifies ENOENT as `NotificationGone` and preserves other errno values
+with the ADDFD operation, including EINTR after the retry budget is exhausted.
+An unconfirmed supervisor effect failure carries the supervisor operation.
 
 This deadline is the watchdog: it runs in the existing reactor and does not
 interrupt arbitrary JVM code. Completion callbacks have disposal authority only.
@@ -75,6 +82,13 @@ publish an observation, ACK a listener, or send another kernel reply. If the rea
 itself stops polling, no in-process watchdog can guarantee recovery; deployment
 health checks should supervise the daemon process and restart it according to the
 fail-closed policy.
+
+Each supervisor daemon retains up to 64 recent output lines for unexpected-exit
+diagnostics. The pump drops lines longer than 2,048 UTF-16 code units while
+reading them. Crash logs and `MazewallEvents.DaemonExited` include a summary when
+oversized lines were dropped or older entries were evicted. A replacement daemon
+starts with an empty history. Stack frames used during validation are passed to
+the scoping policy and are not saved in a diagnostic history.
 
 ![Notification deadline and terminal reply](../../../diagrams/user_notif_liveness.svg)
 
@@ -128,6 +142,19 @@ must not be represented as a completed feature.
 
 ## Profiler observation and ACK
 
+Session construction retains the completion wakeup through listener setup and
+buffer acquisition. A failed startup retires the wakeup and any partially
+acquired buffers. The eventfd factory owns the descriptor and arena until both
+counter buffers are initialized. Rollback attempts every independent release
+and preserves startup and cleanup failure evidence.
+
+Profiler installation waits for a one-shot listener startup result inside
+the installation deadline. The listener reports `Ready` after accepting its
+initial daemon ACK. A rejected ACK, EOF or read failure reports `Failed(cause)`.
+Both outcomes release the readiness wait. Failure reaches the installing
+caller with its original cause and prevents TSYNC and workload execution.
+The applied filter stage still records any irreversible kernel work.
+
 Profiler and supervisor share native transport, reply classification and lifecycle
 mechanics; their authorization and observation reducers remain separate.
 Profiler preparation runs in its bounded helper pool, carrying architecture and
@@ -138,10 +165,14 @@ for ACK, or attempt a fallback reply.
 
 For an ordinary observation, event transmission and the listener's 0xAC ACK precede
 the offered CONTINUE reply so the blocked syscall's stack remains capturable.
-The same deadline covers preparation, event write and ACK read. Malformed or absent
-ACK is terminal. A listener ACK write error or short write closes the endpoint
-before another frame; processing failure remains primary and ACK/cleanup failures
-remain suppressed. Invalid TID is a protocol violation without publication/ACK.
+The same deadline covers preparation, event write and ACK read. A pass-through
+request received during an observation leaves the event awaiting ACK under that
+deadline. The daemon emits the pass-through terminal record only after ACK and a
+successful CONTINUE. A shutdown command takes precedence if it arrives alongside
+pass-through. Without ACK it aborts the observation. Malformed or absent ACK is
+terminal. A listener ACK write error or short write closes the endpoint before
+another frame. Processing failure remains primary and ACK/cleanup failures remain
+suppressed. Invalid TID is a protocol violation without publication/ACK.
 Rejected event bodies after a valid TID still discharge their one ACK obligation.
 Any rejection during graceful drain remains incomplete evidence.
 Normal producer exit and requested pass-through publish a distinct bounded

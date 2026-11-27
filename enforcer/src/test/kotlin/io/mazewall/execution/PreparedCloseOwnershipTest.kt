@@ -21,10 +21,13 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.TestProcessLauncher
+import io.mazewall.platform.lifecycle.UsesProcessDescriptors
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.platform.process.JvmChildProcess
+import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.api.parallel.Execution
@@ -42,6 +45,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @Execution(ExecutionMode.CONCURRENT)
+@UsesProcessDescriptors
 class PreparedCloseOwnershipTest {
     @TempDir lateinit var directory: Path
 
@@ -215,13 +219,13 @@ class PreparedCloseOwnershipTest {
                     directory.toString(),
                     mode,
                 ),
-        ).redirectErrorStream(true)
+        )
         JvmChildProcess.stripInheritedJvmOptions(builder.environment())
-        val process = builder.start()
+        val log = directory.resolve("close-ownership-$mode.log")
+        val process = TestProcessLauncher.startWithLog(builder, log)
         try {
             assertTrue(process.waitFor(20, TimeUnit.SECONDS), "Close ownership probe must finish")
-            val output = process.inputStream.readNBytes(65536).toString(Charsets.UTF_8)
-            assertEquals(0, process.exitValue(), output)
+            Assertions.assertEquals(0, process.exitValue()) { TestProcessLauncher.readLog(log) }
             if (coverageFile != null) validateOwnedCoverage(coverageFile, Path.of(checkNotNull(agent)))
         } finally {
             if (process.isAlive) process.destroyForcibly()

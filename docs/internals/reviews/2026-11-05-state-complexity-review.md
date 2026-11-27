@@ -323,7 +323,7 @@ sections and focused scope metadata. No resolved issue was reopened.
 
 | Finding | Action | Canonical owner |
 |---|---|---|
-| 1 / C-01 | NEW, high | [Executor collection lifetime](../backlog/issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) |
+| 1 / C-01 | NEW, high | [Executor collection lifetime](../backlog/resolved/issue-20261105-182827-544-retain-profiler-collection-until-accepted-executor.md) |
 | 2 / A-01 | EXTEND | [Effective installed actions](../backlog/resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
 | 3 / C-02 | EXTEND | [Measured behavior binding](../backlog/issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) |
 | 4 / D-01 | EXTEND | [Tier E resource ownership](../backlog/issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md) |
@@ -331,7 +331,7 @@ sections and focused scope metadata. No resolved issue was reopened.
 | 6 / D-02 | EXTEND | [Definition-source accounting](../backlog/issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-.md) |
 | 7 / D-03 | EXTEND | [Strict terminal identity](../backlog/issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) |
 | 8 / D-04 | NEW, medium | [Native cache lifetime coverage](../backlog/issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) |
-| 9 / A-02 | NEW, medium | [BPF command/descriptor ownership](../backlog/issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) |
+| 9 / A-02 | Resolved, medium | [BPF command/descriptor ownership](../backlog/resolved/issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) |
 | 10 / C-03 | NEW, medium | [Malformed recorded eBPF](../backlog/issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) |
 | 11 / F-02 | EXTEND, conditional | [Retained ingestion identities](../backlog/issue-20261103-235259-662-preserve-canonical-issue-identities-in-any-retaine.md) |
 | 12 / F-03 | EXTEND | [Consumer evidence drain](../backlog/issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) |
@@ -354,8 +354,8 @@ so another restatement was deliberately not appended.
 | Portal codegen | One position-safe immutable schema drives declarations, codecs and fingerprint | [CG02 schema](../backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md), [CG03 identity](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |
 | Generated wire/reply validation | Parse/finish validation before invocation or checkout release | [CG04 parsing](../backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md), [CG05 checkout](../backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) |
 | Replacement worker custody | Registered provisional owner until published or physically retired | [Replacement ownership](../backlog/issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) |
-| Profiler ACK | `AwaitingAck(id,afterAck)` defers pass-through across socket reads | [ACK ordering](../backlog/issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) |
-| Listener readiness | Typed one-shot `Ready | Failed(cause)` before waiter wakeup | [Startup outcome](../backlog/issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) |
+| Profiler ACK | `AwaitingAck(id,afterAck)` defers pass-through across socket reads | [ACK ordering](../backlog/resolved/issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) |
+| Listener readiness | Typed one-shot `Ready | Failed(cause)` before waiter wakeup | [Startup outcome](../backlog/resolved/issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) |
 | Spring shutdown | Framework callback does not replace physical runtime/dependency retention | [Framework retirement](../backlog/issue-20261103-235255-089-tie-spring-lifecycle-completion-to-physical-retire.md) |
 
 Keep the existing successful exemplars: concrete BPF builder stages and immutable

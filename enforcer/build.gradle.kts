@@ -1,5 +1,9 @@
 import java.io.File
 import java.math.BigDecimal
+import java.nio.file.FileSystemException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 plugins {
     id("mazewall.quality-conventions")
@@ -180,10 +184,44 @@ fun Test.configureConfinedHelperLane() {
     }
 }
 // END confined helper CI routing
+
+fun mapFilesOpenDenied(): Boolean {
+    val dir = Path.of("/proc/self/map_files")
+    if (!Files.isDirectory(dir)) return false
+    val entry =
+        Files.newDirectoryStream(dir).use { stream ->
+            val entries = stream.iterator()
+            if (entries.hasNext()) entries.next() else null
+        }
+    if (entry == null) return false
+    return try {
+        Files.newByteChannel(entry, StandardOpenOption.READ).close()
+        false
+    } catch (failure: FileSystemException) {
+        val reason = failure.reason ?: failure.message.orEmpty()
+        reason.contains("not permitted") || reason.contains("Permission denied")
+    }
+}
+
+fun Test.rejectUnopenableAllLane() {
+    if (mazewallKernelLane != "ALL") return
+    // Probe at execution. A configuration-time directory listing is a changing cache input.
+    doFirst {
+        if (mapFilesOpenDenied()) {
+            error(
+                "Lane ALL cannot open /proc/self/map_files on this host. " +
+                    "From the checkout root, ./gradlew build runs BASELINE here and CONFINED in Docker. " +
+                    "Host only: -PmazewallKernelLane=BASELINE",
+            )
+        }
+    }
+}
+
 val integrationTest =
     tasks.register<Test>("integrationTest") {
         configureEnforcerIntegrationPrerequisites()
         configureConfinedHelperLane()
+        rejectUnopenableAllLane()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
@@ -258,11 +296,13 @@ pitest {
     // Core security logic must have high mutation coverage
     targetClasses.set(
         setOf(
-            "io.mazewall.Policy*",
-            "io.mazewall.BpfFilter*",
-            "io.mazewall.SbobParser*",
+            "io.mazewall.enforcer.api.Policy",
+            "io.mazewall.enforcer.api.Policy\$*",
+            "io.mazewall.enforcer.api.PolicyKt",
+            "io.mazewall.enforcer.internal.seccomp.BpfFilter*",
+            "io.mazewall.enforcer.api.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
-            "io.mazewall.enforcer.PolicyCombining*",
+            "io.mazewall.enforcer.api.PolicyDefinition*",
             "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine*",
             "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
@@ -283,9 +323,9 @@ pitest {
     // PBTs run hundreds of iterations per mutant, causing combinatorial explosion and minion timeouts.
     targetTests.set(
         setOf(
-            "io.mazewall.PolicyTest",
+            "io.mazewall.enforcer.api.PolicyTest",
             "io.mazewall.seccomp.BpfFilterTest",
-            "io.mazewall.SbobParserTest",
+            "io.mazewall.enforcer.api.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
             "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachineTest",
             "io.mazewall.enforcer.ContainmentStateRegistryTest",

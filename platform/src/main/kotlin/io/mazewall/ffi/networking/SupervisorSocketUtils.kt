@@ -5,6 +5,7 @@ import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.CmsghdrSegment
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.IovecSegment
+import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.MsghdrSegment
 import io.mazewall.ffi.memory.SockaddrUnSegment
 import io.mazewall.ffi.memory.unwrap
@@ -134,13 +135,37 @@ internal object SupervisorSocketUtils {
         fdToSend: Int,
     ): Boolean = sendDescriptor(socketFd, fdToSend, LinuxNative.snapshot().networking)
 
-    /** Descriptor transfer using the caller's captured native transport. */
+    /** Raw compatibility entrypoint. The caller owns both integer lifetimes. */
     @io.mazewall.platform.lifecycle.MazewallInternal
     public fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
         networking: NativeNetworking,
         beforeAttempt: (() -> Unit)? = null,
+    ): Boolean =
+        sendDescriptorMessage(beforeAttempt) { cmsg, msg, flags ->
+            cmsg.setDataFd(fdToSend)
+            networking.sendmsg(FileDescriptor.unixSocket(socketFd), msg, flags)
+        }
+
+    /** Uses the original tracked generations through each native send attempt. */
+    @io.mazewall.platform.lifecycle.MazewallInternal
+    internal fun sendDescriptor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+        fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
+        networking: NativeNetworking,
+        beforeAttempt: (() -> Unit)? = null,
+    ): Boolean =
+        sendDescriptorMessage(beforeAttempt) { cmsg, msg, flags ->
+            FdEpoch.withLivePair(socketFd, fdToSend) {
+                cmsg.setDataFd(fdToSend.value)
+                networking.sendmsg(socketFd, msg, flags)
+            }
+        }
+
+    private fun sendDescriptorMessage(
+        beforeAttempt: (() -> Unit)?,
+        send: (CmsghdrSegment, ManagedSegment, Int) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>?,
     ): Boolean {
         io.mazewall.ffi.memory.NativeArena.ofConfined().use { nativeArena ->
             val arena = nativeArena.arena
@@ -153,7 +178,6 @@ internal object SupervisorSocketUtils {
             cmsg.setCmsgLen(CMSG_RIGHTS_LEN)
             cmsg.setCmsgLevel(SOL_SOCKET)
             cmsg.setCmsgType(SCM_RIGHTS)
-            cmsg.setDataFd(fdToSend)
 
             val iov = IovecSegment(arena.allocate(Layouts.IOVEC))
             iov.setIovBase(dummyByte)
@@ -164,17 +188,19 @@ internal object SupervisorSocketUtils {
             msg.setMsgIovlen(1L)
             msg.setMsgControl(controlBuf)
             msg.setMsgControllen(CMSG_RIGHTS_LEN)
+            val message = ConfinedSegment(msg.segment)
+            val flags = if (beforeAttempt == null) 0 else 0x40 // MSG_DONTWAIT after readiness polling.
 
             while (true) {
                 beforeAttempt?.invoke()
-                val res = networking.sendmsg(FileDescriptor.unixSocket(socketFd), ConfinedSegment(msg.segment), if (beforeAttempt == null) 0 else 0x40)
-                if (res is LinuxNative.SyscallResult.Success) {
-                    return res.value == 1L
-                } else {
-                    val errno = (res as LinuxNative.SyscallResult.Error).errno
-                    if (errno == io.mazewall.ffi.NativeConstants.EINTR) continue
-                    if (beforeAttempt != null && errno == NativeConstants.EAGAIN) continue
-                    return false
+                when (val result = send(cmsg, message, flags)) {
+                    null -> return false
+                    is LinuxNative.SyscallResult.Success -> return result.value == 1L
+                    is LinuxNative.SyscallResult.Error -> {
+                        if (result.errno == NativeConstants.EINTR) continue
+                        if (beforeAttempt != null && result.errno == NativeConstants.EAGAIN) continue
+                        return false
+                    }
                 }
             }
         }

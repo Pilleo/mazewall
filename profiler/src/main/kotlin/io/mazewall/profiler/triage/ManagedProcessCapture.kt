@@ -3,17 +3,34 @@ package io.mazewall.profiler.triage
 import java.io.IOException
 import java.time.Duration
 import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /** Owns a diagnostic child process, its streams, and its bounded reaping protocol. */
 internal class ManagedProcessCapture private constructor(
     internal val process: Process,
 ) : AutoCloseable {
-    fun readStdout(timeout: Duration): String {
-        val executor = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "process-capture").apply { isDaemon = true } }
-        val capture = runCatching { captureOutput(executor, timeout) }
+    data class Output(
+        val stdout: String,
+        val stderr: String,
+    )
+
+    fun readStdout(timeout: Duration): String = readStreams(timeout, Callable(::readStdoutToEnd)).single()
+
+    fun readOutput(timeout: Duration): Output {
+        val (stdout, stderr) = readStreams(timeout, Callable(::readStdoutToEnd), Callable(::readStderr))
+        return Output(stdout, stderr)
+    }
+
+    private fun readStreams(
+        timeout: Duration,
+        vararg readers: Callable<String>,
+    ): List<String> {
+        val executor = Executors.newFixedThreadPool(readers.size) { runnable -> Thread(runnable, "process-capture").apply { isDaemon = true } }
+        val capture = runCatching { captureOutput(executor, timeout, readers) }
         val cleanupFailure = stopReader(executor, timeout)
         return capture.fold(
             onSuccess = { output ->
@@ -28,21 +45,51 @@ internal class ManagedProcessCapture private constructor(
     }
 
     private fun captureOutput(
-        executor: java.util.concurrent.ExecutorService,
+        executor: ExecutorService,
         timeout: Duration,
-    ): String {
-        val output = executor.submit(Callable { process.inputStream.bufferedReader().use { it.readText() } })
+        readers: Array<out Callable<String>>,
+    ): List<String> {
+        val start = System.nanoTime()
+        val completed = ExecutorCompletionService<IndexedValue<String>>(executor)
+        readers.forEachIndexed { index, read -> completed.submit { IndexedValue(index, read.call()) } }
+        val outputs = Array(readers.size) { "" }
         try {
-            return output.get(timeout.toMillis(), TimeUnit.MILLISECONDS)
-        } catch (failure: TimeoutException) {
-            output.cancel(true)
-            terminateAndReap(timeout)
-            throw IOException("Process output capture timed out after ${timeout.toSeconds()}s", failure)
+            repeat(readers.size) {
+                val remaining = timeout.toNanos() - (System.nanoTime() - start)
+                val future = completed.poll(remaining.coerceAtLeast(0), TimeUnit.NANOSECONDS)
+                if (future == null) {
+                    terminateAndReap(timeout)
+                    throw IOException("Process output capture timed out after ${timeout.toMillis()} ms")
+                }
+                val (index, output) = future.get()
+                outputs[index] = output
+            }
+        } catch (failure: ExecutionException) {
+            throw failure.cause ?: failure
         }
+        return outputs.asList()
     }
 
+    private fun readStdoutToEnd(): String = process.inputStream.bufferedReader().use { it.readText() }
+
+    private fun readStderr(): String =
+        process.errorStream.bufferedReader().use { reader ->
+            val prefix = StringBuilder()
+            val buffer = CharArray(MAX_STDERR_CHARACTERS)
+            var truncated = false
+            while (true) {
+                val read = reader.read(buffer)
+                if (read == -1) break
+                val keep = minOf(read, MAX_STDERR_CHARACTERS - prefix.length)
+                prefix.append(buffer, 0, keep)
+                if (keep < read) truncated = true
+            }
+            if (truncated) prefix.append(" [truncated]")
+            prefix.toString()
+        }
+
     private fun stopReader(
-        executor: java.util.concurrent.ExecutorService,
+        executor: ExecutorService,
         timeout: Duration,
     ): IOException? {
         executor.shutdownNow()
@@ -61,7 +108,7 @@ internal class ManagedProcessCapture private constructor(
     fun awaitExit(timeout: Duration): Int {
         if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
             terminateAndReap(timeout)
-            throw IOException("Process did not exit within ${timeout.toSeconds()}s")
+            throw IOException("Process did not exit within ${timeout.toMillis()} ms")
         }
         return process.exitValue()
     }
@@ -102,6 +149,7 @@ internal class ManagedProcessCapture private constructor(
 
     internal companion object {
         private const val CLOSE_TIMEOUT_SECONDS = 5L
+        private const val MAX_STDERR_CHARACTERS = 2048
 
         fun start(builder: ProcessBuilder): ManagedProcessCapture = ManagedProcessCapture(builder.start())
     }

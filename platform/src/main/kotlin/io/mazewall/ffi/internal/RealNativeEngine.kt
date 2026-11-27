@@ -835,25 +835,7 @@ internal object RealNativeMemory : NativeMemory {
         return SyscallInvoker.write(WRITE, fd.value, buf.native, count)
     }
 
-    context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
-        require(filters.size <= NativeConstants.BPF_MAXINSNS) {
-            "BPF program exceeds kernel maximum instruction limit of ${NativeConstants.BPF_MAXINSNS} instructions"
-        }
-        val rawArena = arena.arena
-        val filterArraySeg = with(rawArena) { SockFilterSegment.allocateArray(filters.size) }
-        for (i in filters.indices) {
-            val f = filters[i]
-            val segment = SockFilterSegment(filterArraySeg.asSlice(i * Layouts.SOCK_FILTER_SIZE, Layouts.SOCK_FILTER_SIZE))
-            segment.setCode(f.code)
-            segment.setJt(f.jt.toByte())
-            segment.setJf(f.jf.toByte())
-            segment.setK(f.k)
-        }
-        val prog = with(rawArena) { SockFprogSegment.allocate() }
-        prog.setLen(filters.size.toShort())
-        prog.setFilter(filterArraySeg)
-        return ConfinedSegment(prog.segment)
-    }
+    context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment = with(arena.arena) { SockFilterSegment.packProgram(filters) }
 }
 
 internal object RealNativeHelper {

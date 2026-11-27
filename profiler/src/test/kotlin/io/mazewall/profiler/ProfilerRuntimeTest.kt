@@ -4,6 +4,7 @@ import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.enforcer.api.MockPlatformProvider
 import io.mazewall.enforcer.api.Platform
+import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readByte
@@ -27,6 +28,7 @@ import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.NativeSocketInputStream
 import io.mazewall.profiler.internal.ProfilerDaemonManager
+import io.mazewall.profiler.internal.TraceListenerProtocolException
 import io.mazewall.profiler.internal.engine.RealProfilerInstaller
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import io.mazewall.seccomp.BpfInstruction
@@ -34,10 +36,13 @@ import io.mazewall.seccomp.BpfProgram
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.io.EOFException
+import java.io.IOException
 import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -55,6 +60,81 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ProfilerRuntimeTest {
+    enum class StartupFailure { InvalidAck, EndOfStream, NativeRead, ThrownRead }
+
+    @Test
+    @Timeout(10)
+    fun `valid listener startup permits TSYNC before workload`() {
+        val calls = CopyOnWriteArrayList<String>()
+        val service = startupService(calls)
+        try {
+            val result = service.profile(processWide = true) {
+                calls.add("workload")
+                "profiled"
+            }
+            assertEquals("profiled", result.value)
+            val phases = listOf("read", "install-tsync", "workload")
+            assertEquals(phases, calls.filter { it in phases }.distinct())
+            assertEquals(1, calls.count { it == "install-tsync" })
+        } finally {
+            service.shutdown()
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(StartupFailure::class)
+    @Timeout(10)
+    fun `rejected listener startup reaches the caller before TSYNC and workload`(startup: StartupFailure) {
+        val calls = CopyOnWriteArrayList<String>()
+        val original = IOException("injected listener read failure")
+        val service = startupService(calls) { buffer ->
+            when (startup) {
+                StartupFailure.InvalidAck -> {
+                    buffer.writeByte(0, 0)
+                    LinuxNative.SyscallResult.Success(1L)
+                }
+                StartupFailure.EndOfStream -> LinuxNative.SyscallResult.Success(0L)
+                StartupFailure.NativeRead -> LinuxNative.SyscallResult.Error(NativeConstants.EIO, -1L)
+                StartupFailure.ThrownRead -> throw original
+            }
+        }
+        try {
+            val failure = assertFailsWith<IOException> {
+                service.profile(processWide = true) { calls.add("workload") }
+            }
+            when (startup) {
+                StartupFailure.InvalidAck -> assertIs<TraceListenerProtocolException>(failure)
+                StartupFailure.EndOfStream -> assertIs<EOFException>(failure)
+                StartupFailure.NativeRead -> assertTrue(failure.message.orEmpty().contains("errno=5 (EIO)"))
+                StartupFailure.ThrownRead -> kotlin.test.assertSame(original, failure)
+            }
+            assertEquals(0, calls.count { it == "install-tsync" || it == "workload" })
+            assertEquals(1, calls.count { it == "close:701" })
+            assertEquals(1, calls.count { it == "close:702" })
+        } finally {
+            service.shutdown()
+        }
+    }
+
+    private fun startupService(
+        calls: MutableList<String>,
+        firstRead: ((ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null,
+    ): ProfilerService {
+        val native = installationEngine(calls, firstRead = firstRead)
+        native.onSyscall = { _, _, flags, _, _, _, _ ->
+            when (flags.asLong) {
+                8L -> LinuxNative.SyscallResult.Success(701L)
+                1L -> {
+                    calls.add("install-tsync")
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+                else -> error("Unexpected seccomp flags: $flags")
+            }
+        }
+        val manager = ProfilerDaemonManager(native, ProfilerTest.MockSocketManager(), ProfilerTest.MockProcessLauncher())
+        return ProfilerService(ProfilerRuntime({ manager }, RealProfilerInstaller(native, true), { native.process.gettid() }, native))
+    }
+
     @Test
     @Timeout(20)
     fun `close waits only for an already committed native installation`() {
@@ -296,6 +376,7 @@ class ProfilerRuntimeTest {
         beforeRead: () -> Unit = {},
         onPassThrough: () -> Unit = {},
         onBpfAllocation: (Int) -> Unit = {},
+        firstRead: ((ManagedSegment) -> LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>)? = null,
     ): MockNativeEngine {
         val bytes = ByteArrayOutputStream()
         DataOutputStream(bytes).use { output ->
@@ -319,6 +400,8 @@ class ProfilerRuntimeTest {
         val drained = CountDownLatch(1)
         val allocations = AtomicInteger()
         val memory = object : MockNativeMemory() {
+            private var readingStartup = true
+
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
                 calls.add("bpf")
                 val program = super.newSockFProg(filters)
@@ -332,6 +415,10 @@ class ProfilerRuntimeTest {
                 count: Long,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 calls.add("read")
+                if (readingStartup) {
+                    readingStartup = false
+                    firstRead?.let { return it(buf) }
+                }
                 if (input.available() > 0) beforeRead()
                 val length = minOf(input.available(), count.toInt())
                 repeat(length) { buf.writeByte(it.toLong(), input.read().toByte()) }

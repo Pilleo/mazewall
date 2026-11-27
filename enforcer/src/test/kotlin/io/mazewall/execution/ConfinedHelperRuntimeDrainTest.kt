@@ -51,6 +51,7 @@ import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.NativeCloseFailure
 import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.TestProcessLauncher
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.InvocationId
 import io.mazewall.platform.native.LinuxNative
@@ -81,6 +82,7 @@ import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.PrctlCommand
 import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -581,25 +583,13 @@ class ConfinedHelperRuntimeDrainTest {
                     directory.toString(),
                     mode,
                 )
-            val process = ProcessBuilder(command)
-                .redirectErrorStream(true)
-                .also { JvmChildProcess.stripInheritedJvmOptions(it.environment()) }
-                .start()
-            val output = CompletableFuture.supplyAsync {
-                process.inputStream.use { input ->
-                    val retained = java.io.ByteArrayOutputStream()
-                    val buffer = ByteArray(4096)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        retained.write(buffer, 0, minOf(count, (65536 - retained.size()).coerceAtLeast(0)))
-                    }
-                    retained.toString(Charsets.UTF_8)
-                }
-            }
+            val builder = ProcessBuilder(command)
+            JvmChildProcess.stripInheritedJvmOptions(builder.environment())
+            val log = directory.resolve("support-close-$mode.log")
+            val process = TestProcessLauncher.startWithLog(builder, log)
             try {
                 assertTrue(process.waitFor(45, TimeUnit.SECONDS), "support ownership child did not finish")
-                assertEquals(0, process.exitValue(), output.get(5, TimeUnit.SECONDS))
+                Assertions.assertEquals(0, process.exitValue()) { TestProcessLauncher.readLog(log) }
             } finally {
                 if (process.isAlive) process.destroyForcibly()
                 assertTrue(process.waitFor(5, TimeUnit.SECONDS), "support ownership child was not reaped")
@@ -3937,22 +3927,31 @@ class ConfinedHelperRuntimeDrainTest {
             val policy = (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy
             val owner = DirectResolutionCapture.create()
             val direct = owner.prepare(RuntimeProfile.HOTSPOT_JIT, policy, fixture.resources.implementationClass, emptySet())
-            val completed = fixture.manager.completedTaskCount
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val blocker = fixture.manager.submit {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
             val nativeCalls = AtomicInteger()
             beforeNative = { nativeCalls.incrementAndGet() }
             try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertTrue(fixture.manager.queue.isEmpty())
                 val failure = assertFailsWith<IllegalStateException> {
                     fixture.runtime.prepareConfinedRead(fixture.reviewed, DomainLimits(1, 1), direct, fixture.endpoint.context, fixture.support, HelperSupportLifetime.NoWriters)
                 }
                 assertTrue(failure.message.orEmpty().contains("Direct result confined preparation is not available"))
-                assertEquals(completed, fixture.manager.completedTaskCount)
+                assertTrue(fixture.manager.queue.isEmpty(), "A direct result must not queue a manager task")
                 assertEquals(0, nativeCalls.get())
                 val helperDrain = ManagedRuntime::class.java.getDeclaredField("helperDrainMode").apply { isAccessible = true }
                 assertFalse(helperDrain.getBoolean(fixture.runtime))
                 direct.validate()
             } finally {
+                release.countDown()
                 beforeNative = {}
                 direct.close()
+                blocker.get(5, TimeUnit.SECONDS)
             }
         }
 

@@ -3,6 +3,8 @@ package io.mazewall.build;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
@@ -18,10 +20,7 @@ final class RootVerificationFunctionalTest {
             Path fixture = Files.createTempDirectory("root-verification-");
             System.out.println("Root verification fixture: " + fixture);
             Files.createDirectory(fixture.resolve("empty-plugin-repository"));
-            Path testKitRoot = Path.of(System.getProperty("org.gradle.testkit.dir"));
-            Files.createDirectories(testKitRoot);
-            Path fixtureTestKit = Files.createDirectories(testKitRoot.resolve("root-verification"));
-            System.out.println("Root verification TestKit cache: " + fixtureTestKit);
+            Path fixtureTestKit = fixtureTestKit(fixture, "root-verification");
             write(fixture, "settings.gradle.kts", """
                 pluginManagement {
                     repositories { maven { url = uri(rootDir.resolve("empty-plugin-repository")) } }
@@ -178,7 +177,7 @@ final class RootVerificationFunctionalTest {
                 """);
             write(fixture, "portals/build.gradle.kts", "plugins { base }\n");
 
-            prepareFixtureDependencies(fixture, fixtureTestKit);
+            prepareFixtureDependencies(fixtureRunner(fixture, fixtureTestKit).withPluginClasspath());
             BuildResult selected = run(fixture, fixtureTestKit, false,
                 ":integrations:build", ":core:build", ":portals:build", ":unitCheck", ":kernelCheck",
                 ":integrations:spring:java-leaf:verifyCoverageSelection");
@@ -421,7 +420,14 @@ final class RootVerificationFunctionalTest {
             Path repository = rootBuild.getParent();
             Path fixture = Files.createTempDirectory("root-failure-triage-");
             System.out.println("Root failure triage fixture: " + fixture);
-            write(fixture, "settings.gradle.kts", "rootProject.name = \"failure-triage-fixture\"\ninclude(\":leaf\", \":peer\", \":unused\", \":profiler\")\n");
+            Path fixtureTestKit = fixtureTestKit(fixture, "");
+            write(fixture, "settings.gradle.kts", """
+                rootProject.name = "failure-triage-fixture"
+                include(":leaf", ":peer", ":unused", ":profiler")
+                if ("prepareFixtureDependencies" !in gradle.startParameter.taskNames) {
+                    check(gradle.startParameter.isOffline) { "Failure-triage controls must run offline" }
+                }
+                """);
             write(fixture, "gradle.properties", "org.gradle.caching=true\n");
             write(fixture, "gradle/libs.versions.toml", Files.readString(repository.resolve("gradle/libs.versions.toml")));
             Files.copy(repository.resolve("gradle/verification-metadata.xml"),
@@ -485,32 +491,32 @@ final class RootVerificationFunctionalTest {
                 """);
             write(fixture, "unused/build.gradle.kts", "plugins { java }\n");
 
-            prepareFixtureDependencies(fixture, null);
+            prepareFixtureDependencies(fixtureRunner(fixture, fixtureTestKit));
             write(fixture, "leaf/mode.txt", "fail");
-            BuildResult first = triageRun(fixture, "cc-first", true, true, false, ":leaf:test");
+            BuildResult first = triageRun(fixture, fixtureTestKit, "cc-first", true, true, false, ":leaf:test");
             xmlCounts(fixture, 1, 1);
             contains(first, "Configuration cache entry stored.");
-            BuildResult reused = triageRun(fixture, "cc-reuse", true, true, false, ":leaf:test");
+            BuildResult reused = triageRun(fixture, fixtureTestKit, "cc-reuse", true, true, false, ":leaf:test");
             xmlCounts(fixture, 1, 1);
             contains(reused, "Reusing configuration cache.");
 
             // Stale results from an unselected Test must not trigger this invocation's collector.
             write(fixture, "unused/build/test-results/test/TEST-stale.xml", "<testsuite tests=\"1\" failures=\"1\"/>\n");
             write(fixture, "leaf/mode.txt", "pass");
-            BuildResult success = triageRun(fixture, "success-after-failure", false, false, false, ":leaf:test");
+            BuildResult success = triageRun(fixture, fixtureTestKit, "success-after-failure", false, false, false, ":leaf:test");
             xmlCounts(fixture, 1, 0);
             contains(success, "Reusing configuration cache.");
-            BuildResult unchanged = triageRun(fixture, "up-to-date-with-stale-xml", false, false, false, ":leaf:test");
+            BuildResult unchanged = triageRun(fixture, fixtureTestKit, "up-to-date-with-stale-xml", false, false, false, ":leaf:test");
             outcome(unchanged, ":leaf:test", TaskOutcome.UP_TO_DATE);
             contains(unchanged, "Reusing configuration cache.");
-            BuildResult noSource = triageRun(fixture, "no-source-with-stale-xml", false, false, false, ":unused:test");
+            BuildResult noSource = triageRun(fixture, fixtureTestKit, "no-source-with-stale-xml", false, false, false, ":unused:test");
             outcome(noSource, ":unused:test", TaskOutcome.NO_SOURCE);
 
             for (String mode : List.of("prexml", "predicate", "crash")) {
                 Path xml = fixture.resolve("leaf/build/test-results/test/TEST-ControlledTest.xml");
                 Files.deleteIfExists(xml);
                 write(fixture, "leaf/mode.txt", mode);
-                BuildResult failed = triageRun(fixture, mode, true, true, false, ":leaf:test");
+                BuildResult failed = triageRun(fixture, fixtureTestKit, mode, true, true, false, ":leaf:test");
                 contains(failed, "Reusing configuration cache.");
                 if (mode.equals("crash")) {
                     contains(failed, "non-zero exit value 17");
@@ -521,9 +527,9 @@ final class RootVerificationFunctionalTest {
             }
             write(fixture, "leaf/mode.txt", "fail");
             // Require a current successful sibling event, even with a populated shared build cache.
-            BuildResult siblings = triageRun(fixture, "parallel-siblings", true, true, true, ":leaf:test", ":peer:test", "--rerun");
+            BuildResult siblings = triageRun(fixture, fixtureTestKit, "parallel-siblings", true, true, true, ":leaf:test", ":peer:test", "--rerun");
             outcome(siblings, ":peer:test", TaskOutcome.SUCCESS);
-            BuildResult nonTest = triageRun(fixture, "non-test-failure", true, false, true, ":nonTestFailure", ":runTriage");
+            BuildResult nonTest = triageRun(fixture, fixtureTestKit, "non-test-failure", true, false, true, ":nonTestFailure", ":runTriage");
             contains(nonTest, "CONTROLLED_NON_TEST_FAILURE");
 
             // Force event delivery to lag behind the barrier task, using the production handler.
@@ -600,11 +606,12 @@ final class RootVerificationFunctionalTest {
                 }
                 """);
             // Compile the collector against the changed fixture buildSrc before withholding Test events.
-            run(fixture, false, ":profiler:jar");
+            fixtureRunner(fixture, fixtureTestKit)
+                .withArguments(":profiler:jar", "--offline", "--no-configuration-cache", "--max-workers=2", "--stacktrace").build();
             for (String label : List.of("delayed-cc-first", "delayed-cc-reuse", "delayed-no-cc")) {
                 BuildResult delayed = label.equals("delayed-no-cc")
-                    ? triageRun(fixture, label, true, true, false, ":leaf:test", "--no-configuration-cache")
-                    : triageRun(fixture, label, true, true, false, ":leaf:test");
+                    ? triageRun(fixture, fixtureTestKit, label, true, true, false, ":leaf:test", "--no-configuration-cache")
+                    : triageRun(fixture, fixtureTestKit, label, true, true, false, ":leaf:test");
                 if (!label.equals("delayed-no-cc")) {
                     contains(delayed, label.endsWith("first") ? "Configuration cache entry stored." : "Reusing configuration cache.");
                 }
@@ -618,7 +625,7 @@ final class RootVerificationFunctionalTest {
                     throw new AssertionError("Did not exercise/drain asynchronous Test completion before triage: " + fixture);
                 }
             }
-            BuildResult handshakeTimeout = triageRun(fixture, "handshake-timeout", true, true, false,
+            BuildResult handshakeTimeout = triageRun(fixture, fixtureTestKit, "handshake-timeout", true, true, false,
                 ":leaf:test", ":rejectHandshakeTimeout", "--continue");
             outcome(handshakeTimeout, ":rejectHandshakeTimeout", TaskOutcome.FAILED);
             contains(handshakeTimeout, "FIXTURE_PRE_AWAIT_MARKER");
@@ -630,17 +637,15 @@ final class RootVerificationFunctionalTest {
         }
     }
 
-    private static BuildResult triageRun(Path fixture, String label, boolean fail, boolean triage, boolean parallel, String... tasks) throws Exception {
+    private static BuildResult triageRun(Path fixture, Path fixtureTestKit, String label, boolean fail, boolean triage, boolean parallel, String... tasks) throws Exception {
         Path report = fixture.resolve("build/triage_report.json");
         Files.deleteIfExists(report);
-        var arguments = new java.util.ArrayList<>(List.of(tasks));
+        var arguments = new ArrayList<>(List.of(tasks));
         if (!arguments.contains("--no-configuration-cache")) arguments.add("--configuration-cache");
-        arguments.addAll(List.of("--max-workers=2", "--stacktrace"));
+        arguments.addAll(List.of("--offline", "--max-workers=2", "--stacktrace"));
         if (parallel) arguments.addAll(List.of("--parallel", "--continue"));
-        String home = System.getenv("GRADLE_USER_HOME");
-        if (home != null) arguments.addAll(List.of("--gradle-user-home", home));
         write(fixture, "evidence/" + label + ".argv", String.join("\n", arguments) + "\n");
-        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments);
+        GradleRunner runner = fixtureRunner(fixture, fixtureTestKit).withArguments(arguments);
         BuildResult result = fail ? runner.buildAndFail() : runner.build();
         write(fixture, "evidence/" + label + ".log", result.getOutput());
         contains(result, fail ? "BUILD FAILED" : "BUILD SUCCESSFUL");
@@ -727,42 +732,47 @@ final class RootVerificationFunctionalTest {
         return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
     }
 
-    private static BuildResult run(Path fixture, boolean fail, String... tasks) throws java.net.URISyntaxException {
-        return run(fixture, null, fail, tasks);
+    private static Path fixtureTestKit(Path fixture, String relativeHome) throws java.io.IOException {
+        boolean cold = Boolean.getBoolean("mazewall.test.coldFixtureDependencies");
+        if (cold && Boolean.getBoolean("mazewall.test.outerOffline")) {
+            throw new IllegalStateException("Cold fixture dependency preparation requires repository access. Omit outer --offline.");
+        }
+        Path home = cold
+            ? Files.createDirectory(fixture.resolve("test-kit"))
+            : Files.createDirectories(Path.of(System.getProperty("org.gradle.testkit.dir")).resolve(relativeHome));
+        System.out.println("Fixture TestKit home: " + home);
+        return home;
     }
 
-    private static void prepareFixtureDependencies(Path fixture, Path testKit) throws java.net.URISyntaxException {
+    private static GradleRunner fixtureRunner(Path fixture, Path testKit) {
+        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withTestKitDir(testKit.toFile());
+        if (Boolean.getBoolean("mazewall.test.coldFixtureDependencies")) {
+            var environment = new HashMap<>(System.getenv());
+            environment.remove("GRADLE_USER_HOME");
+            environment.remove("GRADLE_RO_DEP_CACHE");
+            runner.withEnvironment(environment);
+        }
+        return runner;
+    }
+
+    private static void prepareFixtureDependencies(GradleRunner runner) {
         String offline = System.getProperty("mazewall.test.outerOffline");
         if (!"true".equals(offline) && !"false".equals(offline)) {
             throw new IllegalStateException("Missing or invalid outer Gradle offline mode");
         }
-        var arguments = new java.util.ArrayList<>(List.of(
+        var arguments = new ArrayList<>(List.of(
                 "prepareFixtureDependencies", "--max-workers=2", "--stacktrace", "--no-configuration-cache"));
         if (Boolean.parseBoolean(offline)) arguments.add("--offline");
-        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
-        configurePluginClasspath(runner, testKit);
-        BuildResult result = runner.build();
+        BuildResult result = runner.withArguments(arguments).forwardOutput().build();
         outcome(result, ":prepareFixtureDependencies", TaskOutcome.SUCCESS);
     }
 
-    private static BuildResult run(Path fixture, Path testKit, boolean fail, String... tasks) throws java.net.URISyntaxException {
-        var arguments = new java.util.ArrayList<>(List.of(tasks));
+    private static BuildResult run(Path fixture, Path testKit, boolean fail, String... tasks) {
+        var arguments = new ArrayList<>(List.of(tasks));
         arguments.addAll(List.of("--offline", "--max-workers=2", "--stacktrace"));
         if (!arguments.contains("--configuration-cache")) arguments.add("--no-configuration-cache");
-        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
-        configurePluginClasspath(runner, testKit);
+        GradleRunner runner = fixtureRunner(fixture, testKit).withPluginClasspath().withArguments(arguments).forwardOutput();
         return fail ? runner.buildAndFail() : runner.build();
-    }
-
-    private static void configurePluginClasspath(GradleRunner runner, Path testKit) throws java.net.URISyntaxException {
-        if (testKit != null) {
-            runner.withPluginClasspath().withTestKitDir(testKit.toFile());
-        } else {
-            runner.withPluginClasspath(List.of(
-                    classpathEntry(SpotBugsToolchainPlugin.class),
-                    classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
-                    new java.io.File("build/resources/main").getAbsoluteFile()));
-        }
     }
 
     private static String dependencyPreparationTask() {

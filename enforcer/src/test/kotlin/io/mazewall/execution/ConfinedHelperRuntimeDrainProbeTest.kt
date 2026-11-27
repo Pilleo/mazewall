@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.api.execution
 
+import io.mazewall.platform.lifecycle.UsesProcessDescriptors
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.api.parallel.Execution
@@ -13,6 +14,7 @@ import java.nio.file.Path
  * execution file, touching no shared mutable state in the parent JUnit JVM.
  */
 @Execution(ExecutionMode.CONCURRENT)
+@UsesProcessDescriptors
 class ConfinedHelperRuntimeDrainProbeTest {
     @TempDir lateinit var directory: Path
 
