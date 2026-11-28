@@ -463,7 +463,7 @@ internal class TierEDaemonService(
         check(sessionState != ControlSessionState.Terminated) { "STATE" }
         if (allTargetCapture) session.enableCaptureAdmission()
         attachment.registeredTarget?.let { target ->
-            active.terminalWatch = targetExitCoordinator.watch(target) { finalizeRegisteredTarget(target) }
+            active.terminalWatch = targetExitCoordinator.watch(target) { exit -> finalizeRegisteredTarget(active, exit) }
         }
         activeMarkerTransport = selection.selected.name.lowercase()
         activeMarkerFallbackReason = selection.fallbackReason
@@ -481,11 +481,13 @@ internal class TierEDaemonService(
         } ?: cause
         if (sessionState == ControlSessionState.Terminated) stopRequested.set(activeSession == null)
         val target = runCatching { registeredTargetResolver?.resolve(cmd) }.getOrNull()
-        if (!attachmentAcquired && target != null && processIdentityVerifier.checkAtTerminal(target) != TierEProcessIdentityCheck.MATCHED) {
+        if (!attachmentAcquired && target != null) {
             try {
-                reportRejectedAttach(target, "STALE_PROCESS_IDENTITY")
-            } catch (publicationFailure: Throwable) {
-                failure = recordFinalizationFailure(null, publicationFailure, failure)
+                if (processIdentityVerifier.checkAtTerminal(target) != TierEProcessIdentityCheck.MATCHED) {
+                    reportRejectedAttach(target, "STALE_PROCESS_IDENTITY")
+                }
+            } catch (observationOrPublicationFailure: Throwable) {
+                failure = recordFinalizationFailure(null, observationOrPublicationFailure, failure)
             }
         }
         if (failure is Error) throw failure
@@ -551,8 +553,15 @@ internal class TierEDaemonService(
     }
 
     @Synchronized
-    private fun finalizeRegisteredTarget(target: TierERegisteredTarget) {
-        if (activeSession?.registeredTarget != target) return
+    private fun finalizeRegisteredTarget(
+        active: ActiveSession,
+        exit: TierETargetExit,
+    ) {
+        if (activeSession !== active) {
+            if (exit is TierETargetExit.ObservationFailed && exit.cause is Error) throw exit.cause
+            return
+        }
+        if (exit is TierETargetExit.ObservationFailed) recordFinalizationFailure(active, exit.cause)
         val failure = finishActiveSession(waitForTerminalArtifact = true)
         if (sessionState != ControlSessionState.Terminated) {
             sessionState = activeSession?.let { ControlSessionState.Attached(it.session) } ?: ControlSessionState.Idle

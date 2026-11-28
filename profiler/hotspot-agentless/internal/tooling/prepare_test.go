@@ -3,6 +3,7 @@ package tooling
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,118 @@ import (
 	"testing"
 	"time"
 )
+
+func TestVerifiedPreparationRejectsChangedDependencySources(t *testing.T) {
+	tests := []struct {
+		name       string
+		dependency string
+		file       string
+		remove     bool
+	}{
+		{name: "edited Go body", dependency: "gadget", file: "decoder.go"},
+		{name: "extra Go source", dependency: "profiler", file: "unexpected.go"},
+		{name: "removed addition", dependency: "profiler", file: "addition.go", remove: true},
+		{name: "changed module file", dependency: "gadget", file: "go.mod"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, id := preparedSourceFixture(t)
+			if got, err := verifiedPreparationIdentity(root); err != nil || got != id {
+				t.Fatalf("unmodified preparation: identity %q, error %v", got, err)
+			}
+			path := filepath.Join(root, "build", "deps", test.dependency+"-"+id, test.file)
+			var err error
+			if test.remove {
+				err = os.Remove(path)
+			} else {
+				err = os.WriteFile(path, []byte("modified"), 0644)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := verifiedPreparationIdentity(root); err == nil || !strings.Contains(err.Error(), test.file) {
+				t.Fatalf("expected verification to reject %s, got %v", test.file, err)
+			}
+		})
+	}
+}
+
+func TestVerifiedPreparationPreservesLegacyCacheWithoutInventory(t *testing.T) {
+	root, id := preparedSourceFixture(t)
+	directory := filepath.Join(root, "build", "deps", "gadget-"+id)
+	if err := os.Remove(filepath.Join(directory, sourceInventoryName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifiedPreparationIdentity(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected missing inventory error, got %v", err)
+	}
+	for _, name := range []string{"decoder.go", "go.mod", preparedMarkerName} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			t.Fatalf("existing preparation member %s: %v", name, err)
+		}
+	}
+}
+
+func preparedSourceFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	write := func(name string) string {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	for _, name := range []string{"patches/gadget-additions", "patches/profiler-additions"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inputs, err := preparationInputs(root, standard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range inputs {
+		write(name)
+	}
+	id, err := patchID(root, standard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(root, "dependencies.lock.json"), dependencyLock{}); err != nil {
+		t.Fatal(err)
+	}
+	gadget := filepath.Join("build", "deps", "gadget-"+id)
+	profiler := filepath.Join("build", "deps", "profiler-"+id)
+	write(filepath.Join(gadget, "decoder.go"))
+	write(filepath.Join(gadget, "go.mod"))
+	write(filepath.Join(profiler, "addition.go"))
+	artifacts := make(map[string]string)
+	for _, name := range []string{"support/types.go", "support/ebpf/tracer.ebpf.amd64", "support/ebpf/tracer.ebpf.arm64"} {
+		hash, err := fileHash(write(filepath.Join(profiler, name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifacts[name] = hash
+	}
+	if err := writeJSON(filepath.Join(root, profiler, ".mw-epoch-artifacts.json"), artifacts); err != nil {
+		t.Fatal(err)
+	}
+	provenance := map[string]any{"base_revision": "", "base_sum": "", "patch_sha256": id, "submitted_upstream": false, "fault_injection": nil, "profiler_base_revision": "", "profiler_base_sum": "", "capture_abi": float64(2), "bpf_builder": ""}
+	for _, directory := range []string{gadget, profiler} {
+		if err := recordPreparedDependency(filepath.Join(root, directory), provenance); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writeJSON(filepath.Join(root, "build", "patch-manifest.json"), provenance); err != nil {
+		t.Fatal(err)
+	}
+	return root, id
+}
 
 func TestKobjectWitnessPreparationInputs(t *testing.T) {
 	prefix := []string{

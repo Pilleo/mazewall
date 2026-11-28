@@ -155,9 +155,16 @@ target_include_directories(capture_yield_agent_test PRIVATE include ${JNI_INCLUD
 target_compile_definitions(capture_yield_agent_test PRIVATE MAZEWALL_CAPTURE_YIELD_TEST)
 target_compile_options(capture_yield_agent_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 target_link_options(capture_yield_agent_test PRIVATE -Wl,--wrap=_Znwm)
+add_executable(definition_watermark_test tests/definition_watermark_test.cpp src/live_stack_context.cpp
+    src/live_stack_jni.cpp src/live_stack_checked_projection.cpp)
+target_include_directories(definition_watermark_test PRIVATE include ${JNI_INCLUDE_DIRS})
+target_compile_options(definition_watermark_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME definition_watermark_test
+    COMMAND definition_watermark_test "${CMAKE_CURRENT_BINARY_DIR}/definition-watermark.mzse")
+set_tests_properties(definition_watermark_test PROPERTIES TIMEOUT 30)
 foreach(verifier_target mazewall_stack_agent mazewall_stack_agent_managed_fixture mazewall_stack_agent_jni_test
         live_stack_preparation_fault_1 live_stack_preparation_fault_2 live_stack_agent_test live_stack_preparation_test
-        open_boundary_recorder_test capture_yield_agent_test)
+        open_boundary_recorder_test capture_yield_agent_test definition_watermark_test)
     target_sources(${verifier_target} PRIVATE src/private_sha256.cpp src/live_startup_binding.cpp
         src/live_distribution_manifest.cpp src/live_startup_capture.cpp src/live_java_observation.cpp)
 endforeach()
@@ -378,6 +385,17 @@ add_test(
 )
 set_tests_properties(agent_native_outcome_preservation PROPERTIES
     PASS_REGULAR_EXPRESSION "native-outcome-workload: return=preserved exception=preserved errno=2")
+add_test(
+    NAME agent_checked_jni_native_outcome
+    COMMAND "${Java_JAVA_EXECUTABLE}" -Xcheck:jni "--add-opens=java.base/sun.nio.fs=ALL-UNNAMED"
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED" --enable-native-access=ALL-UNNAMED
+        "-agentpath:$<TARGET_FILE:mazewall_stack_agent>=benchmark-phases"
+        -cp "${AGENT_TEST_CLASSES}" NativeOutcomeWorkload checked
+)
+set_tests_properties(agent_checked_jni_native_outcome PROPERTIES
+    PASS_REGULAR_EXPRESSION "checked-native-outcomes: preserved"
+    FAIL_REGULAR_EXPRESSION "JNI call made with exception pending"
+    TIMEOUT 30)
 add_test(
     NAME agent_smoke_test
     COMMAND "${Java_JAVA_EXECUTABLE}" "-agentpath:$<TARGET_FILE:mazewall_stack_agent>" -cp "${AGENT_TEST_CLASSES}" AgentWorkload

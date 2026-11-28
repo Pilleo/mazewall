@@ -246,13 +246,22 @@ func verifiedPreparationIdentity(root string) (string, error) {
 		return "", err
 	}
 	expected := map[string]any{"base_revision": lock.Gadget.Revision, "base_sum": lock.Gadget.Sum, "patch_sha256": id, "submitted_upstream": false, "fault_injection": nil, "profiler_base_revision": lock.Profiler.Revision, "profiler_base_sum": lock.Profiler.Sum, "capture_abi": float64(2), "bpf_builder": lock.Images["gadget_builder"]}
-	for _, name := range []string{"build/patch-manifest.json", "build/deps/gadget-" + id + "/.mw-prepared.json", "build/deps/profiler-" + id + "/.mw-prepared.json"} {
-		valid, err := markerMatches(filepath.Join(root, name), expected)
+	manifest := filepath.Join(root, "build", "patch-manifest.json")
+	valid, err := markerMatches(manifest, expected)
+	if err != nil {
+		return "", err
+	}
+	if !valid {
+		return "", fmt.Errorf("missing prepared native provenance: %s", manifest)
+	}
+	for _, name := range []string{"gadget-" + id, "profiler-" + id} {
+		directory := filepath.Join(root, "build", "deps", name)
+		valid, err := verifiedPreparedDependency(directory, expected)
 		if err != nil {
 			return "", err
 		}
 		if !valid {
-			return "", fmt.Errorf("missing prepared native provenance: %s", name)
+			return "", fmt.Errorf("missing prepared native provenance: %s", directory)
 		}
 	}
 	if err := verifyEpochArtifacts(filepath.Join(root, "build/deps/profiler-"+id)); err != nil {

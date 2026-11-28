@@ -1,7 +1,7 @@
 ---
 title: "Decouple mandatory security scans from NVD updates with fresh trusted snapshots"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"

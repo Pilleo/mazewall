@@ -90,6 +90,9 @@ Use `GOWORK=off` with the owner's prepared `build/experiment.go.mod`; the SDK mu
 resolve to that released module, not a local workspace replacement. Existing helper
 bundles do not qualify the new graph; rebuild and verify their embedded module
 provenance before distribution. Strict2 and the Kotlin facade retain their scope.
+Preparation and release both verify the file inventory of each generated dependency.
+If an older directory lacks the inventory, or verification reports a changed member,
+move the named generated dependency directory aside before running preparation again.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and

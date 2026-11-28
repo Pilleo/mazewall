@@ -1,7 +1,7 @@
 ---
 title: "Publish native invocation watermarks independently of completion order"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Publish native invocation watermarks independently of completion order
 
 **Context:**
-Repository-wide review, 2026-11-04: [TE-04](../reviews/2026-11-04-repository-review-findings.md#te-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TE-04](../../reviews/2026-11-04-repository-review-findings.md#te-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · confirmed source defect · high confidence · release boundary: opt-in native live snapshot admission/v2 hybrid recovery. NEW producer-ordering defect.**
 
@@ -28,6 +28,10 @@ Repository-wide review, 2026-11-04: [TE-04](../reviews/2026-11-04-repository-rev
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The native writer computes its watermark from the maximum invocation ID it actually emitted, independent of append order. The deterministic native regression failed on the second snapshot before the correction and now passes. The JDK 25 session-bound writer/reader fixtures passed, and the Kotlin reader and admission accepted both actual native snapshots in order. The separate dictionary batch watermark retains its StackTraceId contract.
 
 ---
 <!-- id: issue-20261103-235249-167-publish-native-invocation-watermarks-independently  file: issue-20261103-235249-167-publish-native-invocation-watermarks-independently.md -->

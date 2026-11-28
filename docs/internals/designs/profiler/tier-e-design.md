@@ -2389,9 +2389,11 @@ payload_length   u64 LE
 payload          unchanged MZSD v2 dictionary bytes or MZSD v3 inline bytes
 ```
 
-The watermark is the highest committed `StackTraceId` represented by the committed
-dependency-complete definition set. It is not a byte offset, event sequence, or
-`InvocationId`. A reader admits a live snapshot only when its session identity is
+The native MZSE watermark is the highest `InvocationId` represented by the
+committed definition set, or zero when there are no invocations. Concurrent
+captures may complete out of order, so this bound does not promise that every
+lower invocation ID is present. The separate dictionary batch protocol has a
+`StackTraceId` watermark. A reader admits a live snapshot only when its session identity is
 unbound for legacy compatibility or matches the expected session. A same-ID
 same-content replay is `DUPLICATE_IDENTICAL`; a new identity is `NEW`; a same-ID
 content mismatch is `CONFLICTING` and is terminal dictionary inconsistency.

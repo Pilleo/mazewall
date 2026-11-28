@@ -512,17 +512,42 @@ class TierEDaemonFinalizationTest {
         assertEquals(1, source.detachAttempts)
     }
 
+    @Test
+    fun `watcher observation failure retires collection and retains its cause`() {
+        val source = FinalizationSource().apply {
+            detachFailure = null
+            closeFailure = null
+        }
+        val failObservation = AtomicBoolean(false)
+        val denied = java.nio.file.AccessDeniedException("fixture stat")
+        val reported = CountDownLatch(1)
+        val fixture = fixture(source, sink = TierETerminalReportSink { reported.countDown() }, observe = {
+            if (failObservation.get()) throw denied
+            9876
+        })
+
+        assertTrue(fixture.daemon.executeCommand(ATTACH).startsWith("OK"))
+        failObservation.set(true)
+
+        assertTrue(reported.await(2, TimeUnit.SECONDS))
+        assertTrue(fixture.daemon.executeCommand("STATUS").contains("FINALIZATION_FAILED"))
+        assertSame(denied, assertFailsWith<java.nio.file.AccessDeniedException> { fixture.daemon.shutdown() })
+        assertEquals(0, source.detachAttempts, "failed observation must bypass normal collection finalization")
+        assertEquals(1, source.closeAttempts)
+    }
+
     private fun fixture(
         source: FinalizationSource,
         incarnation: AtomicLong = AtomicLong(9876),
         sink: TierETerminalReportSink? = null,
         resultSink: TierEDaemonResultSink = TierEDaemonResultSink { },
         allTargetCapture: Boolean = false,
+        observe: (Int) -> Long? = { incarnation.get().takeUnless { it == 0L } },
     ): Fixture {
         val target = TierERegisteredTarget("orders", 4242, 0x4d5a, 9876, Path.of("/agent.so"), 0x20, "orders.mzse")
         val stopped = AtomicBoolean(false)
         val reports = mutableListOf<TierETerminalReport>()
-        val verifier = TierEProcessIdentityVerifier { incarnation.get().takeUnless { it == 0L } }
+        val verifier = TierEProcessIdentityVerifier(observe)
         val daemon = TierEDaemonService(
             stopRequested = stopped,
             artifactResolver = TierEDaemonArtifactResolver(root),

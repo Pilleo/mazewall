@@ -1295,6 +1295,11 @@ cannot convert a permanently failed listener into a usable installation.
 Raw executor ownership stays with the caller; a dedicated daemon lifetime observer
 joins each installing platform thread, without finalizer/cleaner inference. Retirement
 requests stop, and the listener completes socket and arena cleanup in its own reactor.
+An acknowledged validation connection can wait indefinitely between requests.
+Idle polling remains interruptible and observes owner retirement. Once the first
+byte arrives, one monotonic deadline bounds decoding the entire request. EOF
+between requests ends the connection normally. EOF during a request fails the
+listener.
 
 Migration: callers that manually invoked `SupervisorInstaller.registerThread` or
 `unregisterThread` must scope the `InstallationReceipt` itself with `use`; closing

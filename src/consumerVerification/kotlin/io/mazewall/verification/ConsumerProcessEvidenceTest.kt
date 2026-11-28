@@ -145,7 +145,8 @@ class ConsumerProcessEvidenceTest {
     }
 
     private fun assertDelayedReaders(exitCode: Int) {
-        val args = listOf("sh", "-c", "printf 'out\\000é\\n'; printf 'err\\000λ\\n' >&2; exit $exitCode")
+        // Keep argv ASCII even on hosts whose native encoding cannot carry the UTF-8 test payload.
+        val args = listOf("sh", "-c", "printf 'out\\000\\303\\251\\n'; printf 'err\\000\\316\\273\\n' >&2; exit $exitCode")
         val outcome = runCatching {
             ConsumerProcessEvidence.run(args, root, "delayed", startPump = { reader ->
                 // Execute the actual reader only at its join, after the real child's exit.

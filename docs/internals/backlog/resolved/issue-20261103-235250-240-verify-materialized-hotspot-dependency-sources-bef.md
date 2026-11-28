@@ -1,7 +1,7 @@
 ---
 title: "Verify materialized HotSpot dependency sources before preparation reuse"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Verify materialized HotSpot dependency sources before preparation reuse
 
 **Context:**
-Repository-wide review, 2026-11-04: [HS-04](../reviews/2026-11-04-repository-review-findings.md#hs-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [HS-04](../../reviews/2026-11-04-repository-review-findings.md#hs-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · confirmed verification gap / build reproducibility debt · confidence high on behavior, medium on operational incidence · native tooling.**
 
@@ -40,6 +40,10 @@ Repository-wide review, 2026-11-04: [HS-04](../reviews/2026-11-04-repository-rev
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The tooling regression reproduced acceptance of all four modified trees before the fix. The complete Go 1.26.11 tooling test package passed under the race detector with edited, added, deleted and module-metadata controls. Legacy caches without inventories are rejected and preserved. Verification covered isolated prepared trees and the cached dependency-graph test.
 
 ---
 <!-- id: issue-20261103-235250-240-verify-materialized-hotspot-dependency-sources-bef  file: issue-20261103-235250-240-verify-materialized-hotspot-dependency-sources-bef.md -->

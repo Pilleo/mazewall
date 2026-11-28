@@ -1,7 +1,7 @@
 ---
 title: "Make executable mapping Boolean configuration a genuine setter"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -32,6 +32,10 @@ Integration foundation C2 and A04 require false-after-true configuration to remo
 - Fresh pinned consumer build passed with Java/Kotlin recompilation and updated dependency locks; packaged overload ambiguity remains explicitly characterized until C9 migration.
 - `./gradlew build` passed: 272 tasks, 93 executed, one from cache, 178 up-to-date. `./scripts/adkw check-backlog` and `git diff --check` passed.
 - The canonical fixed-scope builder/caller migration is still pending; this scoped setter correction alone does not complete C2.
+
+**Resolution**
+
+The existing canonical Boolean setter and immutable snapshots remain in place. ExecutableMappingConfigurationTest passed on JDK 25 at the current checkout, including false after a direct grant and after an executable runtime profile.
 
 ---
 <!-- id: issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge  file: issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge.md -->

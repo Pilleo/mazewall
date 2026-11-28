@@ -259,17 +259,42 @@ class ProcessBrokerIntegrationTest {
             throw failure
         } finally {
             releaseLaunch.countDown()
-            try {
-                try {
-                    startup.handle { _, _ -> Unit }.get(10, TimeUnit.SECONDS)
-                } finally {
-                    broker.close()
-                }
-            } catch (cleanupFailure: Throwable) {
-                if (primaryFailure == null) throw cleanupFailure
-                primaryFailure.addSuppressed(cleanupFailure)
-            }
+            finishLatePublicationFixture(
+                primaryFailure,
+                awaitStartup = { startup.handle { _, _ -> Unit }.get(10, TimeUnit.SECONDS) },
+                closeBroker = { broker.close() },
+            )
         }
+    }
+
+    private fun finishLatePublicationFixture(
+        primaryFailure: Throwable?,
+        awaitStartup: () -> Unit,
+        closeBroker: () -> Unit,
+    ) {
+        val cleanupFailures = listOfNotNull(
+            runCatching(awaitStartup).exceptionOrNull(),
+            runCatching(closeBroker).exceptionOrNull(),
+        )
+        val reportedFailure = primaryFailure ?: cleanupFailures.firstOrNull() ?: return
+        cleanupFailures.filterNot { it === reportedFailure }.forEach(reportedFailure::addSuppressed)
+        if (primaryFailure == null) throw reportedFailure
+    }
+
+    @Test
+    fun `late publication cleanup retains settlement and close failures`() {
+        val failure = AssertionError("fixture assertion")
+        val settlement = java.util.concurrent.TimeoutException("startup settlement")
+        val close = IllegalStateException("broker close")
+
+        finishLatePublicationFixture(failure, { throw settlement }, { throw close })
+        assertEquals(listOf(settlement, close), failure.suppressed.toList())
+
+        val reported = assertThrows(java.util.concurrent.TimeoutException::class.java) {
+            finishLatePublicationFixture(null, { throw settlement }, { throw close })
+        }
+        assertSame(settlement, reported)
+        assertEquals(listOf(close), reported.suppressed.toList())
     }
 
     @Test

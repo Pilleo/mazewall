@@ -155,9 +155,9 @@ func (d *Decoder) Accept(line []byte) error {
 			d.phase = collecting
 			err = d.keep(line)
 		}
-	case "event", "enrichment", "recovery", "session_summary":
-		if d.phase != collecting {
-			err = fmt.Errorf("%w: %s before ready", ErrOrder, r.Kind)
+	case "event", "enrichment", "recovery":
+		if d.phase != awaitReady && d.phase != collecting {
+			err = fmt.Errorf("%w: %s before start", ErrOrder, r.Kind)
 			break
 		}
 		switch r.Kind {
@@ -167,13 +167,17 @@ func (d *Decoder) Accept(line []byte) error {
 			err = d.terminal(r, line)
 		case "recovery":
 			err = d.recovery(r, line)
-		case "session_summary":
-			err = d.validateSummary(*r.Summary)
-			if err == nil {
-				d.summary = r.Summary
-				d.phase = summarized
-				err = d.keep(line)
-			}
+		}
+	case "session_summary":
+		if d.phase != collecting {
+			err = fmt.Errorf("%w: summary before ready", ErrOrder)
+			break
+		}
+		err = d.validateSummary(*r.Summary)
+		if err == nil {
+			d.summary = r.Summary
+			d.phase = summarized
+			err = d.keep(line)
 		}
 	default:
 		err = fmt.Errorf("%w: unknown row kind %q", ErrOrder, r.Kind)

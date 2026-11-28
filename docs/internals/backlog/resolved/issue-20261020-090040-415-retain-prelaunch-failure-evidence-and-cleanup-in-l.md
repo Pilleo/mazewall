@@ -1,7 +1,7 @@
 ---
 title: "Retain prelaunch failure evidence and cleanup in late-publication portal fixture"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "portal"
@@ -54,6 +54,10 @@ that diagnostic follow-up here rather than claiming all exception paths complete
 
 Complete local optional build passes271tasks in4m30s. Hosted requalification is
 pending; no memory/performance/native pass is inferred from these fixture checks.
+
+**Resolution**
+
+The teardown attempts startup settlement and broker close independently. It retains the original assertion failure and attaches both cleanup failures when present. If the fixture body succeeds, the first cleanup failure is reported with subsequent failures suppressed. On JDK 25, the regression failed with the original teardown because it retained only the close failure. The corrected full ProcessBrokerIntegrationTest class passed, including the real late-child reaping fixture.
 
 ---
 <!-- id: issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l  file: issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md -->

@@ -1,7 +1,7 @@
 ---
 title: "Retire removed orchestrator entrypoints before control-plane effects"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "tooling"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Retire removed orchestrator entrypoints before control-plane effects
 
 **Context:**
-Repository-wide review, 2026-11-04: [TOOL-02](../reviews/2026-11-04-repository-review-findings.md#tool-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TOOL-02](../../reviews/2026-11-04-repository-review-findings.md#tool-02). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category / confidence / boundary:** confirmed current-source defect and authoritative-workflow gap; high; operator/repository tooling.
 
@@ -38,6 +38,10 @@ Repository-wide review, 2026-11-04: [TOOL-02](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The retired launcher and scaffolder entrypoints now return nonzero with guidance to the supported local ADK. The disposable shell fixture failed before the correction because the Paperclip launcher invoked the ingestion stub. It now verifies foreground, background, preview, ordinary loop, and scaffolding calls launch no tooling or ingestion.
 
 ---
 <!-- id: issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con  file: issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con.md -->

@@ -101,7 +101,7 @@ stale readiness/authorization, **not a demonstrated forbidden-syscall bypass**.
   then focused owner tests and the required full build at implementation completion.
 
 This source-confirmed schedule was not executed here. The
-[idle-listener owner](issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md)
+[idle-listener owner](resolved/issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md)
 fixes one failure trigger, not health propagation after arbitrary channel loss.
 Existing diagnosis/retention obligations above remain intact; no second listener
 machine or mandatory idle-timeout dependency is introduced.
