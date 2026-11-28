@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 368 | *Total Resolved Issues:* 818
+*Total Active Issues:* 352 | *Total Resolved Issues:* 834
 
 Active totals include open and deferred issues in nested folders. Explicitly marked archived rows preserve historical links.
 After updating issue files and their index rows, run `./gradlew refreshBacklogTotals validateBacklogIndex`.
@@ -189,18 +189,18 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261103-235246-772](resolved/issue-20261103-235246-772-route-every-profiler-executor-admission-through-co.md) | Route every profiler executor admission through collector installation (resolved 2026-11-26) | high | profiler |
 | Archived [issue-20261103-235247-255](resolved/issue-20261103-235247-255-keep-published-profiler-events-awaiting-ack-during.md) | Keep published profiler events awaiting ACK during pass-through requests (resolved 2026-11-26) | medium | profiler |
 | Archived [issue-20261103-235247-666](resolved/issue-20261103-235247-666-propagate-profiler-listener-handshake-failure-befo.md) | Propagate profiler listener handshake failure before installation readiness (resolved 2026-11-26) | medium | profiler |
-| [issue-20261103-235248-095](issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) | Preserve pending application exceptions during native capture cleanup | high | profiler |
+| Archived [issue-20261103-235248-095](resolved/issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md) | Preserve pending application exceptions during native capture cleanup | high | profiler |
 | [issue-20261103-235248-477](issue-20261103-235248-477-contain-allocation-failure-inside-native-profiler-.md) | Contain allocation failure inside native profiler capture boundaries | high | profiler |
 | [issue-20261103-235248-781](issue-20261103-235248-781-keep-symbolization-closed-until-the-owning-replace.md) | Keep symbolization closed until the owning replacement completes | high | profiler |
-| [issue-20261103-235249-167](issue-20261103-235249-167-publish-native-invocation-watermarks-independently.md) | Publish native invocation watermarks independently of completion order | medium | profiler |
+| Archived [issue-20261103-235249-167](resolved/issue-20261103-235249-167-publish-native-invocation-watermarks-independently.md) | Publish native invocation watermarks independently of completion order | medium | profiler |
 | [issue-20261103-235249-509](issue-20261103-235249-509-bound-total-hotspot-line-table-decoding-and-refill.md) | Bound total HotSpot line-table decoding and refill allocation | high | profiler |
 | [issue-20261103-235249-904](issue-20261103-235249-904-bind-packaged-hotspot-executables-to-their-actual-.md) | Bind packaged HotSpot executables to their actual build and source provenance | medium | profiler |
-| [issue-20261103-235250-240](issue-20261103-235250-240-verify-materialized-hotspot-dependency-sources-bef.md) | Verify materialized HotSpot dependency sources before preparation reuse | medium | profiler |
-| [issue-20261103-235250-506](issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md) | Accept contract-permitted pre-ready HotSpot events in the shared Go decoder | high | profiler |
+| Archived [issue-20261103-235250-240](resolved/issue-20261103-235250-240-verify-materialized-hotspot-dependency-sources-bef.md) | Verify materialized HotSpot dependency sources before preparation reuse | medium | profiler |
+| Archived [issue-20261103-235250-506](resolved/issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md) | Accept contract-permitted pre-ready HotSpot events in the shared Go decoder | high | profiler |
 | [issue-20261103-235250-806](issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) | Bind strict HotSpot terminal evidence to negotiated provider and captured epoch | medium | profiler |
 | [issue-20261103-235251-281](issue-20261103-235251-281-validate-strict-hotspot-finalization-and-selected-.md) | Validate strict HotSpot finalization and selected accounting before completion | medium | profiler |
-| [issue-20261103-235251-822](issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) | Keep autonomous HotSpot deadline enforcement active through finishing | medium | profiler |
-| [issue-20261103-235252-265](issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
+| Archived [issue-20261103-235251-822](resolved/issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) | Keep autonomous HotSpot deadline enforcement active through finishing | medium | profiler |
+| Archived [issue-20261103-235252-265](resolved/issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
 | [issue-20261103-235252-762](issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) | Isolate cross-process signals in the required Portal worker baseline | high | portal-runtime |
 | [issue-20261103-235253-262](issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) | Retain replacement worker ownership across broker close races | high | portal-runtime |
 | Archived [issue-20261103-235253-722](resolved/issue-20261103-235253-722-reject-fifo-portal-grants-without-blocking-before-.md) | Reject FIFO Portal grants without blocking before file-type validation (resolved 2026-11-21) | medium | portal-runtime |
@@ -215,10 +215,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261103-235257-865](resolved/issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) | Align packaged consumer matrix deadline with owned child budgets (resolved 2026-11-26) | medium | build |
 | Archived [issue-20261103-235258-396](resolved/issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) | Invalidate the C ABI oracle when effective native build inputs change (resolved 2026-11-25) | medium | core |
 | [issue-20261103-235258-789](issue-20261103-235258-789-guard-supported-portal-binary-compatibility-with-t.md) | Guard supported Portal binary compatibility with the existing ABI mechanism | medium | portal-runtime |
-| [issue-20261103-235259-123](issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con.md) | Retire removed orchestrator entrypoints before control-plane effects | medium | tooling |
+| Archived [issue-20261103-235259-123](resolved/issue-20261103-235259-123-retire-removed-orchestrator-entrypoints-before-con.md) | Retire removed orchestrator entrypoints before control-plane effects | medium | tooling |
 | [issue-20261103-235259-662](issue-20261103-235259-662-preserve-canonical-issue-identities-in-any-retaine.md) | Preserve canonical issue identities in any retained standalone ingestion | medium | tooling |
 | [issue-20261103-235300-192](issue-20261103-235300-192-return-failure-after-unsuccessful-or-ambiguous-ret.md) | Return failure after unsuccessful or ambiguous retained ingestion writes | medium | tooling |
-| [issue-20261103-235357-491](issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md) | Keep healthy supervisor listeners alive across idle request intervals | high | core |
+| Archived [issue-20261103-235357-491](resolved/issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md) | Keep healthy supervisor listeners alive across idle request intervals | high | core |
 | [issue-20261103-235357-847](issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) | Align approved accept routing with tracee authority execution | high | core |
 | Archived [issue-20261103-235358-296](resolved/issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects (resolved 2026-11-27) | high | core |
 | [issue-20261103-235358-819](issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) | Retain supervisor helper capacity across fatal worker replacement | medium | core |
@@ -289,13 +289,13 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261102-070428-309](resolved/issue-20261102-070428-309-align-independent-consumer-cache-verification-dead.md) | Align independent consumer cache verification deadline with owned child budgets | high | core |
 | Archived [issue-20261102-032138-671](resolved/issue-20261102-032138-671-reject-case-folded-provider-aliases-across-negotia.md) | Reject case-folded provider aliases across negotiated HotSpot wire rows | high | profiler |
 | [issue-20261102-001737-121](issue-20261102-001737-121-verify-controlled-cli-permission-refusals-without-.md) | Verify controlled CLI permission refusals without claiming authenticated denial | high | core |
-| [issue-20261101-211554-659](issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t.md) | Enable Gradle build and configuration caching in the pre-commit hook | high | core |
+| Archived [issue-20261101-211554-659](resolved/issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t.md) | Enable Gradle build and configuration caching in the pre-commit hook | high | core |
 | [issue-20261116-072155-079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md) | Retire consumed Tier E A4 one-shot live diagnostic path | medium | profiler |
 | [issue-20261116-002649-322](issue-20261116-002649-322-align-codegen-kotlin-reflection-runtime-with-proje.md) | Align Codegen Kotlin reflection runtime with project Kotlin version | high | core |
 | [issue-20261115-220004-725](issue-20261115-220004-725-separate-confined-helper-drain-observations-from-p.md) | Separate confined-helper drain observations from physical retirement | high | enforcer |
 | [issue-20261115-215930-225](issue-20261115-215930-225-investigate-codegen-yarn-audit-i-o-failure-in-depe.md) | Investigate Codegen Yarn Audit I/O failure in Dependency-Check CI | high | core |
 | [issue-20261115-193140-602](issue-20261115-193140-602-expand-mandatory-dependency-check-coverage-to-defa.md) | Expand mandatory Dependency-Check coverage to default SDK production dependencies | high | core |
-| [issue-20261115-132820-021](issue-20261115-132820-021-decouple-mandatory-security-scans-from-nvd-updates.md) | Decouple mandatory security scans from NVD updates with fresh trusted snapshots | high | core |
+| Archived [issue-20261115-132820-021](resolved/issue-20261115-132820-021-decouple-mandatory-security-scans-from-nvd-updates.md) | Decouple mandatory security scans from NVD updates with fresh trusted snapshots | high | core |
 | [issue-20261115-061756-146](issue-20261115-061756-146-preserve-authenticated-concurrent-drain-completion.md) | Preserve authenticated concurrent drain completion after closure | high | enforcer |
 | [issue-20261115-054348-515](issue-20261115-054348-515-patch-current-go-vulnerability-findings-in-both-ag.md) | Patch current Go vulnerability findings in both agentless modules | high | profiler |
 | [issue-20261115-024924-787](issue-20261115-024924-787-preserve-full-kernel-coverage-across-baseline-and-.md) | Preserve full kernel coverage across baseline and confined CI lanes | high | core |
@@ -305,14 +305,14 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261114-174301-368](issue-20261114-174301-368-bind-native-open-arguments-to-the-live-publication.md) | Bind native open arguments to the live publication | high | profiler |
 | [issue-20261114-023757-094](issue-20261114-023757-094-b6-bind-authenticated-listener-authorization-to-ex.md) | B6 bind authenticated listener authorization to exact Live worker task | high | core |
 | Archived [issue-20261112-063058-038](resolved/issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md) | Preserve expected FFM handle shape when a libc symbol is missing (resolved 2026-11-21) | high | core |
-| [issue-20261112-051312-407](issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md) | Preserve supervisor startup failure when helper shutdown also fails | high | core |
+| Archived [issue-20261112-051312-407](resolved/issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md) | Preserve supervisor startup failure when helper shutdown also fails | high | core |
 | [issue-20261111-230615-569](issue-20261111-230615-569-bind-checked-stack-association-to-canonical-runtim.md) | Bind checked stack association to canonical runtime owner | high | core |
 | [issue-20261111-224650-335](issue-20261111-224650-335-revalidate-checked-native-stack-association-at-pro.md) | Revalidate checked native stack association at producer use | high | core |
 | [issue-20261111-204426-270](issue-20261111-204426-270-bind-checked-live-bootstrap-to-original-request-an.md) | Bind checked live bootstrap to original request and runtime references | high | core |
 | [issue-20261111-185936-203](issue-20261111-185936-203-preserve-confined-child-cleanup-when-ptracer-bookk.md) | Preserve confined child cleanup when ptracer bookkeeping throws | high | core |
 | [issue-20261109-200553-461](issue-20261109-200553-461-hide-jvm-visible-mutable-runtime-authority-before-.md) | Hide JVM-visible mutable runtime authority before reporting retirement | high | core |
 | Archived [issue-20261109-192741-507](resolved/issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a.md) | Reject process-wide ACT_NOTIFY before supervisor acquisition (resolved 2026-11-27) | high | core |
-| [issue-20261109-110052-812](issue-20261109-110052-812-preserve-prepared-resource-close-failures-across-r.md) | Preserve prepared resource close failures across repeat calls | high | core |
+| Archived [issue-20261109-110052-812](resolved/issue-20261109-110052-812-preserve-prepared-resource-close-failures-across-r.md) | Preserve prepared resource close failures across repeat calls | high | core |
 | [issue-20261109-063230-677](issue-20261109-063230-677-retain-eventfd-completion-wakeup-ownership-after-c.md) | Retain eventfd completion wakeup ownership after close failure | high | platform |
 | [issue-20261109-054828-051](issue-20261109-054828-051-investigate-socket-helper-prewarm-cleanup-timeout-.md) | Investigate socket helper prewarm cleanup timeout during process spawn | high | enforcer |
 | [issue-20261108-190054-405](issue-20261108-190054-405-t4-coordinate-versioned-native-projection-parsing-.md) | T4 coordinate versioned native projection parsing and qualification | high | core |
@@ -366,7 +366,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261104-082104-029](issue-20261104-082104-029-avoid-verbose-verifier-log-exhaustion-in-tier-e-di.md) | Avoid verbose verifier log exhaustion in Tier E diagnostics | medium | profiler |
 | [issue-20261104-061859-942](issue-20261104-061859-942-retain-attributable-bpf-program-load-failure-evide.md) | Retain attributable BPF program load failure evidence | medium | profiler |
 | [issue-20261103-190440-355](issue-20261103-190440-355-investigate-retained-all-target-19-of-20-loadtempl.md) | Investigate retained all-target 19-of-20 loadTemplate attribution | medium | profiler |
-| [issue-20261103-152002-779](issue-20261103-152002-779-preserve-process-observation-errors-and-watcher-re.md) | Preserve process observation errors and watcher retirement | high | profiler |
+| Archived [issue-20261103-152002-779](resolved/issue-20261103-152002-779-preserve-process-observation-errors-and-watcher-re.md) | Preserve process observation errors and watcher retirement | high | profiler |
 | [issue-20261103-134641-217](issue-20261103-134641-217-package-tier-e-target-registration-and-attach-help.md) | Package Tier E target registration and attach helper | medium | profiler |
 | [issue-20261103-134635-250](issue-20261103-134635-250-enable-opt-in-tier-e-evidence-group-access-and-ato.md) | Enable opt-in Tier E evidence group access and atomic publication | medium | profiler |
 | Archived [issue-20261101-205810-601](resolved/issue-20261101-205810-601-prevent-stale-spotbugs-auxiliary-classpath-suffix-.md) | Prevent stale SpotBugs auxiliary classpath suffix after dependency graph shrink | high | core |
@@ -406,7 +406,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261020-213826-813](issue-20261020-213826-813-assess-and-patch-high-severity-compress-advisories.md) | Assess and patch high-severity compress advisories in agentless Go modules | high | profiler |
 | [issue-20261020-202040-181](issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md) | Run build-tool regression checks once while preserving required security validation | high | ci |
 | [issue-20261020-145645-363](issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md) | Persist completed security data before analysis in an independent required lane | high | ci |
-| [issue-20261020-090040-415](issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md) | Retain prelaunch failure evidence and cleanup in late-publication portal fixture | high | portal |
+| Archived [issue-20261020-090040-415](resolved/issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md) | Retain prelaunch failure evidence and cleanup in late-publication portal fixture | high | portal |
 | Archived [issue-20261020-083727-843](resolved/issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) | Drain consumer command evidence before normal process cleanup closes streams | high | testing |
 | [issue-20261019-220939-759](issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m.md) | Bound mutation worker memory before isolating CI mutation validation | high | ci |
 | [issue-20261019-203415-734](issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md) | Reuse nested Gradle TestKit caches across disposable CI checkouts | high | ci |
@@ -567,7 +567,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261007-214327-867-require-parent-startup-authorization-before-portal](issue-20261007-214327-867-require-parent-startup-authorization-before-portal.md) | Require parent startup authorization before Portal guest construction | high | core |
 | [issue-20261007-223139-618-observe-cancellation-inside-admitted-portal-native](issue-20261007-223139-618-observe-cancellation-inside-admitted-portal-native.md) | Observe cancellation inside admitted Portal native polling | high | core |
 | [issue-20261007-221224-904-require-fresh-external-state-evidence-from-every-k](issue-20261007-221224-904-require-fresh-external-state-evidence-from-every-k.md) | Require fresh external-state evidence from every kernel integration gate | high | core |
-| [issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared](issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared.md) | Align shared test compiler classpath with declared friend JARs | high | core |
+| Archived [issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared](resolved/issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared.md) | Align shared test compiler classpath with declared friend JARs | high | core |
 | [issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in](issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in.md) | Publish portable verified worker resources with independent dependency closure | high | core |
 | [issue-20261007-211004-888-own-prepared-portal-invocation-cancellation-throug](issue-20261007-211004-888-own-prepared-portal-invocation-cancellation-throug.md) | Own prepared Portal invocation cancellation through physical retirement | high | core |
 | [issue-20261007-205309-190-prevent-stateful-portal-worker-recreation-after-am](issue-20261007-205309-190-prevent-stateful-portal-worker-recreation-after-am.md) | Prevent stateful Portal worker recreation after ambiguous loss | high | core |
@@ -597,7 +597,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261006-172913-068-require-effective-installation-before-contained-ex](issue-20261006-172913-068-require-effective-installation-before-contained-ex.md) | Require effective installation before contained executor target entry | high | core |
 | [issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot](issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot.md) | Align profiler compile artifacts with declared Kotlin friend paths | high | core |
 | [issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces](issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces.md) | Replace scope-promoting builders with fixed process and worker construction | high | core |
-| [issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge](issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge.md) | Make executable mapping Boolean configuration a genuine setter | high | core |
+| Archived [issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge](resolved/issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge.md) | Make executable mapping Boolean configuration a genuine setter | high | core |
 | [issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con](issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con.md) | Establish packaged Java and Kotlin integration consumer baselines | high | core |
 | [issue-20261006-022633-064-preserve-runtime-profile-when-composing-dedicated-](issue-20261006-022633-064-preserve-runtime-profile-when-composing-dedicated-.md) | Preserve runtime profile when composing dedicated worker policies | high | profiler |
 | [issue-20261006-021624-843-replace-stale-synchronization-waits-with-observabl](issue-20261006-021624-843-replace-stale-synchronization-waits-with-observabl.md) | Replace stale synchronization waits with observable bounded conditions | high | core |

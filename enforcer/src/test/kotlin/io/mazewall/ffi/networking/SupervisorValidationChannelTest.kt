@@ -7,6 +7,7 @@ import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.SupervisorResponseSegment
 import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.writeByte
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -25,7 +26,10 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.io.BufferedInputStream
+import java.io.DataInputStream
 import java.io.IOException
+import java.nio.ByteBuffer
 
 @io.mazewall.platform.lifecycle.GuardProcessDescriptors
 class SupervisorValidationChannelTest {
@@ -111,6 +115,59 @@ class SupervisorValidationChannelTest {
         assertTrue(reads > 1)
         channel.close()
     }
+
+    @Test
+    fun `idle request waits survive poll expiry after handshake and between requests`() {
+        System.setProperty("mazewall.supervisor.installTimeoutMillis", "50")
+        val chunks = ArrayDeque(listOf(byteArrayOf(0xAC.toByte()), requestId(41), requestId(42)))
+        val polls = ArrayDeque(listOf(1L, 0L, 0L, 1L, 0L, 0L, 1L))
+        val engine = MockNativeEngine(memory = scriptedMemory(chunks)).apply {
+            onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(polls.removeFirst()) }
+        }
+        channel(engine).use { channel ->
+            val input = DataInputStream(BufferedInputStream(channel.inputStream))
+            assertEquals(0xAC, input.readUnsignedByte())
+            assertEquals(41L, channel.readRequest(input, DataInputStream::readLong))
+            assertEquals(42L, channel.readRequest(input, DataInputStream::readLong))
+            assertTrue(polls.isEmpty())
+        }
+    }
+
+    @Test
+    fun `partially received request is bounded and idle wait observes shutdown`() {
+        System.setProperty("mazewall.supervisor.installTimeoutMillis", "50")
+        val engine = MockNativeEngine(memory = scriptedMemory(ArrayDeque(listOf(byteArrayOf(0))))).apply {
+            val polls = ArrayDeque(listOf(1L, 0L))
+            onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(polls.removeFirst()) }
+        }
+        channel(engine).use { channel ->
+            val input = DataInputStream(BufferedInputStream(channel.inputStream))
+            val incomplete = assertThrows<IOException> { channel.readRequest(input, DataInputStream::readLong) }
+            assertTrue(incomplete.message.orEmpty().contains("timed out"))
+            engine.onPoll = { _, _, _ ->
+                channel.requestStop()
+                LinuxNative.SyscallResult.Success(0L)
+            }
+            val stopped = assertThrows<IOException> { channel.readRequest(input, DataInputStream::readLong) }
+            assertTrue(stopped.message.orEmpty().contains("owner terminated"))
+        }
+    }
+
+    private fun requestId(id: Long): ByteArray = ByteBuffer.allocate(Long.SIZE_BYTES).putLong(id).array()
+
+    private fun scriptedMemory(chunks: ArrayDeque<ByteArray>): MockNativeMemory =
+        object : MockNativeMemory() {
+            override fun read(
+                fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                buf: io.mazewall.ffi.memory.ManagedSegment,
+                count: Long,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val chunk = chunks.removeFirst()
+                require(chunk.size <= count)
+                chunk.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                return LinuxNative.SyscallResult.Success(chunk.size.toLong())
+            }
+        }
 
     @Test
     fun `sendResponse writes correct decision and error to native memory`() {

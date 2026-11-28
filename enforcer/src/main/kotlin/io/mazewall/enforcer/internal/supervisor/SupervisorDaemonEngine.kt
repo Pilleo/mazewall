@@ -2,6 +2,7 @@ package io.mazewall.enforcer.internal.supervisor
 
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
@@ -74,15 +75,13 @@ internal class SupervisorDaemonEngine(
     }
 
     fun run(block: (() -> Unit)? = null) {
-        try {
+        closeHelpersAfter {
             socketHelpers.prewarm()
             confinedBootstrap?.let { startup ->
                 startup.requireCommon()
                 confinedControl = ConfinedHelperControl(socketHelpers, startup, engine, stopping = { delegate.isGlobalShutdown() }, retryConnection = delegate::retryConnectionCleanup)
             }
             delegate.run()
-        } finally {
-            socketHelpers.close()
         }
     }
 
@@ -105,10 +104,13 @@ internal class SupervisorDaemonEngine(
     }
 
     fun triggerGlobalShutdown(source: String = "unknown") {
-        try {
-            delegate.triggerGlobalShutdown(source)
-        } finally {
-            socketHelpers.close()
-        }
+        closeHelpersAfter { delegate.triggerGlobalShutdown(source) }
+    }
+
+    private fun closeHelpersAfter(action: () -> Unit) {
+        val failure = runCatching(action).exceptionOrNull()
+        val cleanup = runCatching(socketHelpers::close).exceptionOrNull()
+        if (cleanup != null) throw CleanupFailures.merge(failure, cleanup)
+        if (failure != null) throw failure
     }
 }

@@ -57,6 +57,9 @@ Schema3 requires explicit `policy_eligibility:false` on every row and ready's
 absent. Schema2 lifecycle cannot assert cgroup/mount identity: events still require
 the independently expected cgroup, so an event-bearing session needs it supplied.
 Start may omit process birth and JVM IDs; ready must bind them.
+After a valid start, the decoder accepts events, enrichment, and recovery before
+ready. They use the same identity and accounting checks as later rows. Only a
+validated ready row establishes readiness, and the summary must follow it.
 Strict schema2 correlated success additionally requires a native-valid stable
 captured HotSpot epoch and matching checked terminal epoch/profile; zero is valid.
 Unavailable/skipped outcomes and schema3 unknown observations do not gain that claim.

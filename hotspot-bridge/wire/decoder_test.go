@@ -117,6 +117,58 @@ func TestDecoderCompleteSyntheticSession(t *testing.T) {
 	}
 }
 
+func TestDecoderRetainsEventsBeforeReady(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		session func() (Expected, []Record)
+	}{
+		{name: "strict", session: func() (Expected, []Record) { return strictSession(2) }},
+		{name: "observed", session: syntheticSession},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expected, rows := tc.session()
+			d := NewDecoder(expected)
+			if err := acceptRecords(d, []Record{rows[0], rows[2], rows[3]}); err != nil {
+				t.Fatalf("valid events before ready: %v", err)
+			}
+			if _, ok := d.Ready(); ok {
+				t.Fatal("events must not establish readiness")
+			}
+			if err := acceptRecords(d, []Record{rows[1], rows[4]}); err != nil {
+				t.Fatalf("ready and summary: %v", err)
+			}
+			capture, err := d.Finish(nil)
+			if err != nil {
+				t.Fatalf("finish after validated readiness: %v", err)
+			}
+			if len(capture.Pairs) != 1 || capture.Pairs[0].Event.EventID != rows[2].EventID {
+				t.Fatal("the early event pair was lost")
+			}
+		})
+	}
+}
+
+func TestDecoderRequiresStartAndReadyForCompletion(t *testing.T) {
+	expected, rows := syntheticSession()
+	t.Run("event needs start", func(t *testing.T) {
+		if err := acceptRecords(NewDecoder(expected), rows[2:3]); !errors.Is(err, ErrOrder) {
+			t.Fatalf("event without start: got %v, want ErrOrder", err)
+		}
+	})
+	t.Run("summary needs ready", func(t *testing.T) {
+		d := NewDecoder(expected)
+		if err := acceptRecords(d, rows[:1]); err != nil {
+			t.Fatal(err)
+		}
+		if err := acceptRecords(d, rows[4:]); !errors.Is(err, ErrOrder) {
+			t.Fatalf("summary without ready: got %v, want ErrOrder", err)
+		}
+		if _, err := d.Finish(nil); !errors.Is(err, ErrOrder) {
+			t.Fatalf("finish after rejected summary: got %v, want ErrOrder", err)
+		}
+	})
+}
+
 func TestDecoderRejectsOneFieldContradictions(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -1,7 +1,7 @@
 ---
 title: "Keep healthy supervisor listeners alive across idle request intervals"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Keep healthy supervisor listeners alive across idle request intervals
 
 **Context:**
-Repository-wide review, 2026-11-04: [SUP-01](../reviews/2026-11-04-repository-review-findings.md#sup-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [SUP-01](../../reviews/2026-11-04-repository-review-findings.md#sup-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · reproduced · high confidence · existing supervised installations.**
 
@@ -45,6 +45,10 @@ idle read failed: supervisor validation readiness timed out; polls=2
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+JDK 25 focused channel and decoder tests, Enforcer ktlint, and the Detekt warning ratchet passed. Regression fixtures observed idle polling beyond the request budget, two subsequent valid requests, a bounded partial frame, and explicit owner retirement.
 
 ---
 <!-- id: issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl  file: issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md -->

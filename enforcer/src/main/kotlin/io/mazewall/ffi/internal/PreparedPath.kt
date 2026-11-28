@@ -23,6 +23,8 @@ internal class PreparedPath private constructor(
     private val key: Any,
     private val native: NativeEngine,
 ) : AutoCloseable {
+    private var terminalCloseFailure: Throwable? = null
+
     val identity: String get() = "$requested\u0000$resolved\u0000$key\u0000$directory"
 
     fun validate() {
@@ -37,11 +39,11 @@ internal class PreparedPath private constructor(
 
     fun descriptorPath(): Path = Path.of("/proc/self/fd/${descriptor.value}")
 
+    @Synchronized
     override fun close() {
-        if (descriptor.isLiveForIo()) {
-            val result = native.fileSystem.close(descriptor)
-            descriptor.markClosed()
-            result.getOrThrow("close prepared resource $requested")
+        terminalCloseFailure?.let { throw it }
+        descriptor.closeResource(native.fileSystem) { failure ->
+            terminalCloseFailure = failure
         }
     }
 

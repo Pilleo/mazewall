@@ -354,8 +354,7 @@ func prepare(root string, mode preparationMode) error {
 		return err
 	}
 	generatedProfiler := filepath.Join(deps, "profiler-"+id)
-	profilerMarker := filepath.Join(generatedProfiler, ".mw-prepared.json")
-	prepared, err := markerMatches(profilerMarker, manifest)
+	prepared, err := verifiedPreparedDependency(generatedProfiler, manifest)
 	if err != nil {
 		return err
 	}
@@ -395,7 +394,7 @@ func prepare(root string, mode preparationMode) error {
 		if err := writeJSON(filepath.Join(generatedProfiler, ".mw-epoch-artifacts.json"), artifacts); err != nil {
 			return err
 		}
-		if err := writeJSON(profilerMarker, manifest); err != nil {
+		if err := recordPreparedDependency(generatedProfiler, manifest); err != nil {
 			return err
 		}
 	}
@@ -403,8 +402,7 @@ func prepare(root string, mode preparationMode) error {
 		return err
 	}
 	generated := filepath.Join(deps, "gadget-"+id)
-	marker := filepath.Join(generated, ".mw-prepared.json")
-	prepared, err = markerMatches(marker, manifest)
+	prepared, err = verifiedPreparedDependency(generated, manifest)
 	if err != nil {
 		return err
 	}
@@ -423,7 +421,7 @@ func prepare(root string, mode preparationMode) error {
 				return err
 			}
 		}
-		if err := writeJSON(marker, manifest); err != nil {
+		if err := recordPreparedDependency(generated, manifest); err != nil {
 			return err
 		}
 	}

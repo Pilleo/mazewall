@@ -1,7 +1,7 @@
 ---
 title: "Preserve pending application exceptions during native capture cleanup"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Preserve pending application exceptions during native capture cleanup
 
 **Context:**
-Repository-wide review, 2026-11-04: [TE-01](../reviews/2026-11-04-repository-review-findings.md#te-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TE-01](../../reviews/2026-11-04-repository-review-findings.md#te-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · confirmed source defect · high confidence · release boundary: JVMs running the optional native agent. NEW after backlog/review search.**
 
@@ -28,6 +28,10 @@ Repository-wide review, 2026-11-04: [TE-01](../reviews/2026-11-04-repository-rev
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+On JDK 25, the checked-JNI regression observed calls with pending application exceptions on file, unlink and socket paths. Exceptional scope exit now clears attribution, retires its local reference and preserves the original throwable without lookup or Java method calls. The focused native suite passed six tests, including the checked-JNI failure controls, original ENOENT, and ordinary return-value and startup controls.
 
 ---
 <!-- id: issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat  file: issue-20261103-235248-095-preserve-pending-application-exceptions-during-nat.md -->

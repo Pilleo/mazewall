@@ -83,6 +83,44 @@ class HotSpotWireReaderTest {
     }
 
     @Test
+    fun `repeated decoded extension keys are rejected within their object`() {
+        val duplicateObjects = listOf(
+            """{"label":"one","label":"two"}""",
+            """{"label":"one","l\u0061bel":"two"}""",
+            """[{"l\u0061bel":"two","label":"one"}]""",
+        )
+        for (schema in 2uL..3uL) {
+            for (extension in duplicateObjects) {
+                val failure = assertFailsWith<HotSpotProtocolException> {
+                    HotSpotWireReader(HotSpotReplayLimits(), schema).read(extensionRow(schema, extension).byteInputStream()) {
+                        error("A record with repeated keys must not be delivered")
+                    }
+                }
+                assertEquals("duplicate JSON object key", failure.message)
+            }
+        }
+    }
+
+    @Test
+    fun `separate extension objects may use the same decoded key`() {
+        val extension = """[{"label":"}{ \"label\":"},{"l\u0061bel":"value"}]"""
+        for (schema in 2uL..3uL) {
+            val row = extensionRow(schema, extension)
+            val delivered = mutableListOf<String>()
+            HotSpotWireReader(HotSpotReplayLimits(), schema).read(row.byteInputStream()) { delivered += it.rawJson }
+            assertEquals(listOf(row.trimEnd()), delivered)
+        }
+    }
+
+    private fun extensionRow(
+        schema: ULong,
+        extension: String,
+    ): String {
+        val observationField = if (schema == 3uL) ""","policy_eligibility":false""" else ""
+        return """{"schema_version":$schema,"kind":"session_started","session_id":"s","extension":$extension$observationField}""" + "\n"
+    }
+
+    @Test
     fun `malformed UTF8 and newline-truncated input are explicit protocol failures`() {
         assertFailsWith<HotSpotProtocolException> { HotSpotWireReader(HotSpotReplayLimits()).read(byteArrayOf(0xc3.toByte(), 0x28, 0x0a).inputStream()) {} }
         assertFailsWith<HotSpotProtocolException> { HotSpotWireReader(HotSpotReplayLimits()).read("{}".byteInputStream()) {} }

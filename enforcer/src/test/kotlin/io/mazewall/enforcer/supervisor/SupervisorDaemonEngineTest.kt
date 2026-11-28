@@ -30,6 +30,7 @@ import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -45,6 +46,55 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Isolated
 class SupervisorDaemonEngineTest {
+    @Test
+    fun `startup failure retains helper shutdown failure`() {
+        val startup = java.io.IOException("bind failed")
+        val shutdown = java.io.IOException("helper shutdown failed")
+        assertDaemonStartupCleanupFailure(startup, shutdown, startup, shutdown)
+    }
+
+    @Test
+    fun `fatal helper shutdown retains startup failure`() {
+        val startup = java.io.IOException("bind failed")
+        val shutdown = AssertionError("fatal helper shutdown")
+        assertDaemonStartupCleanupFailure(startup, shutdown, shutdown, startup)
+    }
+
+    private fun assertDaemonStartupCleanupFailure(
+        startup: Throwable,
+        shutdown: Throwable,
+        primary: Throwable,
+        suppressed: Throwable,
+    ) {
+        val retirements = AtomicInteger()
+        val helpers = SocketHelperPool(PoolProvisioning.PrestartedConfined) {
+            object : SocketHelper {
+                override fun execute(
+                    operation: SocketOperation,
+                    socket: SupervisorOwnedFd,
+                ): SocketHelperResult = error("Startup must not execute helper requests")
+
+                override fun close() {
+                    if (retirements.incrementAndGet() == 1) throw shutdown
+                }
+            }
+        }
+        val sockets = object : SocketManager by RealSocketManager {
+            override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = throw startup
+        }
+        val daemon = SupervisorDaemonEngine("/unused/startup-failure.sock", socketManager = sockets, socketHelpers = helpers)
+
+        try {
+            val reported = assertThrows(Throwable::class.java) { daemon.run() }
+            assertSame(primary, reported)
+            assertEquals(listOf(suppressed), reported.suppressed.toList())
+            assertEquals(1, retirements.get())
+        } finally {
+            helpers.close()
+        }
+        assertEquals(2, retirements.get(), "A failed helper close remains retryable")
+    }
+
     @Test
     fun `daemon supervisor recycle leaves original control close to connection owner`() = controlSocketRetirement(false)
 

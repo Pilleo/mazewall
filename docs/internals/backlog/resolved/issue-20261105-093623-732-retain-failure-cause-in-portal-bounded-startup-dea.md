@@ -21,7 +21,7 @@ The Tier E reliability full build on 2026-11-05 failed the unchanged worker conn
 **Needed:**
 1. Capture the actual startup exception and launcher-entry/child identity with original150ms budget, provide unconditional cleanup, and distinguish prelaunch expiry from physical-retirement failure before proposing any fix; relate to issue20261020-090040-415 without assuming the same cause.
 
-Related setup-budget evidence: [late-publication fixture](../issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md).
+Related setup-budget evidence: [late-publication fixture](issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md).
 The new failure concerns a different test and does not establish that its cause is identical.
 
 The unchanged test passed in the successor full build at09:55:12UTC (24 owning-class cases,

@@ -806,6 +806,7 @@ bool record_invocation(InvocationDefinition definition) {
 thread_local ExecutionContext prepared_worker_execution{};
 ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
     if (env == nullptr || thread == nullptr) return {};
+    if (env->ExceptionCheck()) return {};
     if (prepared_worker_execution.valid()) return prepared_worker_execution;
     auto is_virtual = thread_is_virtual.load(std::memory_order_acquire);
     auto java_thread_id = thread_id.load(std::memory_order_acquire);
@@ -816,6 +817,7 @@ ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
         if (env->ExceptionCheck()) { env->DeleteLocalRef(thread_class); return {}; }
         java_thread_id = env->GetMethodID(thread_class, "threadId", "()J");
         env->DeleteLocalRef(thread_class);
+        if (env->ExceptionCheck()) return {};
         if (is_virtual != nullptr) thread_is_virtual.store(is_virtual, std::memory_order_release);
         if (java_thread_id != nullptr) thread_id.store(java_thread_id, std::memory_order_release);
     }
@@ -1120,16 +1122,17 @@ public:
     ~InvocationScope() {
         if (live_startup_mode != LiveStartupMode::DiagnosticOnly) {
             mazewall::live::jni::end_activation(guard_owner_);
-            if (current_env_ && current_env_->ExceptionCheck()) {
-                if (live_startup_mode != LiveStartupMode::Only) {
-                    publish_stack_marker(0, 0, MarkerTransition::exit_clear);
-                    invocation_registry.invalidate();
-                    record_virtual_duration();
-                    record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
-                }
-                return;
-            }
         } else mazewall::live::leave();
+        if (current_env_ && current_env_->ExceptionCheck()) {
+            if (live_startup_mode != LiveStartupMode::Only) {
+                publish_stack_marker(0, 0, MarkerTransition::exit_clear);
+                invocation_registry.invalidate();
+                record_virtual_duration();
+                record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
+            }
+            release_current_thread();
+            return;
+        }
         if (live_startup_mode == LiveStartupMode::Only) { release_current_thread(); return; }
         publish_stack_marker(0, 0, MarkerTransition::exit_clear);
         if (!scope_.valid()) {
@@ -1145,7 +1148,6 @@ public:
         }
         jthread exit_thread = nullptr;
         const auto current_execution =
-            !(open_boundary_recorder != nullptr && current_env_->ExceptionCheck()) &&
             global_jvmti != nullptr && global_jvmti->GetCurrentThread(&exit_thread) == JVMTI_ERROR_NONE
                 ? execution_context_from_current(exit_thread)
                 : ExecutionContext{};
@@ -1886,6 +1888,7 @@ bool write_definitions(bool producer_closed) noexcept {
                 append_stack_payload(encoded, *snapshot.stacks[invocation.stack_id - 1]);
             }
             finish_record(encoded, record);
+            committed_watermark = std::max(committed_watermark, invocation.id);
         }
         const auto stats_record = begin_record(encoded, 3);
         append_le<std::uint64_t>(encoded, stack_capture_failures.load(std::memory_order_relaxed));
@@ -1893,7 +1896,6 @@ bool write_definitions(bool producer_closed) noexcept {
         append_le<std::uint64_t>(encoded, virtual_pinned_scopes.load(std::memory_order_relaxed));
         append_le<std::uint64_t>(encoded, virtual_pinned_nanos.load(std::memory_order_relaxed));
         finish_record(encoded, stats_record);
-        if (!snapshot.invocations.empty()) committed_watermark = snapshot.invocations.back().id;
         if (live_definitions.load(std::memory_order_acquire) ||
             session_bound_definitions.load(std::memory_order_acquire)) {
             std::vector<std::uint8_t> envelope;

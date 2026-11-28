@@ -161,6 +161,9 @@ class PreparedCloseOwnershipTest {
     fun `operation resources retry a retained grant after closing artifact`() = runProbe("operation")
 
     @Test
+    fun `operation resources retain an unknown close without replay`() = runProbe("operation-unknown")
+
+    @Test
     fun `landlock owner retries retained ruleset and closes independent grants`() = runProbe("landlock")
 
     @Test
@@ -313,7 +316,9 @@ internal object PreparedCloseOwnershipProbe {
         if (args[1] == "legacy338generationrace") return legacyGenerationRace338()
         if (args[1].startsWith("legacy338")) return legacyAcquisition338(Path.of(args[0]), args[1] == "legacy338unknown", args[1] == "legacy338confined", args[1] == "legacy338concurrent")
         if (args[1] == "plan") return plan(Path.of(args[0]))
-        if (args[1] == "operation") return operation(Path.of(args[0]))
+        if (args[1] == "operation" || args[1] == "operation-unknown") {
+            return operation(Path.of(args[0]), unknown = args[1] == "operation-unknown")
+        }
         if (args[1] == "landlock") return landlock(Path.of(args[0]))
         val path = Files.writeString(Path.of(args[0]).resolve("resource"), "resource")
         val real = LinuxNative.snapshot()
@@ -353,9 +358,9 @@ internal object PreparedCloseOwnershipProbe {
         target = terminal.descriptor.value
         val before = attempts.size
         syntheticError = true
-        check(runCatching { terminal.close() }.isFailure)
+        val closeFailure = checkNotNull(runCatching { terminal.close() }.exceptionOrNull())
         check(!terminal.descriptor.isLiveForIo())
-        terminal.close()
+        check(runCatching { terminal.close() }.exceptionOrNull() === closeFailure)
         check(attempts.size == before + 1) { "dispatched generation must not be closed twice" }
     }
 
@@ -2017,7 +2022,10 @@ internal object PreparedCloseOwnershipProbe {
         resources.close()
     }
 
-    private fun operation(directory: Path) {
+    private fun operation(
+        directory: Path,
+        unknown: Boolean,
+    ) {
         val source = Files.writeString(directory.resolve("Operation.java"), "package fixture; public class Operation { public int call() { return 42; } }")
         check(ToolProvider.getSystemJavaCompiler().run(null, null, null, "-d", directory.toString(), source.toString()) == 0)
         val jar = directory.resolve("operation.jar")
@@ -2027,7 +2035,7 @@ internal object PreparedCloseOwnershipProbe {
             it.closeEntry()
         }
         val real = LinuxNative.snapshot()
-        val failure = IllegalStateException("before grant close")
+        val failure = IllegalStateException(if (unknown) "grant close returned no result" else "before grant close")
         var armed = false
         var selected: FileDescriptor<*, FdState.Open, FdOwnership.Owned>? = null
         val attempts = mutableListOf<Int>()
@@ -2038,6 +2046,7 @@ internal object PreparedCloseOwnershipProbe {
                     if (armed) {
                         armed = false
                         selected = fd
+                        if (unknown) real.fileSystem.close(fd).getOrThrow("fixture grant close")
                         throw failure
                     }
                     return real.fileSystem.close(fd)
@@ -2052,11 +2061,18 @@ internal object PreparedCloseOwnershipProbe {
                 armed = true
                 check(runCatching { owner.retire() }.exceptionOrNull() === failure)
                 val retained = checkNotNull(selected)
-                check(retained.isLiveForIo())
                 check(attempts.size > 1) { "independent grants and artifact must be attempted" }
-                owner.retire()
-                check(!retained.isLiveForIo()) { "operation owner must retry the retained grant" }
-                check(attempts.count { it == retained.value } == 2)
+                if (unknown) {
+                    check(!retained.isLiveForIo())
+                    check(runCatching { owner.retire() }.exceptionOrNull() === failure) { "second retirement must retain the original close failure" }
+                    check(runCatching { owner.close() }.exceptionOrNull() === failure) { "public close must retain the original close failure" }
+                    check(attempts.count { it == retained.value } == 1) { "the dispatched grant close must never replay" }
+                } else {
+                    check(retained.isLiveForIo())
+                    owner.retire()
+                    check(!retained.isLiveForIo()) { "operation owner must retry the retained grant" }
+                    check(attempts.count { it == retained.value } == 2)
+                }
             }
         } finally {
             LinuxNative.resetToDefault()

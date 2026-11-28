@@ -1,7 +1,7 @@
 ---
 title: "Reject duplicate decoded keys at the HotSpot Kotlin wire boundary"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Reject duplicate decoded keys at the HotSpot Kotlin wire boundary
 
 **Context:**
-Repository-wide review, 2026-11-04: [HS09-05](../reviews/2026-11-04-repository-review-findings.md#hs09-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [HS09-05](../../reviews/2026-11-04-repository-review-findings.md#hs09-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · malformed-input/conformance · reproduced, high confidence · optional Kotlin wire admission. NEW.**
 
@@ -29,6 +29,10 @@ Repository-wide review, 2026-11-04: [HS09-05](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The bounded Kotlin reader now validates decoded member names before constructing the JSON tree. Its schema 2 and 3 tests reject literal and escaped duplicates and permit repeated names in distinct objects. The focused JDK 25 HotSpot wire, observed protocol, and replay protocol tests passed.
 
 ---
 <!-- id: issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli  file: issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md -->

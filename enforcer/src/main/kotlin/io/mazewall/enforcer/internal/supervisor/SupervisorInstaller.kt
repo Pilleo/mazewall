@@ -769,7 +769,7 @@ internal class JVMValidationListener(
             if (!acceptHandshake(dis, readyLatch)) return
 
             while (!closed.get()) {
-                val request = readValidationRequest(dis) ?: break
+                val request = channel.readRequest(dis, ::readValidationRequest) ?: break
                 processValidationRequest(dis, channel, request)
             }
         } catch (expectedStop: java.io.IOException) {
@@ -807,11 +807,7 @@ internal class JVMValidationListener(
     )
 
     private fun readValidationRequest(dis: DataInputStream): ValidationRequest? {
-        val id = try {
-            dis.readLong()
-        } catch (_: java.io.EOFException) {
-            return null
-        }
+        val id = dis.readLong()
         val pid = dis.readInt()
         val arch = dis.readInt()
         val parentPid = dis.readInt()

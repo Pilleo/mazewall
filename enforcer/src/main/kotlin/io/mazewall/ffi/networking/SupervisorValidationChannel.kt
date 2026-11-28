@@ -22,6 +22,7 @@ import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
+import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
@@ -37,6 +38,15 @@ internal class SupervisorValidationChannel(
     private val arena = NativeArena.ofShared()
     private val stopping = java.util.concurrent.atomic
         .AtomicBoolean(false)
+    private var requestRead: RequestRead? = null
+
+    private sealed interface RequestRead {
+        data object Idle : RequestRead
+
+        data class Receiving(
+            val deadline: Deadline,
+        ) : RequestRead
+    }
 
     init {
         configureSocketNonblocking()
@@ -75,12 +85,33 @@ internal class SupervisorValidationChannel(
         stopping.set(true)
     }
 
+    internal fun <T> readRequest(
+        input: DataInputStream,
+        decode: (DataInputStream) -> T,
+    ): T? {
+        check(requestRead == null && input.markSupported())
+        input.mark(1)
+        requestRead = RequestRead.Idle
+        try {
+            if (input.read() < 0) return null
+            requestRead = RequestRead.Receiving(Deadline.afterMillis(configuredTimeoutMillis()))
+            input.reset()
+            return decode(input)
+        } finally {
+            requestRead = null
+        }
+    }
+
     private fun readBounded(
         buffer: io.mazewall.ffi.memory.ManagedSegment,
         count: Long,
         decode: (Long) -> Int,
     ): Int {
-        val deadline = Deadline.afterMillis(configuredTimeoutMillis())
+        val deadline = when (val phase = requestRead) {
+            RequestRead.Idle -> null
+            is RequestRead.Receiving -> phase.deadline
+            null -> Deadline.afterMillis(configuredTimeoutMillis())
+        }
         while (true) {
             awaitReady(NativeConstants.POLLIN, deadline)
             when (val result = native.memory.read(socketFd, buffer, count)) {
@@ -163,18 +194,17 @@ internal class SupervisorValidationChannel(
 
     private fun awaitReady(
         event: Short,
-        deadline: Deadline,
+        deadline: Deadline?,
     ) {
         while (!stopping.get()) {
             if (Thread.currentThread().isInterrupted) {
                 Thread.currentThread().interrupt()
                 throw InterruptedIOException("validation readiness interrupted")
             }
-            val remaining = deadline.remainingMillis()
-            if (remaining <= 0) throw IOException("supervisor validation readiness timed out")
+            val remaining = deadline?.remainingMillis()
             pollFd.setEvents(event)
             pollFd.setRevents(0)
-            val pollTimeout = minOf(remaining, STOP_CHECK_INTERVAL_MILLIS)
+            val pollTimeout = validationPollTimeout(remaining)
             when (val result = native.raw.poll(pollFd.managed, 1, pollTimeout)) {
                 is LinuxNative.SyscallResult.Success -> {
                     if (result.value == 0L) {
@@ -197,6 +227,12 @@ internal class SupervisorValidationChannel(
             }
         }
         throw IOException("supervisor installation owner terminated")
+    }
+
+    private fun validationPollTimeout(remaining: Int?): Int {
+        if (remaining == null) return STOP_CHECK_INTERVAL_MILLIS
+        if (remaining <= 0) throw IOException("supervisor validation readiness timed out")
+        return minOf(remaining, STOP_CHECK_INTERVAL_MILLIS)
     }
 
     public fun sendExecRewriteAck(ok: Boolean) {

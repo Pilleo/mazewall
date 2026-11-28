@@ -1,7 +1,7 @@
 ---
 title: "Accept contract-permitted pre-ready HotSpot events in the shared Go decoder"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Accept contract-permitted pre-ready HotSpot events in the shared Go decoder
 
 **Context:**
-Repository-wide review, 2026-11-04: [HS09-01](../reviews/2026-11-04-repository-review-findings.md#hs09-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [HS09-01](../../reviews/2026-11-04-repository-review-findings.md#hs09-01). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P1 · correctness/availability · reproduced, high confidence · optional bridge/HotSpot product integration release. NEW.**
 
@@ -29,6 +29,10 @@ Repository-wide review, 2026-11-04: [HS09-01](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The Go reader admits validated occurrence rows after start while retaining the independent ready requirement for summaries. The regression failed in both schemas before this change and passes afterward. The complete hotspot-bridge module passed go test -race -shuffle=on -count=1 ./....
 
 ---
 <!-- id: issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events  file: issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md -->

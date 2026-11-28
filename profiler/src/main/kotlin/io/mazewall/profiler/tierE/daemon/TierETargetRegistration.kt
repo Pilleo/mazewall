@@ -4,6 +4,7 @@ import io.mazewall.profiler.internal.attribution.ProcessIncarnationId
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
 /**
@@ -122,10 +123,16 @@ internal class TierEProcessIdentityVerifier(
         /** Linux /proc starttime is stable for one PID lifetime within the current boot. */
         public val linux: TierEProcessIdentityVerifier = TierEProcessIdentityVerifier(::observeLinuxIncarnation)
 
-        internal fun observeLinuxIncarnation(pid: Int): Long? =
-            runCatching {
-                parseLinuxIncarnation(Files.readString(Path.of("/proc/$pid/stat")))
-            }.getOrNull()
+        internal fun observeLinuxIncarnation(pid: Int): Long? = observeLinuxIncarnation { Files.readString(Path.of("/proc/$pid/stat")) }
+
+        internal fun observeLinuxIncarnation(readStat: () -> String): Long? {
+            val stat = try {
+                readStat()
+            } catch (_: NoSuchFileException) {
+                return null
+            }
+            return requireNotNull(parseLinuxIncarnation(stat)) { "malformed proc stat starttime" }
+        }
 
         internal fun parseLinuxIncarnation(stat: String): Long? {
             val closingParenthesis = stat.lastIndexOf(')')

@@ -1,7 +1,7 @@
 ---
 title: "Preserve supervisor startup failure when helper shutdown also fails"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,10 @@ The run lifecycle closes the helper pool in a plain finally; a close failure can
 
 **Needed:**
 1. Define a narrow lifecycle failure-precedence boundary using existing CleanupFailures semantics and focused tests; retain Error promotion, interruption, exact cleanup attempts, existing deadlines, and uncertain retirement.
+
+**Resolution**
+
+The startup and explicit shutdown boundaries use the shared cleanup failure ordering and always attempt helper close. Focused JDK 25 tests failed on the old plain finally and now verify ordinary and fatal precedence, exact throwable identity and retryable helper retirement through the real pool. The owning SupervisorDaemonEngineTest class passes.
 
 ---
 <!-- id: issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh  file: issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md -->

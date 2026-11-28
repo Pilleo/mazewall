@@ -282,12 +282,18 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
      * (the arena) close on terminal paths; their failure cannot replace the close failure.
      * See docs/internals/designs/core/fd-token-ownership.md.
      */
-    internal fun closeResource(native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem) {
+    internal fun closeResource(
+        native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem,
+        onTerminalFailure: (Throwable) -> Unit = {},
+    ) {
         synchronized(lifecycle) {
             if (value < 0 || isClosedType() || !isLiveForIo()) return
             val closeFailure = dispatchClose(native)
             markClosed()
-            closeArena(closeFailure)?.let { throw it }
+            closeArena(closeFailure)?.let {
+                onTerminalFailure(it)
+                throw it
+            }
         }
     }
 

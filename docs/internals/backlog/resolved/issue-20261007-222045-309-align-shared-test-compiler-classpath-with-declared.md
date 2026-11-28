@@ -1,7 +1,7 @@
 ---
 title: "Align shared test compiler classpath with declared friend JARs"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -23,6 +23,10 @@ Fresh full build run-898ecce8d097 exposed compileSharedTestKotlin rejecting inte
 **Evidence (pending repository review):**
 - Fresh build `run-898ecce8d097` failed compileSharedTestKotlin on internal PlatformProvider access. The shared compilation now selects JAR library elements matching its existing platform/enforcer friend paths.
 - Actual `./gradlew compileSharedTestKotlin` passed (`run-a0e4077f13a7`); full fresh host build (`run-87b7f35d556f`) and fresh Docker gates (`run-a7557f9c33a8`) passed. Internal visibility is unchanged.
+
+**Resolution**
+
+The existing JAR variant selection and both friend JAR paths were confirmed in the current build. A JDK 25 enforcer test build rebuilt the enforcer JAR and actually executed compileSharedTestKotlin successfully, with internal visibility unchanged.
 
 ---
 <!-- id: issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared  file: issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared.md -->

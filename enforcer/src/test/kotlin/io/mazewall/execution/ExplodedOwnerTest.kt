@@ -46,7 +46,7 @@ class ExplodedOwnerTest {
             assertEquals(4, closed.size)
             assertTrue(closed.none { it.isLiveForIo() })
             assertTrue(DeploymentOwnerAssertions.pathsBelow(root).isEmpty())
-            owner.close()
+            assertTrue(assertFailsWith<AssertionError> { owner.close() } === fatal)
             assertEquals(4, closed.size, "Retired actual tokens cannot be closed twice")
         }
     }

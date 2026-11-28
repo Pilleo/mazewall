@@ -399,6 +399,9 @@ For registered targets, `TierETargetExitCoordinator` observes the host PID incar
 PID reuse it finalizes exactly once. Exit waits up to 30 seconds for the producer-closed artifact;
 reuse never admits an artifact. The daemon remains available after finalization, reports its
 terminal state through `STATUS`, and may attach a later valid registration.
+Permission, I/O, and malformed process-stat failures end collection for the current
+session and retain the cause as a finalization failure. The collector retires its
+watch and resources without admitting the terminal artifact for that session.
 
 When `TIER_E_EVIDENCE_ROOT` is configured, terminal evidence is atomically written as
 `<registration-id>-<session-epoch>.tier-e.json`. The report includes the host PID, process

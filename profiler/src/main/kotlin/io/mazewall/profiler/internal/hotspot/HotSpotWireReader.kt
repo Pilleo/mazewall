@@ -109,7 +109,6 @@ internal class HotSpotWireReader(
         } catch (failure: java.nio.charset.CharacterCodingException) {
             throw HotSpotProtocolException("invalid UTF-8 record", failure)
         }
-        checkDepth(text)
         val row = parseObject(text)
         checkHotSpotProtocol(row.ulong("schema_version") == expectedSchemaVersion, "unsupported collector schema")
         when (expectedSchemaVersion) {
@@ -137,29 +136,55 @@ internal class HotSpotWireReader(
         return HotSpotWireRecord(kind, session, eventId, row, text, bytes.size)
     }
 
-    private fun parseObject(text: String): JsonObject =
+    private fun parseObject(text: String): JsonObject {
         try {
-        Json.parseToJsonElement(text) as? JsonObject ?: throw HotSpotProtocolException("record is not an object")
-    } catch (failure: SerializationException) {
-        throw HotSpotProtocolException("invalid JSON record", failure)
+            checkObjectKeys(text)
+            return Json.parseToJsonElement(text) as? JsonObject ?: throw HotSpotProtocolException("record is not an object")
+        } catch (failure: SerializationException) {
+            throw HotSpotProtocolException("invalid JSON record", failure)
+        }
     }
 
-    private fun checkDepth(text: String) {
-        var depth = 0
-        var quoted = false
+    // Check members before the JSON tree parser replaces earlier values. Syntax remains
+    // the tree parser's responsibility. Array frames carry no member names.
+    private fun checkObjectKeys(text: String) {
+        val frames = ArrayDeque<MutableSet<String>?>()
+        var stringStart = -1
         var escaped = false
-        for (character in text) {
+        for ((index, character) in text.withIndex()) {
             when {
                 escaped -> escaped = false
-                quoted && character == '\\' -> escaped = true
-                character == '"' -> quoted = !quoted
-                !quoted && (character == '{' || character == '[') -> {
-                    depth++
-                    checkHotSpotProtocol(depth <= MAX_JSON_DEPTH, "JSON nesting limit exceeded")
+                stringStart >= 0 && character == '\\' -> escaped = true
+                stringStart >= 0 && character == '"' -> {
+                    text.recordObjectKey(stringStart, index, frames.lastOrNull())
+                    stringStart = -1
                 }
-                !quoted && (character == '}' || character == ']') -> depth--
+                stringStart >= 0 -> Unit
+                character == '"' -> stringStart = index
+                character == '{' || character == '[' -> {
+                    checkHotSpotProtocol(frames.size < MAX_JSON_DEPTH, "JSON nesting limit exceeded")
+                    frames.addLast(if (character == '{') HashSet() else null)
+                }
+                character == '}' || character == ']' -> frames.removeLastOrNull()
             }
         }
+    }
+
+    private fun String.recordObjectKey(
+        openingQuote: Int,
+        closingQuote: Int,
+        keys: MutableSet<String>?,
+    ) {
+        if (keys == null || !memberColonFollows(closingQuote + 1)) return
+        val unquoted = substring(openingQuote + 1, closingQuote)
+        val key = if ('\\' in unquoted) Json.decodeFromString<String>(substring(openingQuote, closingQuote + 1)) else unquoted
+        checkHotSpotProtocol(keys.add(key), "duplicate JSON object key")
+    }
+
+    private fun String.memberColonFollows(afterQuote: Int): Boolean {
+        var index = afterQuote
+        while (index < length && this[index] in " \t\r\n") index++
+        return index < length && this[index] == ':'
     }
 }
 

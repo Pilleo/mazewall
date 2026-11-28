@@ -1,12 +1,16 @@
 package io.mazewall.profiler.tierE.daemon
 
+import java.nio.file.AccessDeniedException
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class TierETargetExitCoordinatorTest {
@@ -19,6 +23,26 @@ class TierETargetExitCoordinatorTest {
         markerOffset = 0x20,
         artifactFileName = "orders.mzse",
     )
+
+    @Test
+    fun `observation failure requests terminal cleanup`() {
+        val finalized = CountDownLatch(1)
+        val denied = AccessDeniedException("fixture stat")
+        val observed = AtomicReference<TierETargetExit>()
+        val coordinator = TierETargetExitCoordinator(
+            TierEProcessIdentityVerifier { throw denied },
+            pollIntervalMillis = 1,
+        )
+
+        val watch = coordinator.watch(target) {
+            observed.set(it)
+            finalized.countDown()
+        }
+        watch.use {
+            assertTrue(finalized.await(1, TimeUnit.SECONDS), "observation failure must reach the retirement owner")
+        }
+        assertSame(denied, assertIs<TierETargetExit.ObservationFailed>(observed.get()).cause)
+    }
 
     @Test
     fun `exit notification is delivered exactly once`() {

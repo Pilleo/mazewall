@@ -33,7 +33,9 @@ final class ConfinedHelperLaneFunctionalTest {
         Files.copy(repository.resolve("gradle/libs.versions.toml"), fixture.resolve("gradle/libs.versions.toml"));
         Files.copy(repository.resolve("gradle/verification-metadata.xml"), fixture.resolve("gradle/verification-metadata.xml"));
         Path testKit = Files.createDirectories(Path.of(System.getProperty("org.gradle.testkit.dir")).resolve("confined-helper-lane"));
+        String actionClasses = MapFilesAccessCheckAction.class.getProtectionDomain().getCodeSource().getLocation().toURI().toASCIIString();
         Files.writeString(fixture.resolve("build.gradle.kts"), """
+            buildscript { dependencies { classpath(files(uri("%s"))) } }
             plugins { java }
             repositories { mavenCentral() }
             dependencies {
@@ -48,7 +50,7 @@ final class ConfinedHelperLaneFunctionalTest {
                     configurations.testRuntimeClasspath.get().resolve()
                 }
             }
-            """ + source.substring(start, end + endMarker.length()) + "\n" + """
+            """.formatted(actionClasses) + source.substring(start, end + endMarker.length()) + "\n" + """
             tasks.register<Test>("integrationTest") {
                 testClassesDirs = sourceSets["test"].output.classesDirs
                 classpath = sourceSets["test"].runtimeClasspath
@@ -60,6 +62,9 @@ final class ConfinedHelperLaneFunctionalTest {
                 classpath = sourceSets["test"].runtimeClasspath
                 useJUnitPlatform { includeTags("needs-fresh-jvm") }
             }
+            tasks.register<Test>("configurationCacheAllLaneProbe") {
+                rejectUnopenableAllLane()
+            }
             """);
         for (String name : CONFINED) writeTest(fixture, name, false);
         writeTest(fixture, "fixture.OrdinaryTest", false);
@@ -69,11 +74,22 @@ final class ConfinedHelperLaneFunctionalTest {
         var preparation = new java.util.ArrayList<>(List.of("prepareLaneDependencies", "--no-configuration-cache", "--max-workers=1"));
         if (Boolean.parseBoolean(offline)) preparation.add("--offline");
         GradleRunner.create().withProjectDir(fixture.toFile()).withTestKitDir(testKit.toFile()).withArguments(preparation).build();
+        assertAllLaneConfigurationCache(fixture, testKit);
         assertRun(fixture, testKit, null, List.of("fixture.OrdinaryTest", CONFINED.get(0), CONFINED.get(1), CONFINED.get(2)), false);
         assertRun(fixture, testKit, "ALL", List.of("fixture.OrdinaryTest", CONFINED.get(0), CONFINED.get(1), CONFINED.get(2)), false);
         assertRun(fixture, testKit, "BASELINE", List.of("fixture.OrdinaryTest"), false);
         assertRun(fixture, testKit, "CONFINED", CONFINED, false);
         assertRun(fixture, testKit, "INVALID", List.of(), true);
+    }
+
+    private static void assertAllLaneConfigurationCache(Path fixture, Path testKit) {
+        var arguments = List.of("configurationCacheAllLaneProbe", "--dry-run", "--offline", "--configuration-cache",
+            "--configuration-cache-problems=fail", "--max-workers=1", "-PmazewallKernelLane=ALL");
+        var runner = GradleRunner.create().withProjectDir(fixture.toFile()).withTestKitDir(testKit.toFile()).withArguments(arguments);
+        var stored = runner.build().getOutput();
+        if (!stored.contains("Configuration cache entry stored.")) throw new AssertionError(stored);
+        var reused = runner.build().getOutput();
+        if (!reused.contains("Configuration cache entry reused.")) throw new AssertionError(reused);
     }
 
     private static void assertRun(Path fixture, Path testKit, String mode, List<String> expected, boolean fail) throws Exception {

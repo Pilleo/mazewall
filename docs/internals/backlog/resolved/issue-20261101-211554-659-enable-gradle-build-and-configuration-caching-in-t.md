@@ -1,7 +1,7 @@
 ---
 title: "Enable Gradle build and configuration caching in the pre-commit hook"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -20,6 +20,10 @@ Operator requires the full commit hook to use caching. The existing hook invokes
 
 **Needed:**
 1. Enable --build-cache and --configuration-cache, update the existing hook argument regression and guidance, verify fail-closed hook behavior, then demonstrate real Gradle cache reuse.
+
+**Resolution**
+
+Verified the existing full pre-commit command enables both caches and serial execution. The Git hook regression checked the exact arguments, clean environment, and rejection of a failed build. Retained real Gradle output from the prior full commit gate confirms task output cache hits and configuration-cache reuse.
 
 ---
 <!-- id: issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t  file: issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t.md -->

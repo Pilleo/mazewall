@@ -1,15 +1,22 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.profiler.internal.hotspot.HotSpotCollectorProcess
 import io.mazewall.profiler.internal.hotspot.HotSpotCollectorTiming
 import io.mazewall.profiler.internal.hotspot.HotSpotSessionFailure
+import io.mazewall.profiler.internal.hotspot.HotSpotSessionState
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class HotSpotCollectorProcessTest {
@@ -62,6 +69,35 @@ class HotSpotCollectorProcessTest {
         assertTrue(stopped.snapshot.pendingOwnership)
         assertFailsWith<HotSpotSessionFailure> { stopped.owner.close() }
         assertFalse(stopped.owner.snapshot().pendingOwnership)
+    }
+
+    @Test
+    fun `automatic session expiry aborts a hanging collector without caller activity`() {
+        val child = CompletableFuture<Process>()
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream).also { child.complete(it) }
+        }
+        val owner = HotSpotCollectorProcess.attach(
+            HotSpotChildFixture.argv("hang", directory),
+            123,
+            456uL,
+            launcher = launcher,
+            timing = HotSpotCollectorTiming(sessionNanos = 2_000_000_000, stopNanos = 500_000_000),
+        )
+
+        val exitedWithoutCaller = child.join().waitFor(5, TimeUnit.SECONDS)
+        val beforeCleanup = owner.snapshot()
+        val failure = assertFailsWith<HotSpotSessionFailure> { owner.close() }
+
+        assertTrue(exitedWithoutCaller, "The autonomous timer must abort the child before close")
+        val failed = assertIs<HotSpotSessionState.Failed>(beforeCleanup.state)
+        assertEquals("HotSpot startup/stop deadline expired", failed.failures.first().message)
+        assertSame(failed.failures.first(), failure.cause)
+        assertTrue(beforeCleanup.pendingOwnership)
+        assertFalse(failure.snapshot.pendingOwnership)
     }
 
     @Test
