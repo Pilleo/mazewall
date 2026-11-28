@@ -77,6 +77,7 @@ internal object NativeConstants {
     const val EACCES = 13
     const val EINTR = 4
     const val EIO = 5
+    const val E2BIG = 7
     const val EBADF = 9
     const val EINVAL = 22
     const val ELOOP = 40

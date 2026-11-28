@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 384 | *Total Resolved Issues:* 802
+*Total Active Issues:* 383 | *Total Resolved Issues:* 803
 
-Active status detail: 381 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 380 open, 3 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Recursive state/complexity review (2026-11-05): the [consolidated review](../reviews/2026-11-05-state-complexity-review.md)
@@ -220,7 +220,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261103-235300-192](issue-20261103-235300-192-return-failure-after-unsuccessful-or-ambiguous-ret.md) | Return failure after unsuccessful or ambiguous retained ingestion writes | medium | tooling |
 | [issue-20261103-235357-491](issue-20261103-235357-491-keep-healthy-supervisor-listeners-alive-across-idl.md) | Keep healthy supervisor listeners alive across idle request intervals | high | core |
 | [issue-20261103-235357-847](issue-20261103-235357-847-align-approved-accept-routing-with-tracee-authorit.md) | Align approved accept routing with tracee authority execution | high | core |
-| [issue-20261103-235358-296](issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects | high | core |
+| Archived [issue-20261103-235358-296](resolved/issue-20261103-235358-296-preserve-and-validate-complete-openat2-arguments-b.md) | Preserve and validate complete openat2 arguments before supervised effects (resolved 2026-11-27) | high | core |
 | [issue-20261103-235358-819](issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) | Retain supervisor helper capacity across fatal worker replacement | medium | core |
 | [issue-20261103-235400-034](issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) | Escape observed paths as Kotlin literals in generated policy DSL | medium | profiler |
 | [issue-20261103-235400-350](issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) | Hide incomplete-conversion test seams from ordinary Java consumers | medium | profiler |

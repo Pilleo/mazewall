@@ -9,6 +9,7 @@ internal data class SyscallArguments(
     val sockaddrBytes: ByteArray?,
     val dirfd: TraceeDirFd = TraceeDirFd.CurrentWorkingDirectory,
     val openHow: OpenHow? = null,
+    val openHowErrno: Int? = null,
 )
 
 /** Immutable notification fields shared by every supervisor route. */
