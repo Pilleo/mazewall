@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 353 | *Total Resolved Issues:* 833
+*Total Active Issues:* 352 | *Total Resolved Issues:* 834
 
 Active totals include open and deferred issues in nested folders. Explicitly marked archived rows preserve historical links.
 After updating issue files and their index rows, run `./gradlew refreshBacklogTotals validateBacklogIndex`.
@@ -199,7 +199,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261103-235250-506](resolved/issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md) | Accept contract-permitted pre-ready HotSpot events in the shared Go decoder | high | profiler |
 | [issue-20261103-235250-806](issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) | Bind strict HotSpot terminal evidence to negotiated provider and captured epoch | medium | profiler |
 | [issue-20261103-235251-281](issue-20261103-235251-281-validate-strict-hotspot-finalization-and-selected-.md) | Validate strict HotSpot finalization and selected accounting before completion | medium | profiler |
-| [issue-20261103-235251-822](issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) | Keep autonomous HotSpot deadline enforcement active through finishing | medium | profiler |
+| Archived [issue-20261103-235251-822](resolved/issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) | Keep autonomous HotSpot deadline enforcement active through finishing | medium | profiler |
 | Archived [issue-20261103-235252-265](resolved/issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) | Reject duplicate decoded keys at the HotSpot Kotlin wire boundary | medium | profiler |
 | [issue-20261103-235252-762](issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) | Isolate cross-process signals in the required Portal worker baseline | high | portal-runtime |
 | [issue-20261103-235253-262](issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) | Retain replacement worker ownership across broker close races | high | portal-runtime |

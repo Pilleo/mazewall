@@ -72,7 +72,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | HS09-01 | P1 | W10 | [issue-20261103-235250-506](../backlog/resolved/issue-20261103-235250-506-accept-contract-permitted-pre-ready-hotspot-events.md) |
 | HS09-02 | P2 | W10 | [issue-20261103-235250-806](../backlog/issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) |
 | HS09-03 | P2 | W10 | [issue-20261103-235251-281](../backlog/issue-20261103-235251-281-validate-strict-hotspot-finalization-and-selected-.md) |
-| HS09-04 | P2 | W10 | [issue-20261103-235251-822](../backlog/issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) |
+| HS09-04 | P2 | W10 | [issue-20261103-235251-822](../backlog/resolved/issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md) |
 | HS09-05 | P2 | W10 | [issue-20261103-235252-265](../backlog/resolved/issue-20261103-235252-265-reject-duplicate-decoded-keys-at-the-hotspot-kotli.md) |
 | PRT-01 | P1 | W06 | [issue-20261103-235252-762](../backlog/issue-20261103-235252-762-isolate-cross-process-signals-in-the-required-port.md) |
 | PRT-02 | P1 | W06 | [issue-20261103-235253-262](../backlog/issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) |

@@ -53,9 +53,11 @@ internal class HotSpotSessionDriver(
     override fun pulse() = event(HotSpotSessionEvent.Tick)
 
     override fun timerActive(): Boolean =
-        when (interpreter.state) {
+        when (val state = interpreter.state) {
         HotSpotSessionState.Created, is HotSpotSessionState.Starting, is HotSpotSessionState.Ready, is HotSpotSessionState.Running -> true
-        is HotSpotSessionState.Finishing, is HotSpotSessionState.Failed, is HotSpotSessionState.Completed -> false
+        // The timer itself must join before the caller can retire the streams.
+        is HotSpotSessionState.Finishing -> !state.processExited || !state.stdoutEnded || !state.stderrJoined
+        is HotSpotSessionState.Failed, is HotSpotSessionState.Completed -> false
     }
 
     private fun execute(effects: List<HotSpotSessionEffect>) {

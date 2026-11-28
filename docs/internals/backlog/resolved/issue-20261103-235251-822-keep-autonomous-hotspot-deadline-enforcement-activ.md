@@ -1,7 +1,7 @@
 ---
 title: "Keep autonomous HotSpot deadline enforcement active through finishing"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Keep autonomous HotSpot deadline enforcement active through finishing
 
 **Context:**
-Repository-wide review, 2026-11-04: [HS09-04](../reviews/2026-11-04-repository-review-findings.md#hs09-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [HS09-04](../../reviews/2026-11-04-repository-review-findings.md#hs09-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **P2 · lifecycle/resource bound · reproduced, high confidence · optional Kotlin host supervision. NEW.**
 
@@ -29,6 +29,10 @@ Repository-wide review, 2026-11-04: [HS09-04](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+A real JDK 25 fixture reproduced a collector staying alive after automatic session expiry. Deadline pulses now continue until the process and both reader workers report completion, or until the session fails. The timer then relinquishes its lease so checked stream retirement can finish. The regression observed autonomous process exit before any caller cleanup, then verified the retained deadline failure by identity and successful release of the remaining owners. The full HotSpot test group, Profiler lint and the Detekt warning ratchet passed.
 
 ---
 <!-- id: issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ  file: issue-20261103-235251-822-keep-autonomous-hotspot-deadline-enforcement-activ.md -->
