@@ -14,9 +14,22 @@ internal class OwnedPortalInvocation<T>(
     private val action: Callable<T>,
 ) : Runnable,
     InvocationHandle<T> {
+    private sealed class State(
+        val phase: PortalInvocationPhase,
+    ) {
+        data object Queued : State(PortalInvocationPhase.QUEUED)
+
+        data class Running(
+            val worker: Thread,
+        ) : State(PortalInvocationPhase.RUNNING)
+
+        data object Retiring : State(PortalInvocationPhase.RETIRING)
+
+        data object Ended : State(PortalInvocationPhase.ENDED)
+    }
+
     private val lock = Any()
-    private var phase = PortalInvocationPhase.QUEUED
-    private var thread: Thread? = null
+    private var state: State = State.Queued
     private val delivered = CompletableFuture<T>()
     private val ended = CompletableFuture<ExecutionEnd>()
     private val resultView = delivered.minimalCompletionStage()
@@ -28,17 +41,17 @@ internal class OwnedPortalInvocation<T>(
 
     override fun requestCancellation(): CancellationDisposition {
         val queued = synchronized(lock) {
-            when (phase) {
-                PortalInvocationPhase.ENDED -> return CancellationDisposition.ALREADY_ENDED
-                PortalInvocationPhase.QUEUED -> {
-                    phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.CANCEL)
+            when (val current = state) {
+                State.Ended -> return CancellationDisposition.ALREADY_ENDED
+                State.Queued -> {
+                    transition(PortalInvocationEvent.CANCEL, State.Ended)
                     true
                 }
-                PortalInvocationPhase.RUNNING -> {
-                    checkNotNull(thread).interrupt()
+                is State.Running -> {
+                    current.worker.interrupt()
                     false
                 }
-                PortalInvocationPhase.RETIRING -> false
+                State.Retiring -> false
             }
         }
         val failure = CancellationException("Portal invocation cancellation requested")
@@ -49,14 +62,23 @@ internal class OwnedPortalInvocation<T>(
 
     fun reject(failure: Throwable) {
         val rejected = synchronized(lock) {
-            if (phase != PortalInvocationPhase.QUEUED) {
+            if (state != State.Queued) {
                 false
             } else {
-                phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.CANCEL)
+                transition(PortalInvocationEvent.CANCEL, State.Ended)
                 true
             }
         }
         if (rejected) finishNotStarted(failure)
+    }
+
+    /** Called with the invocation lock held. */
+    private fun transition(
+        event: PortalInvocationEvent,
+        next: State,
+    ) {
+        check(PortalInvocationLifecycle.evaluate(state.phase, event) == next.phase)
+        state = next
     }
 
     private fun finishNotStarted(failure: Throwable) {
@@ -72,9 +94,8 @@ internal class OwnedPortalInvocation<T>(
     @Suppress("TooGenericExceptionCaught") // Fatal host mapping failure still retains exact process retirement ownership.
     override fun run() {
         synchronized(lock) {
-            if (phase != PortalInvocationPhase.QUEUED) return
-            phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.START)
-            thread = Thread.currentThread()
+            if (state != State.Queued) return
+            transition(PortalInvocationEvent.START, State.Running(Thread.currentThread()))
         }
         var failure: Throwable? = null
         try {
@@ -88,8 +109,7 @@ internal class OwnedPortalInvocation<T>(
             deliverFailure(bodyFailure)
         } finally {
             synchronized(lock) {
-                phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.BODY_ENDED)
-                thread = null
+                transition(PortalInvocationEvent.BODY_ENDED, State.Retiring)
             }
             retirement.awaitRetirement()?.let { cleanup ->
                 failure = failure?.let {
@@ -97,7 +117,7 @@ internal class OwnedPortalInvocation<T>(
                     .merge(it, cleanup)
                 } ?: cleanup
             }
-            synchronized(lock) { phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.RETIREMENT_ENDED) }
+            synchronized(lock) { transition(PortalInvocationEvent.RETIREMENT_ENDED, State.Ended) }
             Thread.interrupted()
             owner.finished(this)
             val outcome = if (retirement.started) ExecutionEnd.Finished(failure) else ExecutionEnd.NotStarted(checkNotNull(failure))

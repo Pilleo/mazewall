@@ -34,7 +34,7 @@ Host-only reproduction: copy a complete USER_NOTIF result while replacing behavi
 **Design-review follow-up (2026-11-03, finding 6):**
 - `ProfilingResult.kt:71-90` copies behavior independently of coverage and passes both to conversion. `BillOfBehavior.kt:102-132` checks the supplied coverage before compiling the supplied paths, without binding the two snapshots.
 - Own behavior and measured coverage in one immutable aggregate with controlled transformations. Value-only changes may preserve evidence; behavior edits/merges must lose measured completeness unless fresh evidence validates the new snapshot.
-- Coordinate with the [coverage consistency issue](issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md): internally consistent coverage and coverage belonging to this behavior are separate invariants. Preserve HotSpot incompleteness and unsigned-document semantics.
+- Coordinate with the [coverage consistency issue](resolved/issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md): internally consistent coverage and coverage belonging to this behavior are separate invariants. Preserve HotSpot incompleteness and unsigned-document semantics.
 
 ---
 ## Repository-review revalidation — 2026-11-04

@@ -84,7 +84,7 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | BUILD-02 | P2 | W11 | [issue-20261103-235256-009](../backlog/resolved/issue-20261103-235256-009-select-existing-api-abi-and-package-topology-check.md) |
 | TEST-01 | P2 | W11 | [issue-20261103-235256-471](../backlog/resolved/issue-20261103-235256-471-restore-intended-enforcer-and-profiler-mutation-ta.md) |
 | TEST-02 | P2 | W11 | [issue-20261103-235256-949](../backlog/resolved/issue-20261103-235256-949-make-the-kill-thread-kernel-oracle-reject-survival.md) |
-| TEST-03 | P2 | W19 | [issue-20261103-235257-446](../backlog/issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) |
+| TEST-03 | P2 | W19 | [issue-20261103-235257-446](../backlog/resolved/issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md) |
 | TEST-04 | P2 | W16 | [issue-20261103-235257-865](../backlog/resolved/issue-20261103-235257-865-align-packaged-consumer-matrix-deadline-with-owned.md) |
 | TEST-05 | P2 | W11 | [issue-20261103-235258-396](../backlog/resolved/issue-20261103-235258-396-invalidate-the-c-abi-oracle-when-effective-native-.md) |
 | ARCH-02 | P2 | W16 | [issue-20261103-235258-789](../backlog/issue-20261103-235258-789-guard-supported-portal-binary-compatibility-with-t.md) |
@@ -97,13 +97,13 @@ Each owner link resolves to its exact path under `docs/internals/backlog/`.
 | SUP-04 | P2 | W04 | [issue-20261103-235358-819](../backlog/issue-20261103-235358-819-retain-supervisor-helper-capacity-across-fatal-wor.md) |
 | SUP-05 | P2 | W04 | [issue-20261103-235359-257](../backlog/resolved/issue-20261103-235359-257-bound-supervisor-validation-and-daemon-diagnostic-.md) |
 | SUP-06 | P3 | W04 | [issue-20261103-235359-647](../backlog/resolved/issue-20261103-235359-647-preserve-typed-addfd-notification-gone-and-native-.md) |
-| EVID-04 | P2 | W14 | [issue-20261103-235400-034](../backlog/issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) |
-| EVID-05 | P2 | W14 | [issue-20261103-235400-350](../backlog/issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) |
+| EVID-04 | P2 | W14 | [issue-20261103-235400-034](../backlog/resolved/issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md) |
+| EVID-05 | P2 | W14 | [issue-20261103-235400-350](../backlog/resolved/issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md) |
 | EVID-06 | P2 | W14 | [issue-20261103-235400-690](../backlog/issue-20261103-235400-690-own-late-created-strace-descendants-through-cancel.md) |
-| EVID-07 | P2 | W14 | [issue-20261103-235400-980](../backlog/issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md) |
-| EVID-08 | P2 | W14 | [issue-20261103-235401-320](../backlog/issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) |
+| EVID-07 | P2 | W14 | [issue-20261103-235400-980](../backlog/resolved/issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md) |
+| EVID-08 | P2 | W14 | [issue-20261103-235401-320](../backlog/resolved/issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md) |
 | EVID-09 | P2 | W14 | [issue-20261103-235401-641](../backlog/resolved/issue-20261103-235401-641-distinguish-failed-dmesg-probes-from-successful-em.md) |
-| KD-E2 | P2 | W15 | [issue-20261103-235402-001](../backlog/issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) |
+| KD-E2 | P2 | W15 | [issue-20261103-235402-001](../backlog/resolved/issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md) |
 | PLAT-08 | P1 | W01 | [issue-20261103-235911-795](../backlog/resolved/issue-20261103-235911-795-preserve-linux-user-notif-precedence-over-trace-in.md) |
 | BPF-01 | P1 | W02 | [issue-20261103-235912-106](../backlog/resolved/issue-20261103-235912-106-install-effective-allow-list-narrowing-and-restric.md) |
 | BPF-03 | P1 | W02 | [issue-20261103-235912-401](../backlog/resolved/issue-20261103-235912-401-use-canonical-action-ordering-throughout-installed.md) |
@@ -132,7 +132,7 @@ remain those in the detailed finding register; a mapping is not a closure claim.
 | PN05-03 | P1 | W05 | [issue-20260926-121505-981](../backlog/issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md) |
 | PN05-05 | P2 | W05 | [issue-20260926-121514-401](../backlog/issue-20260926-121514-401-make-profiler-listener-startup-and-native-cleanup-.md) |
 | PN-RETENTION | P1 | W05 | [issue-20260926-121456-910](../backlog/issue-20260926-121456-910-bound-user-notif-session-evidence-retention.md) |
-| EVID-01 | P1 | W02 | [issue-20261028-232809-819](../backlog/issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) |
+| EVID-01 | P1 | W02 | [issue-20261028-232809-819](../backlog/resolved/issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md) |
 | EVID-03 | P1 | W02 | [issue-20261028-232811-578](../backlog/issue-20261028-232811-578-bind-measured-profile-coverage-to-its-observed-beh.md) |
 | TE-05 | P1 | W09 | [issue-20260926-121446-405](../backlog/issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md) |
 | TE-06 | P1 | W09 | [issue-20260926-121446-405](../backlog/issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md) |

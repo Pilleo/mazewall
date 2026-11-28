@@ -89,6 +89,7 @@ public class ProfilingResult<T> private constructor(
         baseCwd: java.nio.file.Path? = null,
     ): io.mazewall.enforcer.api.Policy<io.mazewall.enforcer.api.PolicyScope.ThreadLocalOnly, io.mazewall.enforcer.api.Uncompiled> = behavior.toPolicy(base, baseCwd, coverage)
 
+    @JvmSynthetic
     @JvmName("toPolicyAllowingIncomplete")
     internal fun toPolicyAllowingIncomplete(
         base: io.mazewall.enforcer.api.Policy<*, io.mazewall.enforcer.api.Uncompiled> = io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE,
@@ -102,6 +103,7 @@ public class ProfilingResult<T> private constructor(
         baseCwd: java.nio.file.Path? = null,
     ): String = behavior.toDsl(basePolicyName, base, baseCwd, coverage)
 
+    @JvmSynthetic
     @JvmName("toDslAllowingIncomplete")
     internal fun toDslAllowingIncomplete(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",

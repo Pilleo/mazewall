@@ -7,6 +7,8 @@ import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class IterativeProfilerExceptionChainTest {
@@ -20,13 +22,15 @@ class IterativeProfilerExceptionChainTest {
         val basePolicy = Policy.PURE_COMPUTE_UNSAFE
         val targetPath = "/etc/wrapped_denied_path"
 
+        val attempts = AtomicInteger()
         val compiledPolicy = IterativeProfiler.profile(basePolicy) {
-            val root = IOException("$targetPath (Permission denied)")
-            val wrapper = RuntimeException("framework wrapper", root)
-            throw wrapper
+            if (attempts.incrementAndGet() == 1) {
+                val root = IOException("$targetPath (Permission denied)")
+                throw RuntimeException("framework wrapper", root)
+            }
         }
 
-        // This will fail currently because IterativeProfiler only looks at the top-level exception
+        assertEquals(2, attempts.get())
         assertTrue(
             compiledPolicy.allowedFsReadPaths.any { it.value == targetPath },
             "Should have extracted path from wrapped exception",

@@ -1,7 +1,7 @@
 ---
 title: "Report iterative profiling exhaustion separately from convergence"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Report iterative profiling exhaustion separately from convergence
 
 **Context:**
-Repository-wide review, 2026-11-04: [EVID-08](../reviews/2026-11-04-repository-review-findings.md#evid-08). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [EVID-08](../../reviews/2026-11-04-repository-review-findings.md#evid-08). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/boundary:** reproduced bounded correctness/state-outcome defect; deprecated internal lab profiler, not the public session route. **Tracking:** **NEW** after iteration/exhaustion/progress searches; resolved issues `056`/`112` and bounded-wait `20260823-172000` concern other defects.
 
@@ -28,6 +28,10 @@ Repository-wide review, 2026-11-04: [EVID-08](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The internal iterative profiler now throws a distinct exhaustion exception with attempt count and partial-policy diagnostics. The JDK 25 state-machine tests cover repeated and distinct denied paths without successful execution, successful convergence, and unrelated failure propagation.
 
 ---
 <!-- id: issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f  file: issue-20261103-235401-320-report-iterative-profiling-exhaustion-separately-f.md -->

@@ -98,13 +98,12 @@ class ProfilerSessionApiTest {
     }
 
     @Test
-    fun `DSL rejection retains supplied diagnostics even when caller overrides completeness`() {
+    fun `DSL rejection retains supplied path diagnostics`() {
         val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.Missing, "missing operand")
         val observation = ProfileObservation.fromSyscallEvent(
             SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
         )
-        val original = pathCoverage(listOf(observation))
-        val coverage = original.copy(integrity = original.integrity.copy(complete = true))
+        val coverage = pathCoverage(listOf(observation))
         val behaviors = listOf(
             BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
             BillOfBehavior(execs = setOf("/bin/tool")),

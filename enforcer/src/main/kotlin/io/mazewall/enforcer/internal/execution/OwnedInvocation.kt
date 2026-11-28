@@ -20,14 +20,28 @@ internal class OwnedInvocation<T>(
     private val cancellationPermit: Any,
 ) : Runnable,
     InvocationHandle<T> {
-    private enum class Phase { QUEUED, RUNNING, ENDED }
+    private sealed interface Phase {
+        data object Queued : Phase
 
-    internal enum class LiveCancellation { NOT_STARTED, RUNNING, ENDED }
+        data class Running(
+            val worker: Thread,
+        ) : Phase
+
+        data object Ended : Phase
+    }
+
+    internal sealed interface LiveCancellation {
+        data object NotStarted : LiveCancellation
+
+        data class Running(
+            val worker: Thread,
+        ) : LiveCancellation
+
+        data object Ended : LiveCancellation
+    }
 
     private val lock = Any()
-    private var phase = Phase.QUEUED
-    private var worker: Thread? = null
-    private var liveCancellationWorker: Thread? = null
+    private var phase: Phase = Phase.Queued
     private val delivered = CompletableFuture<T>()
     private val ended = CompletableFuture<ExecutionEnd>()
     private val resultView = delivered.minimalCompletionStage()
@@ -98,14 +112,14 @@ internal class OwnedInvocation<T>(
     override fun requestCancellation(): CancellationDisposition {
         if (liveRunState != null) return requestLiveCancellation()
         val neverStarted = synchronized(lock) {
-            when (phase) {
-                Phase.ENDED -> return CancellationDisposition.ALREADY_ENDED
-                Phase.QUEUED -> {
-                    phase = Phase.ENDED
+            when (val current = phase) {
+                Phase.Ended -> return CancellationDisposition.ALREADY_ENDED
+                Phase.Queued -> {
+                    phase = Phase.Ended
                     true
                 }
-                Phase.RUNNING -> {
-                    checkNotNull(worker).interrupt()
+                is Phase.Running -> {
+                    current.worker.interrupt()
                     false
                 }
             }
@@ -123,27 +137,24 @@ internal class OwnedInvocation<T>(
     internal fun markLiveCancellation(permit: Any): LiveCancellation =
         synchronized(lock) {
             check(permit === cancellationPermit) { "Live cancellation permit does not match" }
-            when (phase) {
-                Phase.ENDED -> LiveCancellation.ENDED
-                Phase.QUEUED -> {
-                    phase = Phase.ENDED
-                    LiveCancellation.NOT_STARTED
+            when (val current = phase) {
+                Phase.Ended -> LiveCancellation.Ended
+                Phase.Queued -> {
+                    phase = Phase.Ended
+                    LiveCancellation.NotStarted
                 }
-                Phase.RUNNING -> {
-                    liveCancellationWorker = checkNotNull(worker)
-                    LiveCancellation.RUNNING
-                }
+                is Phase.Running -> LiveCancellation.Running(current.worker)
             }
         }
 
     @Suppress("TooGenericExceptionCaught") // Preserve every cancellation effect failure while completing ownership bookkeeping.
     private fun requestLiveCancellation(): CancellationDisposition {
         val transition = owner.cancelLiveInvocation(this, cancellationPermit)
-        if (transition == LiveCancellation.ENDED) return CancellationDisposition.ALREADY_ENDED
+        if (transition == LiveCancellation.Ended) return CancellationDisposition.ALREADY_ENDED
         var problem: Throwable? = null
         var interrupted = false
         try {
-            if (transition == LiveCancellation.RUNNING) checkNotNull(liveCancellationWorker).interrupt()
+            if (transition is LiveCancellation.Running) transition.worker.interrupt()
         } catch (failure: Throwable) {
             problem = failure
             interrupted = wasInterrupted(failure)
@@ -157,7 +168,7 @@ internal class OwnedInvocation<T>(
         }
         try {
             val failure = checkNotNull(liveCancellationFailure)
-            if (transition == LiveCancellation.NOT_STARTED) finishNotStarted(failure) else deliverFailure(failure)
+            if (transition == LiveCancellation.NotStarted) finishNotStarted(failure) else deliverFailure(failure)
         } catch (failure: Throwable) {
             problem = CleanupFailures.merge(problem, failure)
             interrupted = interrupted || wasInterrupted(failure)
@@ -169,16 +180,16 @@ internal class OwnedInvocation<T>(
 
     fun generationFailed(failure: Throwable) {
         val neverStarted = synchronized(lock) {
-            when (phase) {
-                Phase.ENDED -> return
-                Phase.QUEUED -> {
-                    phase = Phase.ENDED
+            when (val current = phase) {
+                Phase.Ended -> return
+                Phase.Queued -> {
+                    phase = Phase.Ended
                     true
                 }
-                Phase.RUNNING -> {
+                is Phase.Running -> {
                     // The originating body retains canonical classification/delivery after its context cleanup.
-                    if (worker === Thread.currentThread()) return
-                    checkNotNull(worker).interrupt()
+                    if (current.worker === Thread.currentThread()) return
+                    current.worker.interrupt()
                     false
                 }
             }
@@ -203,10 +214,9 @@ internal class OwnedInvocation<T>(
     override fun run() {
         val liveState = liveRunState
         synchronized(lock) {
-            if (phase == Phase.ENDED) return
-            check(phase == Phase.QUEUED)
-            phase = Phase.RUNNING
-            worker = Thread.currentThread()
+            if (phase == Phase.Ended) return
+            check(phase == Phase.Queued)
+            phase = Phase.Running(Thread.currentThread())
         }
         if (liveState != null) {
             runLive(liveState)
@@ -225,8 +235,7 @@ internal class OwnedInvocation<T>(
             deliverFailure(failure)
         } finally {
             synchronized(lock) {
-                phase = Phase.ENDED
-                worker = null
+                phase = Phase.Ended
             }
             Thread.interrupted()
             owner.finished(this)
@@ -360,8 +369,7 @@ internal class OwnedInvocation<T>(
             if (failure is Error || (slot != null && slot.activeTask === this)) quarantineLive(state)
         }
         synchronized(lock) {
-            phase = Phase.ENDED
-            worker = null
+            phase = Phase.Ended
         }
         state.interrupted = Thread.interrupted() || state.interrupted
         try {

@@ -9,7 +9,6 @@ import io.mazewall.profiler.api.IncompleteProfileException
 import io.mazewall.profiler.api.IoUringVisibility
 import io.mazewall.profiler.api.MazewallProfiler
 import io.mazewall.profiler.api.NetworkEndpoint
-import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.api.ObservationCorrelation
 import io.mazewall.profiler.api.ObservationSource
 import io.mazewall.profiler.api.ObservedSyscall
@@ -23,7 +22,7 @@ import io.mazewall.profiler.api.ProfileOptions
 import io.mazewall.profiler.api.ProfileStrategy
 import io.mazewall.profiler.api.ProfilingCoverage
 import io.mazewall.profiler.api.StackAttribution
-import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
+import io.mazewall.profiler.compiler.BobCompiler
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -138,6 +137,30 @@ class CollectorHybridTest {
             )
         assertEquals(1, parsed.observations.size)
         assertEquals(2, parsed.droppedLines)
+    }
+
+    @Test
+    fun `malformed fields discard the whole eBPF observation`() {
+        val write = "kind=uring tid=1 opcode=IORING_OP_WRITE"
+        val parsed =
+            EbpfEventParser.parse(
+                listOf(
+                    """$write path="/tmp/valid \"name\"\\"""",
+                    """$write path="/tmp/unclosed""",
+                    """$write path="/tmp/dangling\""",
+                    """$write path="/tmp/junk"suffix""",
+                    "$write path=/tmp/incomplete trailing",
+                    "$write path=/tmp/malformed trailing next=value",
+                    "# ignored",
+                    "",
+                ).joinToString("\n"),
+            )
+
+        assertEquals(5, parsed.droppedLines)
+        assertEquals(1, parsed.observations.size)
+        val behavior = BobCompiler.compileObservations(parsed.observations)
+        assertEquals(setOf("/tmp/valid \"name\"\\"), behavior.fsWritePaths)
+        assertEquals(emptySet(), behavior.opens)
     }
 
     @Test

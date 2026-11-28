@@ -6,8 +6,6 @@ import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.platform.native.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
-import io.mazewall.profiler.api.ObservationConstructorContract
-import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -95,26 +93,30 @@ class IterativeProfilerStateMachineTest {
     }
 
     @Test
-    fun `test IterativeProfiler limit exceeded state`() {
+    fun `exhaustion is a failure with no successful task execution`() {
         val originalExecutor = IterativeProfiler.taskExecutor
         try {
-            var calls = 0
-            val customExecutor = object : IterativeTaskExecutor {
-                override fun executeTask(
-                    currentPolicy: Policy<*, Uncompiled>,
-                    task: Runnable,
-                ): Throwable? {
-                    calls++
-                    return java.nio.file.AccessDeniedException("/tmp/infinite-$calls")
+            for (distinctPaths in listOf(false, true)) {
+                var calls = 0
+                IterativeProfiler.taskExecutor = object : IterativeTaskExecutor {
+                    override fun executeTask(
+                        currentPolicy: Policy<*, Uncompiled>,
+                        task: Runnable,
+                    ): Throwable {
+                        calls++
+                        val id = if (distinctPaths) calls else 1
+                        return java.nio.file.AccessDeniedException("/tmp/infinite-$id")
+                    }
                 }
+
+                val failure =
+                    org.junit.jupiter.api.assertThrows<IterativeProfilingExhaustedException> {
+                        IterativeProfiler.profile(Policy.PURE_COMPUTE_UNSAFE) { }
+                    }
+                assertEquals(20, calls)
+                assertEquals(calls, failure.attempts)
+                assertTrue(failure.partialPolicy.allowedFsReadPaths.any { it.value == "/tmp/infinite-1" })
             }
-
-            IterativeProfiler.taskExecutor = customExecutor
-
-            val policy = IterativeProfiler.profile(Policy.PURE_COMPUTE_UNSAFE) { }
-
-            assertEquals(20, calls, "Should stop at max 20 retries")
-            assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp/infinite-1" })
         } finally {
             IterativeProfiler.taskExecutor = originalExecutor
         }

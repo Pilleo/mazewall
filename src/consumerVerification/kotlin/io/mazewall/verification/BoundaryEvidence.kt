@@ -192,9 +192,11 @@ internal object BoundaryEvidence {
             val warm = normal.filter { it[2] == "warm" }.map { number(it[10], "clock:order") - number(it[7], "clock:order") }.sorted()
             val throughput = records("throughput").single { it[1] == mode.name }
             require(throughput[4] == "includes-result-verification+raw-emission") { "attribution:throughput" }
-            require(number(throughput[2], "measurement:throughput") == normal.size.toLong() && number(throughput[3], "measurement:throughput") > 0) { "measurement:throughput" }
+            val duration = number(throughput[3], "measurement:throughput")
+            require(number(throughput[2], "measurement:throughput") == normal.size.toLong() && duration > 0) { "measurement:throughput" }
+            require(duration >= ordinarySpan(normal)) { "measurement:throughput-span" }
             val median = warm[warm.size / 2].toDouble() / 2 + warm[(warm.size - 1) / 2].toDouble() / 2
-            summary[mode] = BoundarySummary(warm.size, warm.first(), median, warm.last(), normal.size * 1e9 / number(throughput[3], "measurement:throughput"), pressure, denied)
+            summary[mode] = BoundarySummary(warm.size, warm.first(), median, warm.last(), normal.size * 1e9 / duration, pressure, denied)
         }
         val direct = ordinary.getValue(BoundaryMode.DIRECT).mapValues { (_, row) -> row.subList(4, 7) }
         require(ordinary.values.all { records -> records.mapValues { (_, row) -> row.subList(4, 7) } == direct }) { "equivalence:ordinary" }
@@ -209,6 +211,14 @@ internal object BoundaryEvidence {
             require(queue >= 0 && execution >= 0 && queue <= interval && execution <= interval - queue) { "measurement:portal-timing" }
         }
         return summary
+    }
+
+    private fun ordinarySpan(records: List<List<String>>): Long {
+        val intervals = records
+            .sortedBy { number(it[3], "configured:ids") }
+            .map { number(it[7], "clock:order") to number(it[11], "clock:order") }
+        require(intervals.zipWithNext().all { (previous, next) -> previous.second <= next.first }) { "clock:ordinary-order" }
+        return intervals.last().second - intervals.first().first
     }
 
     private fun number(

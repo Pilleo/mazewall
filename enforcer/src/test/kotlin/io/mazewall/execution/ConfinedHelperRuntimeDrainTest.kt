@@ -2415,7 +2415,7 @@ class ConfinedHelperRuntimeDrainTest {
                     assertFailsWith<IllegalStateException> { domain.cancelLiveInvocation(invocation, Any()) }
                     assertFailsWith<IllegalStateException> { foreign.cancelLiveInvocation(invocation, foreignPermit) }
                     assertEquals(
-                        io.mazewall.enforcer.internal.execution.OwnedInvocation.LiveCancellation.ENDED,
+                        io.mazewall.enforcer.internal.execution.OwnedInvocation.LiveCancellation.Ended,
                         domain.cancelLiveInvocation(unregistered, cancellationPermit),
                     )
                     assertEquals("READY", (phase.get(domain) as Enum<*>).name)

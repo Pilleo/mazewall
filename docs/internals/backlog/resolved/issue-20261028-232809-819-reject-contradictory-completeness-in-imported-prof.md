@@ -1,7 +1,7 @@
 ---
 title: "Reject contradictory completeness in imported profile documents"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -35,12 +35,16 @@ Host-only reproduction: serialize USER_NOTIF coverage with droppedEvents=3 and d
 ---
 ## Repository-review revalidation — 2026-11-04
 
-[EVID-01](../reviews/2026-11-04-repository-review-findings.md#evid-01) reproduces the
+[EVID-01](../../reviews/2026-11-04-repository-review-findings.md#evid-01) reproduces the
 single-bit contradiction against current compiled source and reaches dedicated-worker policy
 conversion. Include unknown syscall names discarded by BoB import in the lossy-input matrix;
 do not certify a lossy decoder merely because the remaining facts are consistent. Static
 worker policy composition remains independent. This fix precedes EVID-03 ownership binding;
 the separate five-overload profiler omission PN05-02 also requires correction.
+
+**Resolution**
+
+Complete coverage now requires consistent collector, loss, drain and path evidence shared by inference and construction. The profile importer uses strict syscall decoding when completeness is claimed. JDK 25 tests passed for valid and conservative incomplete documents, contradictory persisted facts, and unknown syscall names.
 
 ---
 <!-- id: issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof  file: issue-20261028-232809-819-reject-contradictory-completeness-in-imported-prof.md -->

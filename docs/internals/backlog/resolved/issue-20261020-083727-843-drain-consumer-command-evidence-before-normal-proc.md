@@ -1,7 +1,7 @@
 ---
 title: "Drain consumer command evidence before normal process cleanup closes streams"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "testing"
@@ -50,7 +50,7 @@ the original warm failure is not treated as a pass or bypassed with a retry.
 
 ## Partial pump-acquisition follow-up — 2026-11-05
 
-[Recursive review F-03](../reviews/2026-11-05-state-complexity-review.md):
+[Recursive review F-03](../../reviews/2026-11-05-state-complexity-review.md):
 `ConsumerProcessEvidence.kt:91` assigns `pumps` only after both asynchronous copy
 startups return. If stdout returns a live future and stderr startup throws, the
 stdout owner is absent from the final join ledger at `:121`; diagnostic reads and
@@ -71,6 +71,10 @@ interrupted/failed partial join controls. Preserve exact-byte, delayed-reader,
 timeout and existing normal-completion checks. Do not exhaust common-pool threads.
 Run the existing cheap checks and required implementation completion gate; this
 review ran no pump failure reproduction or hosted qualification.
+
+**Resolution**
+
+Register each acquired pump immediately. The new regression showed that the original implementation performed zero joins after the second startup failed. On JDK 25, the focused consumer harness now joins the stdout future once, preserves the original startup failure and its suppressed drain failure, and confirms the child was reaped.
 
 ---
 <!-- id: issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc  file: issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md -->

@@ -397,14 +397,17 @@ public class ProcessBroker internal constructor(
     @Suppress("TooGenericExceptionCaught")
     override fun close() {
         operations.assertExternalClose()
-        val preparation = prepareClose()
-        preparation.waitForOtherClose?.let { operation ->
-            awaitBrokerCloseOperation(operation).raiseIfFailed()
-            return
-        }
-        if (!preparation.executeCleanup) return
+        val preparation =
+            when (val outcome = prepareClose()) {
+                ClosePreparation.AlreadyClosed -> return
+                is ClosePreparation.Wait -> {
+                    awaitBrokerCloseOperation(outcome.operation).raiseIfFailed()
+                    return
+                }
+                is ClosePreparation.Execute -> outcome
+            }
+        val operation = preparation.operation
         val startupToJoin = preparation.startupToJoin
-        val operation = checkNotNull(preparation.operation)
         val cleanup = CleanupCollector()
         var allRetired = false
         var failure: Throwable? = null
@@ -511,15 +514,15 @@ public class ProcessBroker internal constructor(
 
     private fun prepareClose(): ClosePreparation =
         synchronized(lifecycleGate) {
-            if (lifecycle == ProcessBrokerLifecycle.Closed) return@synchronized ClosePreparation.alreadyClosed()
-            if (lifecycle == ProcessBrokerLifecycle.Closing) return@synchronized ClosePreparation.waitFor(checkNotNull(closeOperation))
+            if (lifecycle == ProcessBrokerLifecycle.Closed) return@synchronized ClosePreparation.AlreadyClosed
+            if (lifecycle == ProcessBrokerLifecycle.Closing) return@synchronized ClosePreparation.Wait(checkNotNull(closeOperation))
             val transition = ProcessBrokerLifecycleMachine.evaluate(lifecycle, ProcessBrokerLifecycleEvent.CloseRequested)
             check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
             lifecycle = transition.state
             startupCancelled = true
             val operation = CloseOperation(Deadline.afterMillis(limits.closeTimeoutMs), CompletableFuture())
             closeOperation = operation
-            ClosePreparation.execute(startupCompletion, operation)
+            ClosePreparation.Execute(operation, startupCompletion)
         }
 
     /** Pool the slot unless the broker closed meanwhile; destroy orphans outside the lifecycle lock. */
@@ -874,22 +877,17 @@ public class ProcessBroker internal constructor(
             get() = channelRetired && serverRetired && processDestroyed && processReaped && pumpRetired && endpointRetired && cgroupRetired
     }
 
-    private data class ClosePreparation(
-        val executeCleanup: Boolean,
-        val waitForOtherClose: CloseOperation?,
-        val startupToJoin: CountDownLatch?,
-        val operation: CloseOperation?,
-    ) {
-        companion object {
-            fun alreadyClosed(): ClosePreparation = ClosePreparation(false, null, null, null)
+    private sealed interface ClosePreparation {
+        data object AlreadyClosed : ClosePreparation
 
-            fun waitFor(operation: CloseOperation): ClosePreparation = ClosePreparation(false, operation, null, null)
+        data class Wait(
+            val operation: CloseOperation,
+        ) : ClosePreparation
 
-            fun execute(
-                startup: CountDownLatch?,
-                operation: CloseOperation,
-            ): ClosePreparation = ClosePreparation(true, null, startup, operation)
-        }
+        data class Execute(
+            val operation: CloseOperation,
+            val startupToJoin: CountDownLatch?,
+        ) : ClosePreparation
     }
 
     private class StartupRetirement(

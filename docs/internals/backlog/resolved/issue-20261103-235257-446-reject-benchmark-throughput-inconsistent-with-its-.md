@@ -1,7 +1,7 @@
 ---
 title: "Reject benchmark throughput inconsistent with its enclosed sample clocks"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "benchmarks"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Reject benchmark throughput inconsistent with its enclosed sample clocks
 
 **Context:**
-Repository-wide review, 2026-11-04: [TEST-03](../reviews/2026-11-04-repository-review-findings.md#test-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [TEST-03](../../reviews/2026-11-04-repository-review-findings.md#test-03). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category:** reproduced bounded evidence-validation defect. **Confidence:** high for source; reproduced against existing compiled classes, not rebuilt in this lane. **Release boundary:** optional benchmark evidence only; not core containment or a production performance claim. **Status:** NEW.
 
@@ -34,6 +34,10 @@ The producer starts its batch timer before every ordinary request and stops afte
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The validator now checks ordinary requests in numeric ID order and requires the batch duration to enclose their host-observed span. The JDK 25 consumer harness rejects positive truncated durations, overlapping or reversed request clocks, and all 84 independent corruptions while retaining the valid baseline.
 
 ---
 <!-- id: issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-  file: issue-20261103-235257-446-reject-benchmark-throughput-inconsistent-with-its-.md -->

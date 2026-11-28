@@ -1,7 +1,7 @@
 ---
 title: "Bind invocation worker identity to its lifecycle phase"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "core"
@@ -38,6 +38,10 @@ Design review finding 9a (2026-11-03): OwnedInvocation and OwnedPortalInvocation
 - Deterministic barriers exercise cancellation before dispatch, during a running body and during Portal retirement; running cancellation targets the correct worker and never releases admission early.
 - Generation failure, repeated cancellation and normal completion retain exactly-once admission/end accounting and existing failure identity.
 - Run focused `OwnedRuntimeTest` and `PreparedPortalOperationTest` checks in their modules, then the required `./gradlew build` completion gate. A green type-state test alone does not establish concurrency correctness.
+
+**Resolution**
+
+Both runtimes now represent active work with a worker-bearing Running state. Portal retirement has a distinct state and the live Enforcer cancellation decision carries its worker without a separate field. JDK 25 checks passed for all 59 OwnedRuntimeTest cases and the Portal fixtures, including cancellation while a retirement future holds admission.
 
 ---
 <!-- id: issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p  file: issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md -->

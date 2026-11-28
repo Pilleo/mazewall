@@ -332,9 +332,9 @@ sections and focused scope metadata. No resolved issue was reopened.
 | 7 / D-03 | EXTEND | [Strict terminal identity](../backlog/issue-20261103-235250-806-bind-strict-hotspot-terminal-evidence-to-negotiate.md) |
 | 8 / D-04 | NEW, medium | [Native cache lifetime coverage](../backlog/issue-20261105-183230-840-require-complete-class-lifetime-coverage-before-na.md) |
 | 9 / A-02 | Resolved, medium | [BPF command/descriptor ownership](../backlog/resolved/issue-20261105-182737-637-reject-non-descriptor-bpf-commands-before-creating.md) |
-| 10 / C-03 | NEW, medium | [Malformed recorded eBPF](../backlog/issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) |
+| 10 / C-03 | NEW, medium | [Malformed recorded eBPF](../backlog/resolved/issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md) |
 | 11 / F-02 | EXTEND, conditional | [Retained ingestion identities](../backlog/issue-20261103-235259-662-preserve-canonical-issue-identities-in-any-retaine.md) |
-| 12 / F-03 | EXTEND | [Consumer evidence drain](../backlog/issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) |
+| 12 / F-03 | EXTEND | [Consumer evidence drain](../backlog/resolved/issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) |
 | 13 / B-01 | NEW, low, design-only | [Production notification phase payloads](../backlog/issue-20261105-182947-263-encode-production-supervisor-authority-work-phase-.md) |
 | 14 / F-01 | EXTEND, optional design-only | [Spring S2 effects](../backlog/issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md) |
 
@@ -349,8 +349,8 @@ so another restatement was deliberately not appended.
 | Policy raw construction/copy | Owned immutable collections, stable equality/cache keys | [Policy snapshots](../backlog/resolved/issue-20261028-232811-132-freeze-policy-definition-collections-at-every-cons.md) |
 | Process scope/filesystem intent | Validated construction, not a caller-selected phantom marker | [Validated process scope](../backlog/resolved/issue-20261028-232810-687-prevent-raw-policy-definitions-from-asserting-inva.md) |
 | Installation result | Failure-first rejection; controlled outcome independent of irreversible progress | [Receipt outcomes](../backlog/resolved/issue-20261028-232811-964-reject-installation-receipts-containing-both-succe.md) |
-| In-process and Portal invocation | `Running(worker)` payload; keep lock and result/physical-end separation | [Phase-owned worker](../backlog/issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) |
-| Broker close preparation | `AlreadyClosed | Wait(operation) | Execute(operation,…)` | [Exclusive close outcomes](../backlog/issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md) |
+| In-process and Portal invocation | `Running(worker)` payload; keep lock and result/physical-end separation | [Phase-owned worker](../backlog/resolved/issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) |
+| Broker close preparation | `AlreadyClosed | Wait(operation) | Execute(operation,…)` | [Exclusive close outcomes](../backlog/resolved/issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md) |
 | Portal codegen | One position-safe immutable schema drives declarations, codecs and fingerprint | [CG02 schema](../backlog/resolved/issue-20261103-095306-294-validate-complete-portal-dto-shapes-before-source-.md), [CG03 identity](../backlog/issue-20261103-095306-992-fingerprint-the-complete-versioned-portal-wire-sch.md) |
 | Generated wire/reply validation | Parse/finish validation before invocation or checkout release | [CG04 parsing](../backlog/resolved/issue-20261103-095307-699-reject-noncanonical-and-incompletely-consumed-gene.md), [CG05 checkout](../backlog/resolved/issue-20261103-095308-453-keep-portal-worker-checkout-owned-through-generate.md) |
 | Replacement worker custody | Registered provisional owner until published or physically retired | [Replacement ownership](../backlog/issue-20261103-235253-262-retain-replacement-worker-ownership-across-broker-.md) |

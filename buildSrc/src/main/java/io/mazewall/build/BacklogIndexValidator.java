@@ -25,14 +25,35 @@ final class BacklogIndexValidator {
     private BacklogIndexValidator() {}
 
     static void validate(Path index) throws IOException {
-        Path backlog = index.getParent();
         String text = Files.readString(index, StandardCharsets.UTF_8);
+        Totals declared = readSummary(text);
+        Totals actual = inspectInventory(index.getParent(), text);
+        if (!declared.equals(actual)) {
+            throw new IllegalArgumentException("Backlog totals are stale: declared active/resolved=" + declared.active + "/"
+                + declared.resolved + ", actual=" + actual.active + "/" + actual.resolved
+                + ". After correcting index membership, run ./gradlew refreshBacklogTotals");
+        }
+    }
+
+    static void refreshTotals(Path index) throws IOException {
+        String text = Files.readString(index, StandardCharsets.UTF_8);
+        Totals declared = readSummary(text);
+        Totals actual = inspectInventory(index.getParent(), text);
+        if (!declared.equals(actual)) {
+            String summary = "*Total Active Issues:* " + actual.active + " | *Total Resolved Issues:* " + actual.resolved;
+            Files.writeString(index, SUMMARY.matcher(text).replaceFirst(Matcher.quoteReplacement(summary)), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static Totals readSummary(String text) {
         Matcher summary = SUMMARY.matcher(text);
         if (!summary.find()) throw new IllegalArgumentException("Backlog index must contain exactly one total summary");
-        int declaredActive = Integer.parseInt(summary.group(1));
-        int declaredResolved = Integer.parseInt(summary.group(2));
+        Totals declared = new Totals(Integer.parseInt(summary.group(1)), Integer.parseInt(summary.group(2)));
         if (summary.find()) throw new IllegalArgumentException("Backlog index must contain exactly one total summary");
+        return declared;
+    }
 
+    private static Totals inspectInventory(Path backlog, String text) throws IOException {
         List<Path> active = new ArrayList<>();
         List<Path> resolved = new ArrayList<>();
         Map<String, Path> identities = new HashMap<>();
@@ -62,11 +83,10 @@ final class BacklogIndexValidator {
             throw new IllegalArgumentException("Backlog index membership mismatch; missing=" + relative(backlog, missing)
                 + ", non-active=" + relative(backlog, stale));
         }
-        if (declaredActive != active.size() || declaredResolved != resolved.size()) {
-            throw new IllegalArgumentException("Backlog totals are stale: declared active/resolved=" + declaredActive + "/"
-                + declaredResolved + ", actual=" + active.size() + "/" + resolved.size());
-        }
+        return new Totals(active.size(), resolved.size());
     }
+
+    private record Totals(int active, int resolved) {}
 
     private static void classify(Path backlog, Path path, List<Path> active, List<Path> resolved, Map<String, Path> identities) {
         try {

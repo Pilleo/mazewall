@@ -1,7 +1,7 @@
 ---
 title: "Hide incomplete-conversion test seams from ordinary Java consumers"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Hide incomplete-conversion test seams from ordinary Java consumers
 
 **Context:**
-Repository-wide review, 2026-11-04: [EVID-05](../reviews/2026-11-04-repository-review-findings.md#evid-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [EVID-05](../../reviews/2026-11-04-repository-review-findings.md#evid-05). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/boundary:** reproduced public-API contract defect; Java profiler consumers, not a hostile-code security boundary. **Tracking:** **NEW**; related historical incomplete-DSL issues were inspected but do not cover Java visibility.
 
@@ -27,6 +27,10 @@ Repository-wide review, 2026-11-04: [EVID-05](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The four test-only conversion methods retain their JVM descriptors and are marked synthetic. JDK 25 Java API checks prove these methods are hidden from Java source, public conversion refuses missing coverage, and the public overloads convert qualified coverage.
 
 ---
 <!-- id: issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar  file: issue-20261103-235400-350-hide-incomplete-conversion-test-seams-from-ordinar.md -->

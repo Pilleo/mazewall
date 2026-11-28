@@ -1,7 +1,7 @@
 ---
 title: "Isolate Git-local commit environment from Gradle foreign-repository tests"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -56,6 +56,10 @@ Commit-hook Git-local environment redirects foreign-repository test Git operatio
   passes all five cases, with both index checksums and original state preserved.
 - Exact red/green commands, logs and follow-up commit are recorded in the shared
   task-4 report; production hook remains unchanged from the reviewed implementation.
+
+**Resolution**
+
+Both full-build lanes now use the same subprocess-only Git environment isolation. A disposable normal-clone version of the repository regression exercised real commits, explicit Git directory and index context, a foreign repository, staged and alternate-index refusal, and fail-closed build exit propagation. The pre-existing linked-worktree evidence remains recorded above.
 
 ---
 <!-- id: issue-20261008-011223-216-isolate-git-local-commit-environment-from-gradle-f  file: issue-20261008-011223-216-isolate-git-local-commit-environment-from-gradle-f.md -->

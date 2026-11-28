@@ -103,7 +103,15 @@ public class ProfilingCoverage internal constructor(
     public val environment: ProfileEnvironment,
     internal val integrity: ProfileIntegrity,
 ) {
-    public val complete: Boolean get() = integrity.complete && strategy != ProfileStrategy.HOTSPOT_AGENTLESS
+    init {
+        require(droppedEvents >= 0) { "Dropped event count must be nonnegative" }
+        require(
+            !integrity.complete ||
+                (supportsCompleteEvidence(strategy, ioUring, pathResolution, droppedEvents, drainComplete, environment) && pathFailures.isEmpty()),
+        ) { "Complete coverage contradicts persisted collector, drain, loss or path evidence" }
+    }
+
+    public val complete: Boolean get() = integrity.complete
     public val warnings: List<String> get() = integrity.warnings
 
     internal fun copy(
@@ -259,7 +267,8 @@ public class ProfilingCoverage internal constructor(
             val pathQuality = inferPaths(observations)
             val facts = analyzeObservations(strategy, observations, environment)
             val warnings = inferWarnings(strategy, ioUring, pathQuality, droppedEvents, drainComplete, facts)
-            val complete = isComplete(strategy, ioUring, pathQuality, droppedEvents, drainComplete, facts)
+            val complete = supportsCompleteEvidence(strategy, ioUring, pathQuality, droppedEvents, drainComplete, environment) &&
+                completeObservations(facts)
             return ProfilingCoverage(
                 strategy = strategy,
                 strategyReason = strategyReason,
@@ -337,24 +346,30 @@ public class ProfilingCoverage internal constructor(
                 }
             }
 
-        private fun isComplete(
+        private fun supportsCompleteEvidence(
             strategy: ProfileStrategy,
             ioUring: IoUringVisibility,
             pathQuality: PathResolutionQuality,
             droppedEvents: Int,
             drainComplete: Boolean,
-            facts: InferenceFacts,
+            environment: ProfileEnvironment,
         ): Boolean =
             listOf(
+                strategy != ProfileStrategy.HOTSPOT_AGENTLESS,
                 drainComplete,
                 droppedEvents == 0,
                 ioUring != IoUringVisibility.BLIND,
                 ioUring != IoUringVisibility.UNSEEN || strategy != ProfileStrategy.EBPF,
+                strategy != ProfileStrategy.HYBRID_NO_URING || environment.ioUringDisabled == true,
+                ioUring != IoUringVisibility.DISABLED_FOR_HYBRID || environment.ioUringDisabled == true,
                 pathQuality !in incompletePathQualities,
+            ).all { it }
+
+        private fun completeObservations(facts: InferenceFacts): Boolean =
+            listOf(
                 !facts.openat2Uninspected,
                 facts.unknownOpenFlags.isEmpty(),
                 !facts.uringOpenUninspected,
-                !facts.hybridUnproven,
                 facts.unparsedConnectCount == 0,
                 facts.unenforceableUringOps.isEmpty(),
                 facts.unmappedSyscalls.isEmpty(),

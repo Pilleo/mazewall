@@ -7,8 +7,12 @@ import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
-import io.mazewall.landlock.Landlock
 import java.nio.file.AccessDeniedException
+
+internal class IterativeProfilingExhaustedException(
+    val attempts: Int,
+    val partialPolicy: Policy<*, Uncompiled>,
+) : IllegalStateException("Iterative profiling did not converge after $attempts attempts")
 
 /**
  * Tier A Profiler: Unprivileged "Deny-and-Retry" loop.
@@ -88,7 +92,7 @@ internal object IterativeProfiler {
                     return currentState.policy
                 }
                 is IterativeProfilerState.Exceeded -> {
-                    return currentState.policy
+                    throw IterativeProfilingExhaustedException(maxRetries, currentState.policy)
                 }
                 is IterativeProfilerState.Failed -> {
                     throw currentState.error

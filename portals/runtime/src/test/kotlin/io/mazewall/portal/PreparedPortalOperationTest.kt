@@ -2,12 +2,14 @@ package io.mazewall.portal
 
 import io.mazewall.enforcer.api.execution.CancellationDisposition
 import io.mazewall.enforcer.api.execution.ExecutionEnd
+import io.mazewall.platform.lifecycle.Deadline
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Callable
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -63,6 +65,60 @@ class PreparedPortalOperationTest {
             assertEquals(2L, owner.diagnostics().delivered)
             assertEquals(2L, owner.diagnostics().ended)
             assertEquals(0L, initial.admitted, "captured counter snapshots must not change")
+        }
+    }
+
+    @Test
+    fun `running cancellation interrupts only the body and retirement retains admission`() {
+        val identity = Any()
+        val owner = PortalOperationOwner(identity, PortalRuntimeLimits(maxAdmissions = 1))
+        val entered = CountDownLatch(1)
+        val bodyInterrupted = CountDownLatch(1)
+        val awaitingRetirement = CountDownLatch(1)
+        val retirementInterrupted = AtomicBoolean()
+        val retirement = object : CompletableFuture<Unit>() {
+            override fun get() {
+                awaitingRetirement.countDown()
+                try {
+                    super.get()
+                } catch (failure: InterruptedException) {
+                    retirementInterrupted.set(true)
+                    throw failure
+                } finally {
+                    if (Thread.currentThread().isInterrupted) retirementInterrupted.set(true)
+                }
+            }
+        }
+        try {
+            val invocation = owner.submit(
+                Callable {
+                    PortalInvocationRetirement.dispatched(identity)
+                    PortalInvocationRetirement.retain(retirement)
+                    entered.countDown()
+                    try {
+                        check(bodyInterrupted.await(5, TimeUnit.SECONDS)) { "Running worker was never interrupted" }
+                    } catch (_: InterruptedException) {
+                        bodyInterrupted.countDown()
+                    }
+                    "body retired"
+                },
+            )
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+            assertTrue(bodyInterrupted.await(5, TimeUnit.SECONDS))
+            assertTrue(awaitingRetirement.await(5, TimeUnit.SECONDS))
+            assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+            assertFalse(invocation.executionEnd().toCompletableFuture().isDone)
+            assertEquals(1, owner.unfinishedInvocations())
+            retirement.complete(Unit)
+            val end = assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+            assertFalse(retirementInterrupted.get())
+            assertEquals(null, end.failure)
+            assertEquals(CancellationDisposition.ALREADY_ENDED, invocation.requestCancellation())
+        } finally {
+            retirement.complete(Unit)
+            owner.stop()
+            assertTrue(owner.await(Deadline.afterMillis(5_000)))
         }
     }
 

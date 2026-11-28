@@ -36,9 +36,11 @@ internal object EbpfEventParser {
     }
 
     public fun parseLine(line: String): ProfileObservation? {
-        val trimmed = line.trim()
-        if (trimmed.isEmpty() || trimmed.startsWith("#")) return null
-        val fields = parseFields(trimmed)
+        val fields =
+            line
+                .trim()
+                .takeUnless { it.isEmpty() || it.startsWith("#") }
+                ?.let(::parseFields) ?: return null
         val tid = fields["tid"]?.toIntOrNull() ?: return null
         val tgid = fields["tgid"]?.toIntOrNull() ?: tid
         val ktime = fields["ktime"]?.toLongOrNull()
@@ -46,16 +48,9 @@ internal object EbpfEventParser {
         val path = fields["path"]
         val paths = if (path.isNullOrEmpty()) emptyList() else listOf(path)
         return when (fields["kind"] ?: "uring") {
-            "uring" -> {
-                val opcode = fields["opcode"] ?: return null
-                ProfileObservation.IoUring(corr, ObservationSource.EBPF, opcode, paths)
-            }
-            "syscall" -> {
-                val name = fields["name"]?.uppercase() ?: return null
-                ProfileObservation.Syscall(corr, ObservationSource.EBPF, name, paths = paths)
-            }
-            "connect" -> {
-                val host = fields["host"] ?: return null
+            "uring" -> fields["opcode"]?.let { ProfileObservation.IoUring(corr, ObservationSource.EBPF, it, paths) }
+            "syscall" -> fields["name"]?.let { ProfileObservation.Syscall(corr, ObservationSource.EBPF, it.uppercase(), paths = paths) }
+            "connect" -> fields["host"]?.let { host ->
                 val port = fields["port"]?.toIntOrNull()
                 ProfileObservation.Connect(corr, ObservationSource.EBPF, NetworkEndpoint(host, port))
             }
@@ -67,36 +62,49 @@ internal object EbpfEventParser {
      * `key=value` tokens. Values may be double-quoted and may contain spaces
      * (`path="/tmp/My File"`). `\"` and `\\` inside quotes are unescaped.
      */
-    internal fun parseFields(line: String): Map<String, String> {
+    private fun parseFields(line: String): Map<String, String>? {
         val fields = linkedMapOf<String, String>()
         var i = 0
         while (i < line.length) {
-            while (i < line.length && line[i].isWhitespace()) i++
-            if (i >= line.length) break
-            val eq = line.indexOf('=', i)
-            if (eq <= i) break
-            val key = line.substring(i, eq)
-            i = eq + 1
-            if (i < line.length && line[i] == '"') {
+            if (line[i].isWhitespace()) {
                 i++
-                val value = StringBuilder()
-                while (i < line.length && line[i] != '"') {
-                    if (line[i] == '\\' && i + 1 < line.length) {
-                        value.append(line[i + 1])
-                        i += 2
-                    } else {
-                        value.append(line[i])
-                        i++
-                    }
-                }
-                if (i < line.length && line[i] == '"') i++
-                fields[key] = value.toString()
-            } else {
-                val start = i
-                while (i < line.length && !line[i].isWhitespace()) i++
-                fields[key] = line.substring(start, i)
+                continue
             }
+            val keyStart = i
+            while (i < line.length && line[i] != '=' && !line[i].isWhitespace()) i++
+            if (i == keyStart || i == line.length || line[i] != '=') return null
+            val key = line.substring(keyStart, i)
+            val value = readValue(line, i + 1) ?: return null
+            i = value.end
+            fields[key] = value.text
         }
         return fields
+    }
+
+    private data class FieldValue(
+        val text: String,
+        val end: Int,
+    )
+
+    private fun readValue(
+        line: String,
+        start: Int,
+    ): FieldValue? {
+        if (line.getOrNull(start) != '"') {
+            var end = start
+            while (end < line.length && !line[end].isWhitespace()) end++
+            return FieldValue(line.substring(start, end), end)
+        }
+
+        val value = StringBuilder()
+        var i = start + 1
+        while (i < line.length) {
+            when (val char = line[i++]) {
+                '"' -> return FieldValue(value.toString(), i).takeIf { i == line.length || line[i].isWhitespace() }
+                '\\' -> if (i < line.length) value.append(line[i++])
+                else -> value.append(char)
+            }
+        }
+        return null
     }
 }

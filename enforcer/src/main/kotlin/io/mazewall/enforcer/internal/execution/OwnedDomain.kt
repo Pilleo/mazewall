@@ -939,9 +939,9 @@ internal class OwnedDomain(
     ): OwnedInvocation.LiveCancellation =
         synchronized(lock) {
             check(permit === liveCancellationPermit && invocation.belongsTo(this)) { "Live cancellation does not own this domain" }
-            if (!pending.contains(invocation)) return@synchronized OwnedInvocation.LiveCancellation.ENDED
+            if (!pending.contains(invocation)) return@synchronized OwnedInvocation.LiveCancellation.Ended
             val transition = invocation.markLiveCancellation(permit)
-            if (transition != OwnedInvocation.LiveCancellation.ENDED && phase == GenerationPhase.READY) {
+            if (transition != OwnedInvocation.LiveCancellation.Ended && phase == GenerationPhase.READY) {
                 liveWorkers.revokeAllTasks()
                 phase = GenerationPhase.DRAINING
             }

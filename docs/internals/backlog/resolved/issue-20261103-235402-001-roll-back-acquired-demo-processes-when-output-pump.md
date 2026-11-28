@@ -1,7 +1,7 @@
 ---
 title: "Roll back acquired demo processes when output pump startup fails"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "demos"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Roll back acquired demo processes when output pump startup fails
 
 **Context:**
-Repository-wide review, 2026-11-04: [KD-E2](../reviews/2026-11-04-repository-review-findings.md#kd-e2). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [KD-E2](../../reviews/2026-11-04-repository-review-findings.md#kd-e2). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category:** confirmed source defect; synchronous pump-acquisition exception demonstrated. **Confidence:** high. **Boundary:** optional agent demo, **P2**. This ownership fix is independent of KD-E1/E3 and should precede additional process-demo qualification.
 
@@ -36,6 +36,10 @@ Connected callers `demos/agent-sandbox-demo/src/main/kotlin/io/mazewall/demo/age
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+Register child and executor ownership before pump submission. Failed acquisition now retires the child, closes all streams, and shuts down any acquired executor with fatal-first failure ordering. The JDK 25 tests reproduced both construction and first-submission failures before the fix and passed with the exact failures retained afterward.
 
 ---
 <!-- id: issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump  file: issue-20261103-235402-001-roll-back-acquired-demo-processes-when-output-pump.md -->

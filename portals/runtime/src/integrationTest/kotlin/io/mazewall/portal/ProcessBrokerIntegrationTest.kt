@@ -578,24 +578,37 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `worker connection and readiness share one bounded startup deadline`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        var child: Process? = null
+        val launcherEntered = AtomicBoolean()
+        val child = AtomicReference<Process>()
         val launcher = object : ProcessLauncher by RealProcessLauncher {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
                 preparation: io.mazewall.platform.process.JvmLaunchPreparation,
-            ): Process = ProcessBuilder("sh", "-c", "sleep 60").start().also { child = it }
+            ): Process {
+                launcherEntered.set(true)
+                return ProcessBuilder("sleep", "60").start().also(child::set)
+            }
         }
-        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 150))
-        val startedAt = System.nanoTime()
+        val reapFixtureChild = AutoCloseable {
+            child.get()?.takeIf(Process::isAlive)?.let { process ->
+                process.destroyForcibly()
+                check(process.waitFor(5, TimeUnit.SECONDS)) { "Fixture worker ${process.pid()} did not retire" }
+            }
+        }
 
-        assertThrows(IllegalStateException::class.java) { broker.start() }
-
-        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
-        assertTrue(elapsedMs < 3_000, "startup deadline escaped: ${elapsedMs}ms")
-        assertTrue(child?.isAlive == false, "timed-out worker must be destroyed and reaped")
-        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
-        broker.close()
+        reapFixtureChild.use {
+            ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 150)).use { broker ->
+                val startedAt = System.nanoTime()
+                val startupFailure = assertThrows(IllegalStateException::class.java) { broker.start() }
+                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+                val worker = child.get()
+                    ?: throw AssertionError("Startup failed without a published worker (launcher entered=${launcherEntered.get()})", startupFailure)
+                if (worker.isAlive) throw AssertionError("Timed-out worker ${worker.pid()} is still alive", startupFailure)
+                if (elapsedMs >= 3_000) throw AssertionError("Startup deadline escaped after ${elapsedMs}ms", startupFailure)
+                assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            }
+        }
     }
 
     @Test
@@ -613,7 +626,9 @@ class ProcessBrokerIntegrationTest {
                 try {
                     secondReady.countDown()
                     assertTrue(startSecond.await(30, TimeUnit.SECONDS))
-                    assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
+                    val failure = assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
+                    assertEquals(PortalInvocationEvidence.UNKNOWN_COMPLETION, failure.evidence)
+                    assertTrue(failure.cause is PortalReadTimeoutException, "Second request must reach reply wait after checkout: $failure")
                     secondResult.complete(Unit)
                 } catch (failure: Throwable) {
                     secondResult.completeExceptionally(failure)
@@ -645,8 +660,9 @@ class ProcessBrokerIntegrationTest {
                 assertTrue(firstWrite.await(2, TimeUnit.SECONDS), "first caller must reach request write after checkout")
                 startSecond.countDown()
                 awaitCondition(java.time.Duration.ofSeconds(2), "second caller blocked in checkout") {
-                    second.stackTrace.any { it.className == "io.mazewall.portal.ProcessBroker" && it.methodName.startsWith("checkoutWorker-") } &&
-                        second.stackTrace.any { it.className == "java.util.concurrent.ArrayBlockingQueue" && it.methodName == "poll" }
+                    val stack = second.stackTrace
+                    stack.any { it.className == "io.mazewall.portal.ProcessBroker" && it.methodName.startsWith("checkoutWorker-") } &&
+                        stack.any { it.className == "java.util.concurrent.ArrayBlockingQueue" && it.methodName == "poll" }
                 }
                 releaseWrite.countDown()
                 secondResult.get(5, TimeUnit.SECONDS)
@@ -658,7 +674,7 @@ class ProcessBrokerIntegrationTest {
                     first?.handle { _, _ -> Unit }?.get(10, TimeUnit.SECONDS)
                     second.join(10_000)
                 } finally {
-                    LinuxNative.resetToDefault()
+                    LinuxNative.setEngine(runtime)
                 }
             }
         }
