@@ -1350,11 +1350,19 @@ tasks.named("check") {
 tasks.register("validateBacklogIndex") {
     group = "verification"
     description = "Ensures the backlog index has one authoritative summary line"
+    mustRunAfter("refreshBacklogTotals")
     val index = layout.projectDirectory.file("docs/internals/backlog/README.md").asFile
     val issues = fileTree(layout.projectDirectory.dir("docs/internals/backlog")) { include("**/issue-*.md") }
     inputs.file(index)
     inputs.files(issues)
     doLast(io.mazewall.build.ValidateBacklogIndexAction(index))
+}
+
+tasks.register("refreshBacklogTotals") {
+    group = "documentation"
+    description = "Updates the canonical totals after the backlog inventory and index rows change"
+    val index = layout.projectDirectory.file("docs/internals/backlog/README.md").asFile
+    doLast(io.mazewall.build.RefreshBacklogTotalsAction(index))
 }
 
 val refactorFirstVersion = "0.10.0"

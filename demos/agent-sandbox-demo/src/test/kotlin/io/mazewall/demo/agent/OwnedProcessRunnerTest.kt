@@ -3,13 +3,50 @@ package io.mazewall.demo.agent
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.time.Duration
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OwnedProcessRunnerTest {
+    @Test
+    fun `pump executor construction failure retires the launched child`() {
+        val sentinel = IllegalStateException("pump executor construction failed")
+        val child = ProcessBuilder("sleep", "60").start()
+        try {
+            val result = OwnedProcessRunner.run(listOf("sleep", "60"), Duration.ofSeconds(5), { child }, { throw sentinel })
+            assertSame(sentinel, assertIs<ProcessOutcome.InfrastructureFailure>(result).cause)
+            assertFalse(child.isAlive)
+        } finally {
+            child.destroyForcibly()
+            assertTrue(child.waitFor(5, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `fatal pump start failure retires the child and acquired executor`() {
+        val sentinel = LinkageError("pump worker startup failed")
+        val child = ProcessBuilder("sleep", "60").start()
+        val executor = Executors.newSingleThreadExecutor { throw sentinel }
+        try {
+            val result = assertFailsWith<LinkageError> {
+                OwnedProcessRunner.run(listOf("sleep", "60"), Duration.ofSeconds(5), { child }, { executor })
+            }
+            assertSame(sentinel, result)
+            assertFalse(child.isAlive)
+            assertTrue(executor.isTerminated)
+        } finally {
+            executor.shutdownNow()
+            child.destroyForcibly()
+            assertTrue(child.waitFor(5, TimeUnit.SECONDS))
+        }
+    }
+
     @Test
     fun `stderr-heavy child cannot block process completion`() {
         val outcome = OwnedProcessRunner.run(

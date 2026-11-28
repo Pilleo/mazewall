@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
@@ -241,10 +242,13 @@ class IterativeProfilerTest {
     fun `test iterative profiling retry limit exceeded`() {
         runPlatformTest {
             val basePolicy = Policy.PURE_COMPUTE_UNSAFE
-            val compiledPolicy = IterativeProfiler.profile(basePolicy) {
-                throw java.io.IOException("/etc/forever_denied (Permission denied)")
+            val failure = assertFailsWith<IterativeProfilingExhaustedException> {
+                IterativeProfiler.profile(basePolicy) {
+                    throw java.io.IOException("/etc/forever_denied (Permission denied)")
+                }
             }
-            assertTrue(compiledPolicy.allowedFsReadPaths.any { it.value == "/etc/forever_denied" })
+            assertEquals(20, failure.attempts)
+            assertTrue(failure.partialPolicy.allowedFsReadPaths.any { it.value == "/etc/forever_denied" })
         }
     }
 
@@ -335,11 +339,11 @@ class IterativeProfilerTest {
                 }
             }
 
-            try {
+            val failure = assertFailsWith<IterativeProfilingExhaustedException> {
                 IterativeProfiler.profile(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
-            } catch (e: Exception) {
-                assertTrue(e is java.nio.file.AccessDeniedException)
             }
+            assertEquals(20, failure.attempts)
+            assertTrue(failure.partialPolicy.allowedFsReadPaths.any { it.value == "/tmp/infinite-loop" })
         }
     }
 

@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProfilerJavaApiTest {
@@ -98,24 +99,33 @@ class ProfilerJavaApiTest {
         assertNotNull(result);
         assertEquals("result-from-callable", result.getValue());
         assertNotNull(result.getBehavior());
-
-        String dsl = result.toDslAllowingIncomplete("Policy.PURE_COMPUTE", Policy.PURE_COMPUTE_UNSAFE, null);
-        assertNotNull(dsl);
     }
 
     @Test
-    void testBillOfBehaviorToPolicyAndDslOverloads() {
-        BillOfBehavior bob = new BillOfBehavior();
-        assertNotNull(bob);
-        assertTrue(bob.getSyscalls().isEmpty());
+    void publicConversionOverloadsRequireCoverage() {
+        var behavior = new BillOfBehavior();
+        var base = Policy.PURE_COMPUTE_UNSAFE;
+        var cwd = Path.of(".");
+        assertThrows(IncompleteProfileException.class, behavior::toPolicy);
+        assertThrows(IncompleteProfileException.class, behavior::toDsl);
 
-        // Test toPolicy overloads with allowIncomplete=true for raw BoB
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy1 =
-                bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE, Path.of("."), null);
-        assertNotNull(policy1);
+        var coverage = ProfilingCoverage.Companion.infer(
+                ProfileStrategy.USER_NOTIF, "test", false, List.of(), StackAttribution.SKIPPED,
+                0, true, new ProfileEnvironment("test", new EbpfLoad.Denied("test"), null, null));
+        assertNotNull(behavior.toPolicy(base, cwd, coverage));
+        assertNotNull(behavior.toDsl("Policy.PURE_COMPUTE_UNSAFE", base, cwd, coverage));
+    }
 
-        String dslWithBase = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE", Policy.PURE_COMPUTE_UNSAFE, Path.of("."), ProfilingCoverage.absent());
-        assertNotNull(dslWithBase);
+    @Test
+    void incompleteConversionSeamsAreHiddenFromJavaSource() throws Exception {
+        assertTrue(BillOfBehavior.class.getDeclaredMethod(
+                "toPolicyAllowingIncomplete", Policy.class, Path.class, ProfilingCoverage.class).isSynthetic());
+        assertTrue(BillOfBehavior.class.getDeclaredMethod(
+                "toDslAllowingIncomplete", String.class, Policy.class, Path.class, ProfilingCoverage.class).isSynthetic());
+        assertTrue(ProfilingResult.class.getDeclaredMethod(
+                "toPolicyAllowingIncomplete", Policy.class, Path.class).isSynthetic());
+        assertTrue(ProfilingResult.class.getDeclaredMethod(
+                "toDslAllowingIncomplete", String.class, Policy.class, Path.class).isSynthetic());
     }
 
     @Test

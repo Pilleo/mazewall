@@ -1,7 +1,7 @@
 ---
 title: "Represent broker close preparation as exclusive outcomes"
 severity: "LOW"
-status: "open"
+status: "resolved"
 priority: low
 dependencies: []
 component: "portal-runtime"
@@ -28,12 +28,16 @@ Design review finding 9b (2026-11-03): ProcessBroker.ClosePreparation combines e
 **Evidence and scope:**
 - `ProcessBroker.kt:862-877` admits arbitrary Boolean/nullable combinations; its factories currently select only three valid shapes. `close` at `:366-376` unpacks those shapes using conditionals and `checkNotNull`.
 - Replace that private decision value and its construction/dispatch sites. Retain `ProcessBrokerLifecycleMachine` and the current owner registries; partial retirement of individual resources remains valid independent state.
-- Read the [process Portal lifecycle contract](../designs/enforcer/process-portal-design.md#authoritative-lifecycles) before implementation. The separate [invocation phase issue](issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) does not block this change.
+- Read the [process Portal lifecycle contract](../../designs/enforcer/process-portal-design.md#authoritative-lifecycles) before implementation. The separate [invocation phase issue](issue-20261103-083030-086-bind-invocation-worker-identity-to-its-lifecycle-p.md) does not block this change.
 
 **Acceptance and verification:**
 - Already-closed calls perform no new cleanup; overlapping closers observe the same owned operation/result; failure releases waiters and retains cleanup ownership for retry.
 - Startup cancellation/join and failed-cleanup retry retain their existing deadlines and failure propagation. Successful `Closed` still requires physical retirement.
 - Run `./gradlew :portals:runtime:test`, including ownership/deadline fixtures, then the required `./gradlew build` completion gate.
+
+**Resolution**
+
+The broker now selects a sealed AlreadyClosed, Wait or Execute branch. Only Execute carries startup retirement state and owns cleanup. JDK 25 runtime and ProcessBrokerIntegrationTest suites passed, including retry, startup cancellation and concurrent close behavior.
 
 ---
 <!-- id: issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou  file: issue-20261103-083030-123-represent-broker-close-preparation-as-exclusive-ou.md -->

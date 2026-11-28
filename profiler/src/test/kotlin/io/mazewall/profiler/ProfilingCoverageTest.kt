@@ -14,7 +14,7 @@ import kotlin.test.assertSame
 class ProfilingCoverageTest {
     @Test
     fun `evidence reports complete and incomplete profiles honestly`() {
-        val complete = ProfilingCoverage.absent().copy(integrity = ProfileIntegrity(true))
+        val complete = ProfilingCoverage.absent().copy(drainComplete = true, integrity = ProfileIntegrity(true))
         assertSame(ProfileEvidence.Complete, complete.evidence())
 
         val incomplete = ProfilingCoverage.absent().copy(integrity = ProfileIntegrity(false))
@@ -26,6 +26,7 @@ class ProfilingCoverageTest {
     fun `prior failed path resolution makes a complete profile incomplete`() {
         val current = ProfilingCoverage.absent().copy(
             pathResolution = PathResolutionQuality.RESOLVED,
+            drainComplete = true,
             integrity = ProfileIntegrity(true),
         )
         val prior = ProfilingCoverage.absent().copy(pathResolution = PathResolutionQuality.FAILED)

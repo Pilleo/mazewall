@@ -100,17 +100,18 @@ echo "==> Build tasks to run: ${GRADLE_ARGS[*]}"
 # in this checkout can otherwise race on those files and surface as EOF/missing-result
 # failures unrelated to either change.  Serialize only this shared-output gate.
 PRECOMMIT_TEST_LOCK=/tmp/mazewall-precommit-test.lock
-if ! (
-  # Audits above need the committing repository's Git context. Gradle tests may
-  # operate on foreign repositories, so drop only Git's repository-local names
-  # in this subprocess; preserve the hook context and all other environment.
-  GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars) || exit $?
-  for name in $GIT_LOCAL_ENV_VARS; do
+run_without_git_local_environment() (
+  # The staged audit retains its Git context. Child build processes may use foreign repositories.
+  local names name
+  names=$(git rev-parse --local-env-vars) || exit $?
+  for name in $names; do
     unset "$name" || exit $?
   done
-  flock -w 900 "$PRECOMMIT_TEST_LOCK" \
-    ./gradlew "${GRADLE_ARGS[@]}"
-) > /tmp/mazewall-precommit-test.log 2>&1; then
+  "$@"
+)
+
+if ! run_without_git_local_environment \
+  flock -w 900 "$PRECOMMIT_TEST_LOCK" ./gradlew "${GRADLE_ARGS[@]}" > /tmp/mazewall-precommit-test.log 2>&1; then
   echo "--- Failing tests ---"
   grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
   echo "-------------------"
@@ -124,13 +125,8 @@ if [[ "$SPLIT_CONFINED_LANE" == true ]]; then
     echo "!!! CI's 'Confined Helper Kernel' job still enforces these tests before merge."
   else
     echo "==> Running CONFINED kernel lane in rootful Docker (CAP_CHECKPOINT_RESTORE)..."
-    if ! (
-      GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars) || exit $?
-      for name in $GIT_LOCAL_ENV_VARS; do
-        unset "$name" || exit $?
-      done
-      flock -w 900 "$PRECOMMIT_TEST_LOCK" bash -eu -c 'source "$1/scripts/confined_build_lane.sh"; run_confined_build_lane "$1"' _ "$ROOT_DIR"
-    ) > /tmp/mazewall-precommit-confined.log 2>&1; then
+    if ! run_without_git_local_environment \
+      flock -w 900 "$PRECOMMIT_TEST_LOCK" bash -eu -c 'source "$1/scripts/confined_build_lane.sh"; run_confined_build_lane "$1"' _ "$ROOT_DIR" > /tmp/mazewall-precommit-confined.log 2>&1; then
       echo "--- Confined helper lane failure ---"
       tail -30 /tmp/mazewall-precommit-confined.log || true
       echo "------------------------------------"

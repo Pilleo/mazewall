@@ -1,7 +1,7 @@
 ---
 title: "Escape observed paths as Kotlin literals in generated policy DSL"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Escape observed paths as Kotlin literals in generated policy DSL
 
 **Context:**
-Repository-wide review, 2026-11-04: [EVID-04](../reviews/2026-11-04-repository-review-findings.md#evid-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [EVID-04](../../reviews/2026-11-04-repository-review-findings.md#evid-04). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/boundary:** reproduced code-generation defect; developer policy-export tooling. **Tracking:** **NEW**; no matching DSL escaping/injection issue found in active/resolved backlog or current reviews.
 
@@ -28,6 +28,10 @@ Repository-wide review, 2026-11-04: [EVID-04](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+Both generated path grant methods use a Kotlin string literal encoder. JDK 25 regression checks quotes, dollar signs, backslashes and controls. Compiling and running a generated snippet with those filenames produced the same read and write path grants as direct policy conversion.
 
 ---
 <!-- id: issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera  file: issue-20261103-235400-034-escape-observed-paths-as-kotlin-literals-in-genera.md -->

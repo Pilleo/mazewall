@@ -42,8 +42,8 @@ public class ProfileDocument private constructor(
             val root = serializer.parseToJsonElement(json).jsonObject
             val version = root.requiredInt("formatVersion")
             require(version == CURRENT_FORMAT_VERSION) { "Unsupported profile document format version: $version" }
-            val behavior = BillOfBehavior.fromJson(root.required("behavior").toString())
             val coverage = root.required("coverage").jsonObject.decodeCoverage()
+            val behavior = BillOfBehavior.decodeJson(root.required("behavior").toString(), requireKnownSyscalls = coverage.complete)
             return ProfileDocument(version, behavior, coverage)
         }
     }

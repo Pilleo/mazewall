@@ -63,7 +63,7 @@ internal object ConsumerProcessEvidence {
                         var timedOut = false
                         var reaped = false
                         var failure: Throwable? = null
-                        var pumps = emptyList<CompletableFuture<Void>>()
+                        val pumps = ArrayList<CompletableFuture<Void>>(2)
                         val transitions = mutableListOf<String>()
 
                         fun persist(phase: Phase) {
@@ -88,7 +88,8 @@ internal object ConsumerProcessEvidence {
                             val acquired = builder.start()
                             child = acquired
                             IsolatedProcessTester.awaitOwnedProcess(acquired, timeout, beforeWait = {
-                                pumps = listOf(stdout.copy(acquired.inputStream, startPump), stderr.copy(acquired.errorStream, startPump))
+                                pumps.add(stdout.copy(acquired.inputStream, startPump))
+                                pumps.add(stderr.copy(acquired.errorStream, startPump))
                                 acquired.outputStream.close()
                                 persist(Phase.RUNNING)
                             }, waitCompleted = { completed ->

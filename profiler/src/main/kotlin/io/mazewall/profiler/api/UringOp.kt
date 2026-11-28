@@ -100,8 +100,7 @@ public sealed interface FsEffect {
             when {
                 op is UringOp.Open -> UnknownOpenMode(paths)
                 op.isFilesystemMutation() -> Write(paths)
-                op is UringOp.Network -> Unenforceable(paths)
-                else -> Read(paths)
+                else -> Unenforceable(paths)
             }
     }
 }

@@ -278,8 +278,19 @@ public final class VerificationActionsTest {
             Files.writeString(index, Files.readString(index).replace("*Total Active Issues:* 1", "*Total Active Issues:* 2")
                 .replace("| [open again](issue-open.md) | Open | high | testing |\n", ""));
             rejects(() -> BacklogIndexValidator.validate(index), "Backlog totals are stale");
+
+            String stale = Files.readString(index).replace("*Total Resolved Issues:* 1", "*Total Resolved Issues:* 0")
+                + "| Archived [done](resolved/issue-done.md) | Done | high | testing |\n";
+            Files.writeString(index, stale);
+            BacklogIndexValidator.refreshTotals(index);
+            equal(stale.replace("*Total Active Issues:* 2", "*Total Active Issues:* 1")
+                .replace("*Total Resolved Issues:* 0", "*Total Resolved Issues:* 1"), Files.readString(index));
+            BacklogIndexValidator.validate(index);
             Files.writeString(index, "*Total Active Issues:* 0 | *Total Resolved Issues:* 1\n");
             rejects(() -> BacklogIndexValidator.validate(index), "membership mismatch");
+            String missingRow = Files.readString(index);
+            rejects(() -> BacklogIndexValidator.refreshTotals(index), "membership mismatch");
+            equal(missingRow, Files.readString(index));
 
             Path duplicate = backlog.resolve("nested/issue-copy.md");
             write(backlog, "nested/issue-copy.md", issue("open", "open-id"));

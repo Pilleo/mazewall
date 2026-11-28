@@ -1,5 +1,6 @@
 package io.mazewall.profiler
 
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.profiler.api.BillOfBehavior
 import io.mazewall.profiler.api.EbpfLoad
 import io.mazewall.profiler.api.IncompleteProfileException
@@ -12,6 +13,7 @@ import io.mazewall.profiler.api.StackAttribution
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ProfileDocumentTest {
@@ -46,6 +48,33 @@ class ProfileDocumentTest {
                 ProfilingResult.dedicatedWorkerPoliciesFromDocument(input)
             }
         }
+    }
+
+    @Test
+    fun `document import checks persisted completeness facts`() {
+        val complete = ProfilingResult(Unit, BillOfBehavior(), emptyMap(), completeCoverage()).toProfileDocumentJson()
+        val inconsistent = listOf(
+            complete.replace("\"droppedEvents\": 0", "\"droppedEvents\": 3"),
+            complete.replace("\"drainComplete\": true", "\"drainComplete\": false"),
+            complete.replace("\"pathResolution\": \"NONE\"", "\"pathResolution\": \"TRUNCATED\""),
+            complete.replace("\"ioUring\": \"UNSEEN\"", "\"ioUring\": \"BLIND\""),
+            complete.replace("\"strategy\": \"USER_NOTIF\"", "\"strategy\": \"HOTSPOT_AGENTLESS\""),
+        )
+        for (document in inconsistent) {
+            assertFalse(document == complete, "Fixture must change a persisted fact")
+            assertFailsWith<IllegalArgumentException> { ProfileDocument.fromJson(document) }
+            val incomplete = document.replace("\"complete\": true", "\"complete\": false")
+            assertFalse(ProfileDocument.fromJson(incomplete).coverage.complete)
+        }
+    }
+
+    @Test
+    fun `complete imported behavior rejects a syscall the decoder cannot retain`() {
+        val result = ProfilingResult(Unit, BillOfBehavior(syscalls = setOf(Syscall.READ)), emptyMap(), completeCoverage())
+        val document = result.toProfileDocumentJson().replace("\"READ\"", "\"UNRECOGNIZED_SYSCALL\"")
+        assertFailsWith<IllegalArgumentException> { ProfileDocument.fromJson(document) }
+        val incomplete = document.replace("\"complete\": true", "\"complete\": false")
+        assertFalse(ProfileDocument.fromJson(incomplete).coverage.complete)
     }
 
     private fun completeCoverage(): ProfilingCoverage =

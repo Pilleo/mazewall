@@ -1,7 +1,7 @@
 ---
 title: "Reject unterminated quoted values in recorded eBPF evidence"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -26,7 +26,7 @@ Recursive state-design review C-03: the pure field scanner publishes a pathname 
 
 ## Evidence and smallest correction
 
-[Recursive review C-03](../reviews/2026-11-05-state-complexity-review.md):
+[Recursive review C-03](../../reviews/2026-11-05-state-complexity-review.md):
 `EbpfEventParser.kt:83–93` reaches EOF without requiring a closing quote, then
 publishes the prefix. The deliberately unterminated record below becomes an
 ordinary zero-drop IoUring observation at `:32–35,46–51`; `BobCompiler.kt:39–43`
@@ -60,11 +60,15 @@ dependency, new transport format or public API change is needed.
 Public recorded-log assembly independently forces incomplete drain
 (`MazewallProfiler.kt:98–106,139–169`), so this is incorrect diagnostic/BoB
 evidence, **not an established policy bypass**. Keep the resolved
-[quoted-whitespace implementation](resolved/issue-20260820-231247-ebpf-whitespace-preservation.md)
-and [whitespace revalidation](resolved/issue-20260821-113001-preserve-whitespace-ebpf.md)
+[quoted-whitespace implementation](issue-20260820-231247-ebpf-whitespace-preservation.md)
+and [whitespace revalidation](issue-20260821-113001-preserve-whitespace-ebpf.md)
 resolved. The [unknown-opcode owner](issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md)
 handles semantic classification, not malformed syntax. Active/resolved searches
 found no exact owner of this residual; dependencies remain empty.
+
+**Resolution**
+
+Validate every field before publishing an observation. The JDK 25 CollectorHybridTest catches unterminated values, dangling escapes, suffix junk and incomplete keys, verifies the malformed paths do not enter read or write evidence, and preserves quoted escapes and the incomplete recorded-log conversion contract.
 
 ---
 <!-- id: issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf  file: issue-20261105-182827-530-reject-unterminated-quoted-values-in-recorded-ebpf.md -->

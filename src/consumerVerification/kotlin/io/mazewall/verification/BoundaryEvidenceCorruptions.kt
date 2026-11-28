@@ -59,6 +59,7 @@ internal object BoundaryEvidenceCorruptions {
         for (mode in BoundaryMode.entries) {
             change("sample-label-$mode", "sample", 14, "attribution:sample", mode.name) { "guest-body" }
             change("throughput-label-$mode", "throughput", 4, "attribution:throughput", mode.name) { "isolated-throughput" }
+            change("throughput-short-$mode", "throughput", 3, "measurement:throughput-span", mode.name) { "1" }
             change("drain-outcome-$mode", "drain", 3, "outcome:drain", mode.name) { "Incomplete" }
             change("drain-duration-$mode", "drain", 2, "measurement:drain", mode.name) { "-1" }
             if (mode.postDrain != null) change("post-drain-$mode", "post-drain", 2, "outcome:post-drain", mode.name) { "ACCEPTED" }

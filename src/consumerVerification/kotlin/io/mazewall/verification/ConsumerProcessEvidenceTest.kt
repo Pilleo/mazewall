@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -110,6 +111,37 @@ class ConsumerProcessEvidenceTest {
             readers.forEach { it.join(5000) }
             assertTrue(!waiter.isAlive && readers.none { it.isAlive }, "Fixture threads did not retire")
         }
+    }
+
+    @Test
+    fun `stderr pump startup failure still joins the acquired stdout pump`() {
+        val startupFailure = IllegalStateException("stderr startup failed")
+        val drainFailure = IllegalStateException("stdout drain failed")
+        var starts = 0
+        var joins = 0
+        val failure = assertThrows<IllegalStateException> {
+            ConsumerProcessEvidence.run(listOf("true"), root, "partial-startup", startPump = {
+                if (++starts == 2) throw startupFailure
+                object : CompletableFuture<Void>() {
+                    override fun get(
+                        timeout: Long,
+                        unit: TimeUnit,
+                    ): Void? {
+                        joins++
+                        val stdout = root.resolve("partial-startup.stdout.log")
+                        assertTrue(Files.isRegularFile(stdout), "Evidence disappeared before the join")
+                        completeExceptionally(drainFailure)
+                        return super.get(timeout, unit)
+                    }
+                }
+            })
+        }
+        assertSame(startupFailure, failure)
+        assertEquals(2, starts)
+        assertEquals(1, joins)
+        assertSame(drainFailure, failure.suppressed.single().cause)
+        val receipt = Json.parseToJsonElement(Files.readString(root.resolve("partial-startup.command.json"))).jsonObject
+        assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
     }
 
     private fun assertDelayedReaders(exitCode: Int) {

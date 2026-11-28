@@ -76,7 +76,7 @@ class HotSpotResultCompatibilityTest {
                 .map { it.bci },
         )
         assertFalse(decoded.collectionLossComplete)
-        val suppliedComplete = ProfilingCoverage.absent().copy(integrity = ProfileIntegrity(true))
+        val suppliedComplete = ProfilingCoverage.absent().copy(drainComplete = true, integrity = ProfileIntegrity(true))
         val copied = result.copy(coverage = suppliedComplete)
         assertFalse(copied.coverage.complete)
         assertEquals(ProfileStrategy.HOTSPOT_AGENTLESS, copied.coverage.strategy)

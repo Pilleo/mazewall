@@ -33,7 +33,7 @@ class BoundaryEvidenceHarnessTest {
         val summary = BoundaryEvidence.validate(fixture(), BUNDLE)
         assertEquals(BoundaryMode.entries.toSet(), summary.keys)
         for ((mode, result) in summary) {
-            assertEquals(BoundarySummary(2, 30, 30.0, 30, 30_000_000.0, 3, if (mode == BoundaryMode.DIRECT) 0 else 1), result)
+            assertEquals(BoundarySummary(2, 30, 30.0, 30, 3_000_000.0, 3, if (mode == BoundaryMode.DIRECT) 0 else 1), result)
         }
         BoundaryEvidenceCorruptions.verify(fixture(), BUNDLE)
     }
@@ -82,6 +82,8 @@ class BoundaryEvidenceHarnessTest {
             Corruption("sample", 13, "11", "clock:delta"),
             Corruption("throughput", 2, "2", "measurement:throughput"),
             Corruption("throughput", 3, "0", "measurement:throughput"),
+            Corruption("throughput", 3, "1", "measurement:throughput-span"),
+            Corruption("throughput", 3, "239", "measurement:throughput-span"),
             Corruption("rejected", 6, "fallback", "outcome:rejected"),
             Corruption("resources", 2, "3", "resources:host-pid", "final"),
             Corruption("resources", 4, "0", "measurement:resources"),
@@ -98,6 +100,17 @@ class BoundaryEvidenceHarnessTest {
             assertEquals(case.reason, assertThrows<IllegalArgumentException> { BoundaryEvidence.validate(rows, BUNDLE) }.message, case.toString())
         }
         assertEquals("custody:bundle-hash", assertThrows<IllegalArgumentException> { BoundaryEvidence.validate(fixture(), "not-a-hash") }.message)
+    }
+
+    @Test
+    fun `ordinary sample clocks must be serial in request order`() {
+        for (start in listOf(90, 130)) {
+            val rows = fixture().map { it.toMutableList() }
+            val second = rows.single { it[0] == "sample" && it[1] == "DIRECT" && it[3] == "1" }
+            for (offset in 0..4) second[7 + offset] = (start + offset * 10).toString()
+            val failure = assertThrows<IllegalArgumentException> { BoundaryEvidence.validate(rows, BUNDLE) }
+            assertEquals("clock:ordinary-order", failure.message, "Second sample starts at $start")
+        }
     }
 
     private fun fixture(): List<List<String>> =
@@ -158,7 +171,7 @@ class BoundaryEvidenceHarnessTest {
                 }
             }
             val accepted = if (mode == BoundaryMode.DIRECT) 6 else 5
-            record("throughput", mode, 3, 100, "includes-result-verification+raw-emission")
+            record("throughput", mode, 3, 1000, "includes-result-verification+raw-emission")
             record("accounting", mode, 6, accepted, 6 - accepted, accepted)
             record("drain", mode, if (mode == BoundaryMode.DIRECT) 0 else 1, mode.drain)
             mode.postDrain?.let { record("post-drain", mode, it) }

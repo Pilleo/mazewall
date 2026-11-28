@@ -1,10 +1,12 @@
 package io.mazewall.demo.agent
 
+import io.mazewall.platform.fd.CleanupFailures
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.time.Duration
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
@@ -42,6 +44,8 @@ internal object OwnedProcessRunner {
     fun run(
         command: List<String>,
         timeout: Duration,
+        launch: (List<String>) -> Process = { ProcessBuilder(it).redirectErrorStream(true).start() },
+        createPumpExecutor: () -> ExecutorService = { Executors.newSingleThreadExecutor(::daemonPumpThread) },
     ): ProcessOutcome {
         require(command.isNotEmpty()) { "command must not be empty" }
         require(!timeout.isNegative && !timeout.isZero) { "timeout must be positive" }
@@ -51,13 +55,23 @@ internal object OwnedProcessRunner {
 
         val process =
             try {
-                ProcessBuilder(command).redirectErrorStream(true).start()
+                launch(command)
             } catch (failure: Throwable) {
                 rethrowFatal(failure)
                 return ProcessOutcome.InfrastructureFailure(failure, "")
             }
-        val pumpExecutor = Executors.newSingleThreadExecutor(::daemonPumpThread)
-        val output = pumpExecutor.submit<String> { drainBounded(process.inputStream) }
+        val pumpExecutor =
+            try {
+                createPumpExecutor()
+            } catch (failure: Throwable) {
+                return rollBackPumpStart(process, null, failure)
+            }
+        val output =
+            try {
+                pumpExecutor.submit<String> { drainBounded(process.inputStream) }
+            } catch (failure: Throwable) {
+                return rollBackPumpStart(process, pumpExecutor, failure)
+            }
         val observed = linkedMapOf<Long, ProcessHandle>()
         val operationDeadline = deadlineAfter(timeout)
         var interrupted: InterruptedException? = null
@@ -110,6 +124,55 @@ internal object OwnedProcessRunner {
             ProcessOutcome.Completed(captured.output)
         } else {
             ProcessOutcome.ExitedNonZero(exitCode ?: -1, captured.output)
+        }
+    }
+
+    private fun rollBackPumpStart(
+        process: Process,
+        executor: ExecutorService?,
+        startupFailure: Throwable,
+    ): ProcessOutcome {
+        var failure = startupFailure
+        var interrupted = Thread.interrupted() || startupFailure is InterruptedException
+
+        fun attempt(action: () -> Unit) {
+            try {
+                action()
+            } catch (cleanupFailure: Throwable) {
+                if (cleanupFailure is InterruptedException) interrupted = true
+                failure = CleanupFailures.merge(failure, cleanupFailure)
+            } finally {
+                interrupted = Thread.interrupted() || interrupted
+            }
+        }
+
+        try {
+            attempt {
+                val retirement = terminateTree(process, linkedMapOf())
+                interrupted = interrupted || retirement.interrupted
+                retirement.failure?.let { failure = CleanupFailures.merge(failure, it) }
+            }
+            attempt {
+                if (process.isAlive) process.destroyForcibly()
+                check(process.waitFor(retirementTimeout.toMillis(), TimeUnit.MILLISECONDS)) { "Child process was not reaped after pump startup failed" }
+            }
+            attempt { process.outputStream.close() }
+            attempt { process.inputStream.close() }
+            attempt { process.errorStream.close() }
+            if (executor != null) {
+                attempt { executor.shutdownNow() }
+                attempt {
+                    check(executor.awaitTermination(retirementTimeout.toMillis(), TimeUnit.MILLISECONDS)) { "Failed output pump executor did not terminate" }
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+
+        return when (val result = failure) {
+            is Error -> throw result
+            is InterruptedException -> ProcessOutcome.Interrupted(result, "")
+            else -> ProcessOutcome.InfrastructureFailure(result, "")
         }
     }
 

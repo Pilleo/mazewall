@@ -22,6 +22,9 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 
+private const val HEXADECIMAL_RADIX = 16
+private const val UNICODE_ESCAPE_DIGITS = 4
+
 private val jsonSerializer = Json {
     prettyPrint = true
     ignoreUnknownKeys = true
@@ -92,6 +95,7 @@ public class BillOfBehavior(
     ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = compilePolicy(base, baseCwd, coverage, allowIncomplete = false)
 
     /** Test/demo seam. Production compilers must not use this. */
+    @JvmSynthetic
     @JvmName("toPolicyAllowingIncomplete")
     internal fun toPolicyAllowingIncomplete(
         base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
@@ -144,6 +148,7 @@ public class BillOfBehavior(
         coverage: ProfilingCoverage = ProfilingCoverage.absent(),
     ): String = compileDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete = false)
 
+    @JvmSynthetic
     @JvmName("toDslAllowingIncomplete")
     internal fun toDslAllowingIncomplete(
         basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
@@ -181,8 +186,8 @@ public class BillOfBehavior(
             sb.append(list.joinToString(",\n") { "        Syscall.${it.name}" })
             sb.append("\n    )\n")
         }
-        for (path in pOpens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
-        for (path in pWrites.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
+        for (path in pOpens.sorted()) sb.append("    .allowFsRead(${kotlinStringLiteral(path)})\n")
+        for (path in pWrites.sorted()) sb.append("    .allowFsWrite(${kotlinStringLiteral(path)})\n")
 
         // Emit warning comment if incomplete coverage is allowed
         if (allowIncomplete && (execs.isNotEmpty() || connects.isNotEmpty())) {
@@ -197,6 +202,28 @@ public class BillOfBehavior(
         sb.append("    .build()")
         return sb.toString()
     }
+
+    private fun kotlinStringLiteral(value: String): String =
+        buildString {
+            append('"')
+            for (character in value) {
+                when (character) {
+                    '\\', '"', '$' -> append('\\').append(character)
+                    '\n' -> append("\\n")
+                    '\r' -> append("\\r")
+                    '\t' -> append("\\t")
+                    '\b' -> append("\\b")
+                    else -> {
+                        if (character.isISOControl() || character in '\u2028'..'\u2029') {
+                            append("\\u").append(character.code.toString(HEXADECIMAL_RADIX).padStart(UNICODE_ESCAPE_DIGITS, '0'))
+                        } else {
+                            append(character)
+                        }
+                    }
+                }
+            }
+            append('"')
+        }
 
     private fun requirePolicyCoverage(
         evidence: ProfilingCoverage,
@@ -471,16 +498,19 @@ public class BillOfBehavior(
         }
 
         @JvmStatic
-        public fun fromJson(json: String): BillOfBehavior {
-            val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
+        public fun fromJson(json: String): BillOfBehavior = decodeJson(json, requireKnownSyscalls = false)
 
+        @JvmSynthetic
+        internal fun decodeJson(
+            json: String,
+            requireKnownSyscalls: Boolean,
+        ): BillOfBehavior {
+            val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
             val mappedSyscalls = dto.syscalls
                 .mapNotNull { name ->
-                    try {
-                        Syscall.valueOf(name.uppercase())
-                    } catch (ignored: Exception) {
-                        null
-                    }
+                    val syscall = Syscall.tryParse(name)
+                    require(!requireKnownSyscalls || syscall != null) { "Unknown syscall in complete profile document: $name" }
+                    syscall
                 }.toSet()
 
             val stackProfile = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()

@@ -6,10 +6,8 @@ import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.profiler.api.*
-import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -105,32 +103,34 @@ class BillOfBehaviorTest {
     }
 
     @Test
-    fun `unenforceable io uring observation requires explicit incomplete-policy opt in`() {
-        val observations = listOf(
-            ProfileObservation.IoUring(
-                ObservationCorrelation(1, Tid(1)),
-                ObservationSource.USER_NOTIF,
-                "IORING_OP_CONNECT",
-                listOf("/tmp/socket"),
-            ),
-        )
-        val behavior = BobCompiler.compileObservations(observations)
-        val coverage = ProfilingCoverage.infer(
-            strategy = ProfileStrategy.USER_NOTIF,
-            strategyReason = "test",
-            processWide = false,
-            observations = observations,
-            stacks = StackAttribution.SKIPPED,
-            droppedEvents = 0,
-            drainComplete = true,
-            environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
-        )
+    fun `unsupported io uring observations make coverage incomplete without granting paths`() {
+        for (opcode in listOf("CONNECT", "FALLOCATE", "FTRUNCATE", "BIND", "URING_CMD", "FUTURE_OP")) {
+            val observations = listOf(
+                ProfileObservation.IoUring(
+                    ObservationCorrelation(1, Tid(1)),
+                    ObservationSource.USER_NOTIF,
+                    "IORING_OP_$opcode",
+                    listOf("/tmp/observed"),
+                ),
+            )
+            val behavior = BobCompiler.compileObservations(observations)
+            val coverage = ProfilingCoverage.infer(
+                strategy = ProfileStrategy.USER_NOTIF,
+                strategyReason = "test",
+                processWide = false,
+                observations = observations,
+                stacks = StackAttribution.SKIPPED,
+                droppedEvents = 0,
+                drainComplete = true,
+                environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+            )
 
-        assertTrue(behavior.opens.isEmpty())
-        assertTrue(behavior.fsWritePaths.isEmpty())
-        assertFalse(coverage.complete)
-        assertFailsWith<IncompleteProfileException> { behavior.toPolicy(coverage = coverage) }
-        assertNotNull(behavior.toPolicyAllowingIncomplete(coverage = coverage))
+            assertTrue(behavior.opens.isEmpty(), opcode)
+            assertTrue(behavior.fsWritePaths.isEmpty(), opcode)
+            assertFalse(coverage.complete, opcode)
+            assertFailsWith<IncompleteProfileException> { behavior.toPolicy(coverage = coverage) }
+            assertNotNull(behavior.toPolicyAllowingIncomplete(coverage = coverage))
+        }
     }
 
     @Test
@@ -252,6 +252,17 @@ class BillOfBehaviorTest {
         )
         assertTrue(dslAllow.contains(".allow("))
         assertTrue(dslAllow.contains("Syscall.OPEN"))
+    }
+
+    @Test
+    fun `generated DSL escapes read and write path literals`() {
+        val path = "cost\$5 \"quoted\" \\ name\nline\tcolumn\rreturn\bback\u0001end"
+        val behavior = BillOfBehavior(opens = setOf("/tmp/read-$path"), fsWritePaths = setOf("/tmp/write-$path"))
+        val dsl = behavior.toDslAllowingIncomplete()
+        val escaped = """cost\${'$'}5 \"quoted\" \\ name\nline\tcolumn\rreturn\bback\u0001end"""
+
+        assertTrue(dsl.lineSequence().any { it == """    .allowFsRead("/tmp/read-$escaped")""" })
+        assertTrue(dsl.lineSequence().any { it == """    .allowFsWrite("/tmp/write-$escaped")""" })
     }
 
     @Test

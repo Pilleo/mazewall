@@ -1,7 +1,7 @@
 ---
 title: "Reject unknown io_uring operations as complete read-only evidence"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -16,7 +16,7 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Reject unknown io_uring operations as complete read-only evidence
 
 **Context:**
-Repository-wide review, 2026-11-04: [EVID-07](../reviews/2026-11-04-repository-review-findings.md#evid-07). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
+Repository-wide review, 2026-11-04: [EVID-07](../../reviews/2026-11-04-repository-review-findings.md#evid-07). The source review and reproductions below are not release qualification or implementation approval. Historical resolved issues remain archived; this is their newly scoped residual where applicable.
 
 **Category/boundary:** reproduced classification/completeness defect; strategy-neutral compiler and recorded-eBPF diagnostics. **Tracking:** **EXPANDED** beyond resolved `docs/internals/backlog/resolved/issue-20260821-113005-reject-unenforceable-iouring-opcodes.md`; CONNECT/SEND/RECV/ACCEPT rejection exists, but unsupported/other opcodes still fall through.
 
@@ -28,6 +28,10 @@ Repository-wide review, 2026-11-04: [EVID-07](../reviews/2026-11-04-repository-r
 
 **Needed:**
 1. Implement only the bounded correction described above, first reproducing its trigger with the stated negative and positive controls. Preserve all ownership, failure and compatibility invariants; run owning focused checks and the project completion gate before closure. Keep native, hosted and published-artifact qualification separate from source-only or isolated evidence.
+
+**Resolution**
+
+The shared filesystem effect classifier treats unmodeled io_uring operations as unenforceable. The JDK 25 profiler test verifies unsupported observations lower completeness and contribute no read or write grants. Recognized writes and unknown open mode retain their established interpretations.
 
 ---
 <!-- id: issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea  file: issue-20261103-235400-980-reject-unknown-io-uring-operations-as-complete-rea.md -->
